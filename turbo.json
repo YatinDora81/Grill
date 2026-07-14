@@ -1,0 +1,46 @@
+{
+  "$schema": "https://turborepo.dev/schema.json",
+  "ui": "tui",
+  "//": "globalEnv: every env var the app reads. Declared so a config change busts the build cache — an undeclared var means turbo happily replays a build made with different secrets.",
+  "globalEnv": [
+    "NODE_ENV",
+    "DATABASE_URL",
+    "JWT_SECRET",
+    "AUTH_COOKIE_NAME",
+    "AUTH_COOKIE_MAXAGE_S",
+    "PASSWORD_MIN_LENGTH",
+    "GEMINI_API_KEYS",
+    "GEMINI_MODEL",
+    "GROQ_API_KEYS",
+    "GROQ_LLM_FALLBACK_MODEL",
+    "GROQ_WHISPER_MODEL",
+    "S3_ENDPOINT",
+    "S3_BUCKET",
+    "S3_ACCESS_KEY_ID",
+    "S3_SECRET_ACCESS_KEY",
+    "AUDIO_SERVICE_URL",
+    "MAX_AUDIO_SECONDS",
+    "MAX_AUDIO_MB",
+    "PRESIGN_EXPIRY_SECONDS",
+    "DEFAULT_NUM_QUESTIONS",
+    "PROVIDER_TIMEOUT_MS",
+    "ROTATION_BASE_BACKOFF_MS"
+  ],
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "inputs": ["$TURBO_DEFAULT$", ".env*"],
+      "outputs": [".next/**", "!.next/cache/**", "!.next/dev/**"]
+    },
+    "lint": {
+      "dependsOn": ["^lint"]
+    },
+    "check-types": {
+      "dependsOn": ["^check-types"]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    }
+  }
+}

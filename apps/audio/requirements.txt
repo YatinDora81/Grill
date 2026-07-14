@@ -1,0 +1,6 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+praat-parselmouth==0.4.5
+numpy==2.2.1
+pydub==0.25.1
+python-multipart==0.0.20

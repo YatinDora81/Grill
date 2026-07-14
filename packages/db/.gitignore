@@ -1,0 +1,36 @@
+# dependencies (bun install)
+node_modules/
+
+# output
+out/
+dist/
+*.tgz
+
+# code coverage
+coverage/
+*.lcov
+
+# logs
+logs/
+*.log
+report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+# dotenv — catch-all so staging/production variants can't slip through
+.env
+.env.*
+!.env.example
+
+# caches
+.eslintcache
+.cache/
+*.tsbuildinfo
+.turbo/
+
+# IntelliJ based IDEs
+.idea/
+
+# Finder (MacOS) folder config
+.DS_Store
+
+# Generated Prisma client
+/generated/

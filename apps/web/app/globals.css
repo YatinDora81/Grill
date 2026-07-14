@@ -1,0 +1,173 @@
+@import "tailwindcss";
+
+/**
+ * Grill design tokens.
+ *
+ * The whole product is one warm dark room — near-black brown, cream ink, lit by
+ * a single ember key-light. There is no light surface anywhere; the contrast we
+ * trade on is heat against dark, not paper against room.
+ *
+ * Ember is heat: reserved for the live/recording state, primary actions and
+ * accents. It must never be used for large fills, or it stops reading as
+ * pressure.
+ */
+@theme {
+  /* Surfaces — `paper` is historical; it means "the base surface". */
+  --color-paper: #16120e;
+  --color-paper-raised: #221c15;
+  --color-paper-sunken: #1b1610;
+  --color-ink: #f3ecde;
+  --color-ink-soft: #b6ac99;
+  --color-ink-muted: #7b7160;
+  --color-line: #2c2823;
+  --color-line-strong: #3e3934;
+
+  /* Heat */
+  --color-ember: #f2642f;
+  --color-ember-hot: #ff7a45;
+  --color-ember-glow: #f6a64e;
+  --color-ember-soft: #301c12;
+
+  /* The room. Now identical to the base surface — kept so session code reads
+     in its own vocabulary. */
+  --color-room: #16120e;
+  --color-room-raised: #221c15;
+  --color-room-line: #2c2823;
+  --color-room-ink: #f3ecde;
+  --color-room-muted: #b6ac99;
+
+  /* Verdict scale — also used by score meters. Lifted for legibility on dark. */
+  --color-strong: #4ade80;
+  --color-mixed: #f6a64e;
+  --color-weak: #f87171;
+
+  --font-display: var(--font-bricolage), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+
+  --radius-card: 14px;
+}
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body {
+    background: var(--color-paper);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+  }
+
+  /* Bricolage is a grotesque, not a serif — it needs weight and tightening to
+     read as display. Lives in `base` so components can still override weight. */
+  .font-display {
+    font-weight: 500;
+    letter-spacing: -0.01em;
+  }
+
+  /* Numbers in tables/meters must not jitter as they change. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  ::selection {
+    background: var(--color-ember);
+    color: var(--color-paper);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-ember);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+}
+
+@layer utilities {
+  /* The key-light behind the question. Decorative: pointer-events-none, and it
+     must sit under content. */
+  .ember-glow {
+    background: radial-gradient(
+      58% 60% at 50% 0%,
+      rgba(242, 100, 47, 0.22),
+      rgba(246, 166, 78, 0.05) 46%,
+      rgba(0, 0, 0, 0) 72%
+    );
+  }
+
+  /* Recording pulse. Reduced-motion users get a static dot — the ember colour
+     already carries the "live" meaning, so no information is lost. */
+  @keyframes grill-pulse {
+    0%,
+    100% {
+      opacity: 1;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 0.45;
+      transform: scale(0.86);
+    }
+  }
+  .animate-pulse-rec {
+    animation: grill-pulse 1.3s ease-in-out infinite;
+  }
+
+  /* Ring around the record button — expands rather than fades, so it reads as
+     output level, not a loading state. */
+  @keyframes grill-ring {
+    0%,
+    100% {
+      transform: scale(1);
+      opacity: 0.55;
+    }
+    50% {
+      transform: scale(1.06);
+      opacity: 1;
+    }
+  }
+  .animate-ring {
+    animation: grill-ring 1.6s ease-in-out infinite;
+  }
+
+  @keyframes grill-rise {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  .animate-rise {
+    animation: grill-rise 0.4s ease-out both;
+  }
+
+  /* A new question resolving into focus, word by word — the interviewer
+     forming the sentence rather than pasting it. Each word carries its own
+     delay (set inline), and `both` keeps it invisible until its turn comes. */
+  @keyframes grill-word-in {
+    from {
+      opacity: 0;
+      transform: translateY(0.45em);
+      filter: blur(5px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+      filter: blur(0);
+    }
+  }
+  .animate-word {
+    animation: grill-word-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .animate-pulse-rec,
+    .animate-ring,
+    .animate-rise,
+    .animate-word {
+      animation: none;
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "extends": "@repo/typescript-config/base.json",
+  "compilerOptions": {
+    // Runs under Bun/tsx, not compiled — match Bun's resolver and the
+    // generated Prisma client, while still inheriting the shared strictness.
+    "module": "Preserve",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "outDir": "dist",
+    "rootDir": "."
+  },
+  "include": ["index.ts", "prisma.config.ts", "generated/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

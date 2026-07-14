@@ -1,0 +1,124 @@
+// AI Interviewer data model — see BACKEND_README §6.
+// Everything the report needs is reconstructable from these three tables,
+// so a report can be regenerated at any time.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id           String    @id @default(uuid()) @db.Uuid
+  email        String    @unique
+  passwordHash String    @map("password_hash")
+  name         String?
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  sessions Session[]
+
+  @@map("users")
+}
+
+enum SourceType {
+  resume
+  jd
+  topic
+
+  @@map("source_type")
+}
+
+enum SessionStatus {
+  in_progress
+  generating_report
+  completed
+  cancelled
+  abandoned
+  error
+
+  @@map("session_status")
+}
+
+enum QuestionType {
+  technical
+  behavioral
+  followup
+  cultural
+
+  @@map("question_type")
+}
+
+model Session {
+  id          String        @id @default(uuid()) @db.Uuid
+  userId      String        @map("user_id") @db.Uuid
+  createdAt   DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+  sourceType  SourceType    @map("source_type")
+  sourceText  String        @map("source_text")
+  role        String?
+  config      Json
+  status      SessionStatus @default(in_progress)
+  errorReason String?       @map("error_reason")
+
+  /// Set when this session is a re-run of an earlier one: same résumé, same
+  /// config, same questions copied verbatim, so the two reports are comparable.
+  /// A retry can itself be retried — this points at the immediate parent, and
+  /// the chain walks back from there. There is no separate "type" column: a
+  /// session is a retry precisely when this is set.
+  retryOfId String?  @map("retry_of_id") @db.Uuid
+  /// Deleting the parent must not delete the retry — the re-run's own answers
+  /// and report are still the user's work.
+  retryOf   Session? @relation("SessionRetries", fields: [retryOfId], references: [id], onDelete: SetNull)
+  retries   Session[] @relation("SessionRetries")
+
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  turns  Turn[]
+  report Report?
+
+  @@index([userId])
+  @@index([status])
+  @@index([retryOfId])
+  @@map("sessions")
+}
+
+model Turn {
+  id              String       @id @default(uuid()) @db.Uuid
+  sessionId       String       @map("session_id") @db.Uuid
+  turnIndex       Int          @map("turn_index")
+  question        String
+  questionType    QuestionType @map("question_type")
+  audioKey        String?      @map("audio_url")
+  transcript      String?
+  transcriptWords Json?        @map("transcript_words")
+  answerScores    Json?        @map("answer_scores")
+  createdAt       DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, turnIndex])
+  @@index([sessionId])
+  @@map("turns")
+}
+
+model Report {
+  id              String   @id @default(uuid()) @db.Uuid
+  sessionId       String   @unique @map("session_id") @db.Uuid
+  overallScore    Int      @map("overall_score")
+  verdict         String
+  categoryScores  Json     @map("category_scores")
+  deliveryMetrics Json     @map("delivery_metrics")
+  strengths       Json
+  weaknesses      Json
+  bestAnswer      Json?    @map("best_answer")
+  worstAnswer     Json?    @map("worst_answer")
+  nextSteps       Json     @map("next_steps")
+  raw             Json
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@map("reports")
+}
