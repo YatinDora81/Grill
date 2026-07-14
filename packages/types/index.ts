@@ -130,7 +130,11 @@ export interface StartRequest {
   source_text: string;
   source_type?: SourceType;
   role?: string;
-  config: Partial<InterviewConfig>;
+  /**
+   * Everything but the name has a server-side default; the name is the user's
+   * own words and can't be defaulted into existence.
+   */
+  config: Partial<InterviewConfig> & Pick<InterviewConfig, "name">;
 }
 
 export interface StartResponse {
