@@ -1,5 +1,6 @@
 import "server-only";
 import * as repo from "@/lib/db/repo";
+import { settleUnfinishedVideos } from "./videoService";
 import { buildAndSaveReport } from "./reportService";
 
 /**
@@ -36,6 +37,20 @@ export async function claimAndBuild(sessionId: string): Promise<BuildOutcome> {
 
   const session = await repo.claimReportLease(sessionId);
   if (!session) return "not_claimed";
+
+  // The interview is over, and this is the only "over" that runs server-side.
+  // The client's own /video/complete is best-effort — the tab can be closed or
+  // navigated away while the tail is still flushing, and then nothing ever
+  // stitches the parts: /video/start and /cancel are the other settle callers
+  // and a finished session reaches neither. Without this, a recording whose
+  // upload outlived its tab dangles until R2 reaps it.
+  //
+  // Before the build, not after: the build is the part that can throw and
+  // burn the session's attempts, and the footage must not be hostage to it.
+  await settleUnfinishedVideos(sessionId).catch((err) => {
+    /* best-effort by contract — a report must never fail over housekeeping */
+    console.warn(`[reportQueue] could not settle videos for ${sessionId}:`, err);
+  });
 
   try {
     await buildAndSaveReport(session);

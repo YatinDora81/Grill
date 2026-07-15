@@ -62,6 +62,17 @@ export function NewInterviewForm() {
 
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  /**
+   * The real guard against a second /interview/start. `busy` drives the button's
+   * disabled state, but that only ever blocked the *click* path — implicit form
+   * submission (Enter in any field) fires onSubmit regardless, and /start holds
+   * the request open for ~12s while the LLM writes the first question, which is
+   * a wide window to submit into. A ref rather than `busy` because a state
+   * update isn't visible to a second handler in the same tick, and because
+   * /start is not idempotent: every call creates a session, and the one the
+   * router doesn't navigate to is stranded `in_progress` forever.
+   */
+  const submitting = useRef(false);
   const [extracting, setExtracting] = useState(false);
   const [fileName, setFileName] = useState("");
   const [dragging, setDragging] = useState(false);
@@ -137,12 +148,14 @@ export function NewInterviewForm() {
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (submitting.current) return;
     if (!name.trim()) return setError("Give this interview a name — it's how you'll find it later.");
     if (!hasResume) return setError("Upload your résumé first — every interview is built around it.");
     if (!mode && sources.length === 0) return setError("Pick what this interview should draw on.");
     if (needsTopic && !topic.trim()) return setError("Name the topic you want drilled on.");
     if (needsJd && !jobDescription.trim()) return setError("Paste the job description you're going for.");
 
+    submitting.current = true;
     setBusy(true);
     setError("");
     try {
@@ -163,6 +176,9 @@ export function NewInterviewForm() {
       router.push(`/session/${res.session_id}`);
     } catch (err) {
       setError(err instanceof ApiClientError ? err.message : "Couldn't start the interview.");
+      // Only reopened on failure. The success path navigates away, and leaving
+      // it latched until then is what stops a submit landing during the push.
+      submitting.current = false;
       setBusy(false);
     }
   }

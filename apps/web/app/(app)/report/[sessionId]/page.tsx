@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import type { Report as ReportDTO } from "@repo/types";
 import { getUserId } from "@/lib/auth";
 import * as repo from "@/lib/db/repo";
+import { settleUnfinishedVideos } from "@/lib/services/videoService";
 import { ButtonLink, Card, ScoreMeter, cx, scoreTone } from "@/components/ui";
 import { Delivery } from "./Delivery";
 import { FinishReport } from "./FinishReport";
@@ -62,6 +63,23 @@ export default async function ReportPage({
 
   // Which turns were spoken — a typed answer has nothing to play back.
   const turns = await repo.getTurns(sessionId);
+
+  // Reaching here means a report exists, which means the interview is over —
+  // so no upload of this session's can still be live, and settling one is safe.
+  // claimAndBuild already did this before the report was built; repeating it is
+  // the retry for the case where that attempt hit a transient R2 error, since
+  // the gate below would otherwise hide such a recording forever with nothing
+  // left to trigger a salvage. A no-op (one indexed read) in the normal case.
+  await settleUnfinishedVideos(sessionId).catch(() => {
+    /* best-effort: a report must still render when housekeeping fails */
+  });
+
+  // Turn.videoId is stamped when the answer is given, long before the upload is
+  // stitched — it says which recording the answer is in, never that the object
+  // exists. Offering "Watch" straight off it hands out a button whose only
+  // possible outcome is a 409, so gate on the recordings that are actually
+  // playable.
+  const playableVideoIds = new Set((await repo.listSessionVideos(sessionId)).map((v) => v.id));
   // One query for the whole replay rather than one per turn: a 100-question
   // report would otherwise open 100 connections to paint 100 star icons.
   const starredHashes = await repo.starredHashesFor(
@@ -213,7 +231,7 @@ export default async function ReportPage({
             question_type: t.questionType,
             transcript: t.transcript,
             has_audio: Boolean(t.audioKey),
-            video_id: t.videoId,
+            video_id: t.videoId && playableVideoIds.has(t.videoId) ? t.videoId : null,
             video_offset_ms: t.videoOffsetMs,
             question_hash: hash,
             starred: starredHashes.has(hash),
