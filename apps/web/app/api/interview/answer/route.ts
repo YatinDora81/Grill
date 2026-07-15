@@ -6,6 +6,7 @@ import { json, errorResponse } from "@/lib/http";
 import { turnRefSchema } from "@/lib/schemas";
 import { config } from "@/lib/env";
 import { requireUserId } from "@/lib/auth";
+import { rateLimit } from "@/lib/rateLimit";
 import * as repo from "@/lib/db/repo";
 import { processAnswer } from "@/lib/services/answerService";
 import { transcribe } from "@/lib/clients/sttClient";
@@ -14,10 +15,17 @@ import { audioKey, putAudio } from "@/lib/storage/objectStore";
 export async function POST(req: Request) {
   try {
     const userId = await requireUserId();
+    // Shares one bucket with answer-text so a client can't double its budget by
+    // alternating routes. Checked before formData() below, which would
+    // otherwise buffer the whole upload before we decide to refuse it.
+    rateLimit(`answer:${userId}`, { limit: 30, windowMs: 60_000 });
+
     const form = await req.formData();
-    const { session_id, turn_index } = turnRefSchema.parse({
+    const { session_id, turn_index, video_id, video_offset_ms } = turnRefSchema.parse({
       session_id: form.get("session_id"),
       turn_index: form.get("turn_index"),
+      video_id: form.get("video_id"),
+      video_offset_ms: form.get("video_offset_ms"),
     });
 
     const file = form.get("audio");
@@ -50,6 +58,14 @@ export async function POST(req: Request) {
     const key = audioKey(session.id, turn_index, ext);
 
     // Save audio FIRST so downstream failures stay retryable.
+    //
+    // If the STT or scoring below throws, this object outlives the request with
+    // no turn row naming it. That's deliberate — it is NOT cleaned up here. The
+    // key is deterministic, so a retry of this turn overwrites it rather than
+    // adding another, and deleting on failure would race a concurrent retry
+    // that just wrote the same key successfully. Orphans are reaped by prefix
+    // in purgeExpiredAudio, which is why that sweep lists R2 rather than
+    // walking audioKey columns.
     await putAudio(key, bytes, file.type);
     const { text, words } = await transcribe(bytes, `turn_${turn_index}.${ext}`, file.type);
 
@@ -59,6 +75,8 @@ export async function POST(req: Request) {
       transcript: text,
       words,
       audioKey: key,
+      videoId: video_id ?? null,
+      videoOffsetMs: video_offset_ms ?? null,
     });
     return json(result);
   } catch (err) {

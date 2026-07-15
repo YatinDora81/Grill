@@ -1,23 +1,34 @@
 export const runtime = "nodejs";
-// The slow one: acoustic fan-out + a big LLM call. On serverless, mind the
-// function duration limit (Grill §Deployment); self-host or a job queue if long.
-export const maxDuration = 120;
+// The response is instant now, but `after()` work runs inside this same
+// invocation and counts against the ceiling — so the build's whole budget is
+// this number. 300s is the Vercel maximum on Hobby (and the default on Pro).
+export const maxDuration = 300;
 
-/**
- * How long a `generating_report` session may sit with no report before we treat
- * the run that set it as dead and allow a retry. Must exceed maxDuration, or we
- * could start a second build while the first is still legitimately running.
- */
-const STALE_REPORT_MS = 3 * 60_000;
-
+import { after } from "next/server";
 import type { EndResponse } from "@repo/types";
 import { conflict, notFound } from "@/lib/errors";
 import { json, errorResponse } from "@/lib/http";
 import { sessionIdSchema } from "@/lib/schemas";
 import { requireUserId } from "@/lib/auth";
 import * as repo from "@/lib/db/repo";
-import { buildAndSaveReport } from "@/lib/services/reportService";
+import { claimAndBuild } from "@/lib/services/reportQueue";
 
+/**
+ * Finish an interview: queue its report and return immediately.
+ *
+ * This used to build the report inline and hold the request open for 30-120s.
+ * Now it only enqueues (status → `generating_report`) and kicks the build off
+ * via `after()`, which runs once the response is already on its way — so the
+ * candidate lands on the thank-you screen at once and the report builds behind
+ * them. If this invocation dies, the session is still queued and the daily
+ * sweep picks it up.
+ *
+ * The client still calls this on `done`, deliberately. `processAnswer` has TWO
+ * `done: true` exits — the second is a retry whose parent had fewer questions
+ * than num_questions, and it never satisfies `answered >= num_questions`. A
+ * server-side enqueue keyed on that count would strand exactly those retries in
+ * `in_progress` forever. Letting the client tell us it's done covers both exits.
+ */
 export async function POST(req: Request) {
   try {
     const userId = await requireUserId();
@@ -38,26 +49,29 @@ export async function POST(req: Request) {
     if (session.status === "cancelled") {
       throw conflict("Session was cancelled.", "session_cancelled");
     }
-    // No report, but flagged as generating: either a build is genuinely running,
-    // or the one that set this died (serverless timeout) and left the session
-    // permanently unfinishable. Give up on it once it outlives maxDuration.
-    if (session.status === "generating_report") {
-      const stale = Date.now() - session.updatedAt.getTime() > STALE_REPORT_MS;
-      if (!stale) {
-        throw conflict("Report generation already in progress.", "report_in_progress");
-      }
-      console.warn(`[end] session ${session_id} stale in generating_report; retrying build`);
+
+    // Enqueue. Idempotent: already-queued sessions just get re-kicked, which the
+    // lease makes harmless — a second builder can't claim what the first holds.
+    if (session.status !== "generating_report") {
+      await repo.setStatus(session_id, "generating_report");
     }
 
-    await repo.setStatus(session_id, "generating_report");
-    try {
-      const report = await buildAndSaveReport(session);
-      await repo.setStatus(session_id, "completed");
-      return json({ session_id, report_id: report.id, status: "completed" } satisfies EndResponse);
-    } catch (err) {
-      await repo.setStatus(session_id, "error", (err as Error).message.slice(0, 300));
-      throw err;
-    }
+    // Runs after the response flushes, inside this invocation's budget. Errors
+    // are swallowed on purpose: the queue is the retry mechanism, and there is
+    // no client left listening by the time this runs.
+    after(async () => {
+      try {
+        await claimAndBuild(session_id);
+      } catch (err) {
+        console.error(`[end] background build for ${session_id} threw:`, err);
+      }
+    });
+
+    return json({
+      session_id,
+      report_id: null,
+      status: "generating_report",
+    } satisfies EndResponse);
   } catch (err) {
     return errorResponse(err);
   }

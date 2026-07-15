@@ -13,6 +13,9 @@ export interface AnswerInput {
   transcript: string;
   words?: TranscriptWord[] | null;
   audioKey?: string | null;
+  /** Which session recording this answer is in, and where. */
+  videoId?: string | null;
+  videoOffsetMs?: number | null;
 }
 
 /**
@@ -43,12 +46,26 @@ export async function processAnswer(input: AnswerInput): Promise<AnswerResponse>
     transcriptWords: input.words ?? null,
     audioKey: input.audioKey ?? null,
     answerScores,
+    videoId: input.videoId ?? null,
+    videoOffsetMs: input.videoOffsetMs ?? null,
   });
 
-  const answered = turnIndex + 1;
-  const done = answered >= numQuestions;
-
-  if (done) {
+  /**
+   * The interview is over: queue the report and say so.
+   *
+   * Enqueueing HERE, not in /end, is what makes the report unloseable. Status
+   * `generating_report` with no report row IS the queue, so once this returns
+   * the sweep can always find the session — even if the client never calls
+   * /end, the tab dies on the way, or the enqueue request itself fails. /end
+   * only makes it *fast*; this makes it *certain*.
+   *
+   * There are two ways an interview can end (the count is reached, or a retry
+   * runs out of copied questions) and both come through here — keying the
+   * enqueue off `answered >= numQuestions` instead would strand every retry
+   * that took the second exit.
+   */
+  const finish = async (): Promise<AnswerResponse> => {
+    await repo.setStatus(session.id, "generating_report");
     return {
       turn_index: turnIndex,
       transcript: input.transcript,
@@ -57,7 +74,10 @@ export async function processAnswer(input: AnswerInput): Promise<AnswerResponse>
       next_question_type: null,
       done: true,
     };
-  }
+  };
+
+  const answered = turnIndex + 1;
+  if (answered >= numQuestions) return finish();
 
   const turns = await repo.getTurns(session.id);
   const nextIndex = turnIndex + 1;
@@ -70,14 +90,7 @@ export async function processAnswer(input: AnswerInput): Promise<AnswerResponse>
     if (!existing) {
       // Fewer copied questions than num_questions says: trust the questions,
       // not the count, and end the run rather than inventing one.
-      return {
-        turn_index: turnIndex,
-        transcript: input.transcript,
-        answer_scores: answerScores,
-        next_question: null,
-        next_question_type: null,
-        done: true,
-      };
+      return finish();
     }
     return {
       turn_index: turnIndex,

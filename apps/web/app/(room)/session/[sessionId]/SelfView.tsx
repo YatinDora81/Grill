@@ -9,6 +9,17 @@ const MAX_W = 520;
 const MARGIN = 16;
 const POS_KEY = "grill.selfview";
 
+/**
+ * The box is sized as a FRACTION of the viewport, not in absolute pixels.
+ * A flat 240px default is 16% of a desktop window and 64% of a 375px phone —
+ * at phone size it landed squarely on top of the record button, and since this
+ * is `fixed z-50` with pointer handlers, it ate the tap. The candidate couldn't
+ * start recording at all. The floor scales for the same reason.
+ */
+const DEFAULT_W = 240;
+const DEFAULT_W_VW = 0.3;
+const MIN_W_VW = 0.25;
+
 interface Box {
   x: number;
   y: number;
@@ -17,9 +28,28 @@ interface Box {
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
 
+/** The starting size: 240px on a desktop, ~30% of the screen on a phone. */
+function defaultWidth(): number {
+  return Math.min(DEFAULT_W, Math.round(window.innerWidth * DEFAULT_W_VW));
+}
+
+/** The corner every interview opens in. */
+function bottomRight(w: number): Box {
+  return {
+    w,
+    x: window.innerWidth - w - MARGIN,
+    // MARGIN * 4, not MARGIN: the bottom strip is where the record button lives,
+    // and this is `fixed z-50` with pointer handlers — flush to the edge it would
+    // sit on top of the control and eat the tap.
+    y: window.innerHeight - w / ASPECT - MARGIN * 4,
+  };
+}
+
 /** Keep the box on screen — a window resize must never strand it off-viewport. */
 function fit(b: Box): Box {
-  const w = clamp(b.w, MIN_W, Math.min(MAX_W, window.innerWidth - MARGIN * 2));
+  // On a phone even MIN_W is a third of the screen, so the floor has to give.
+  const minW = Math.min(MIN_W, window.innerWidth * MIN_W_VW);
+  const w = clamp(b.w, minW, Math.min(MAX_W, window.innerWidth - MARGIN * 2));
   const h = w / ASPECT;
   return {
     w,
@@ -30,35 +60,38 @@ function fit(b: Box): Box {
 
 /**
  * Zoom-style self view: a mirrored picture-in-picture you can drag anywhere and
- * resize from the corner. Video only — the recorder owns the mic, and grabbing
- * audio here as well would fight it for the device.
+ * resize from the corner.
+ *
+ * A pure VIEW of a stream it does not own. It used to call getUserMedia itself
+ * and stop the tracks on unmount — which was fine when the camera existed only
+ * to be looked at, and became a bug the moment the session was being recorded:
+ * closing the PiP would have silently ended the recording. The stream (and its
+ * lifetime) belong to useSessionVideo now; this just paints it.
  */
-export function SelfView({ onClose }: { onClose: () => void }) {
+export function SelfView({ stream, onClose }: { stream: MediaStream | null; onClose: () => void }) {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const [error, setError] = useState("");
   const [box, setBox] = useState<Box | null>(null);
 
   // Position lives in state, not CSS, because dragging has to write it back.
-  // Initialised on mount: bottom-right needs window dimensions, which don't
-  // exist during SSR.
+  // Initialised on mount: the corner needs window dimensions, which don't exist
+  // during SSR.
+  //
+  // SIZE is restored from the last session; POSITION deliberately is not. Every
+  // interview opens in the bottom-right, because where the box was dragged to
+  // during some earlier interview says nothing about where it should sit in
+  // this one — that room had a different question on screen, possibly at a
+  // different window size. Dragging still works; it just doesn't outlive the
+  // session. The stored x/y are read back only by `fit`, never as a start point.
   useEffect(() => {
-    let saved: Box | null = null;
+    let savedW: unknown;
     try {
       const raw = localStorage.getItem(POS_KEY);
-      if (raw) saved = JSON.parse(raw) as Box;
+      if (raw) savedW = (JSON.parse(raw) as Partial<Box>).w;
     } catch {
-      /* corrupt entry — fall through to the default corner */
+      /* corrupt entry — fall through to the default width */
     }
-    const w = saved?.w ?? 240;
-    setBox(
-      fit(
-        saved ?? {
-          w,
-          x: window.innerWidth - w - MARGIN,
-          y: window.innerHeight - w / ASPECT - MARGIN * 4,
-        },
-      ),
-    );
+    const w = typeof savedW === "number" && Number.isFinite(savedW) ? savedW : defaultWidth();
+    setBox(fit(bottomRight(w)));
   }, []);
 
   useEffect(() => {
@@ -84,16 +117,14 @@ export function SelfView({ onClose }: { onClose: () => void }) {
    * long before srcObject exists, which leaves the element parked at
    * readyState 0. Starting it by hand is what actually shows a picture.
    */
-  const streamRef = useRef<MediaStream | null>(null);
   const attach = useCallback(() => {
     const el = videoRef.current;
-    const s = streamRef.current;
-    if (!el || !s || el.srcObject === s) return;
-    el.srcObject = s;
+    if (!el || !stream || el.srcObject === stream) return;
+    el.srcObject = stream;
     void el.play().catch(() => {
       /* autoplay blocked: the frame stays dark, the interview is unaffected */
     });
-  }, []);
+  }, [stream]);
 
   const setVideo = useCallback(
     (el: HTMLVideoElement | null) => {
@@ -103,28 +134,9 @@ export function SelfView({ onClose }: { onClose: () => void }) {
     [attach],
   );
 
-  useEffect(() => {
-    let cancelled = false;
-    navigator.mediaDevices
-      ?.getUserMedia({ video: { width: 640, height: 480 }, audio: false })
-      .then((s) => {
-        // Unmounted mid-request: release the camera rather than leave the light on.
-        if (cancelled) {
-          s.getTracks().forEach((t) => t.stop());
-          return;
-        }
-        streamRef.current = s;
-        attach();
-      })
-      .catch(() => {
-        if (!cancelled) setError("Camera unavailable");
-      });
-    return () => {
-      cancelled = true;
-      streamRef.current?.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-    };
-  }, [attach]);
+  // Attach from this side too, for whenever the stream is the one that lands
+  // second. NO cleanup that stops tracks: the stream is on loan.
+  useEffect(() => attach(), [attach]);
 
   const drag = useRef<{ dx: number; dy: number } | null>(null);
   const resize = useRef<{ x0: number; w0: number } | null>(null);
@@ -172,9 +184,9 @@ export function SelfView({ onClose }: { onClose: () => void }) {
       style={{ left: box.x, top: box.y, width: box.w, height: box.w / ASPECT }}
       className="group fixed z-50 cursor-grab touch-none overflow-hidden rounded-xl border border-room-line bg-room-raised shadow-[0_22px_60px_-20px_rgba(0,0,0,0.9)] active:cursor-grabbing"
     >
-      {error ? (
+      {!stream ? (
         <p className="flex h-full items-center justify-center px-3 text-center text-xs text-room-muted">
-          {error}
+          Camera unavailable
         </p>
       ) : (
         <video
@@ -214,12 +226,17 @@ export function SelfView({ onClose }: { onClose: () => void }) {
   );
 }
 
+/**
+ * Shows/hides the self view. It does NOT turn the camera off — the interview is
+ * recorded either way, and a control labelled "turn the camera off" that leaves
+ * the camera on is the one thing this must never be.
+ */
 export function CameraToggle({ on, onClick }: { on: boolean; onClick: () => void }) {
   return (
     <button
       onClick={onClick}
       aria-pressed={on}
-      aria-label={on ? "Turn the camera off" : "Turn the camera on"}
+      aria-label={on ? "Hide the self view" : "Show the self view"}
       className={cx(
         "flex size-8 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-room-raised",
         on ? "text-room-ink" : "text-room-muted",

@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import type { RecentSession, SessionStatus } from "@repo/types";
 import { getUserId } from "@/lib/auth";
 import { getDashboardData } from "@/lib/services/dashboardService";
+import { UNTITLED } from "@/lib/interviewMeta";
 import { ButtonLink, Card, Eyebrow, cx, scoreTone } from "@/components/ui";
 import { Trend } from "./Trend";
 
@@ -95,6 +96,17 @@ function fmtScore(v: number | null): string {
 }
 
 /**
+ * What to call a session in a list.
+ *
+ * The name is the user's own word for it and always wins. Sessions from before
+ * names existed fall back to the role, which is what this page used as a title
+ * all along — so old rows read exactly as they did yesterday.
+ */
+function sessionTitle(s: RecentSession): string {
+  return s.name?.trim() || s.role?.trim() || UNTITLED;
+}
+
+/**
  * The unfinished interview, pulled out of the list. No key-light here: the glow
  * is the hot seat's signature, and spending it on a dashboard card would stop
  * it meaning "you're live". An ember edge is enough to say "open".
@@ -104,9 +116,10 @@ function ResumeCard({ session: s }: { session: RecentSession }) {
     <div className="rounded-card mt-8 flex flex-wrap items-center justify-between gap-4 border border-line border-l-2 border-l-ember bg-paper-raised p-6">
       <div className="min-w-0">
         <Eyebrow tone="ember">Still open</Eyebrow>
-        <p className="mt-2 truncate font-display text-xl">{s.role ?? "Untitled interview"}</p>
+        <p className="mt-2 truncate font-display text-xl">{sessionTitle(s)}</p>
         <p className="mt-1 font-mono text-xs text-ink-muted">
-          Started {s.date} · not scored until you finish
+          Started {s.date}
+          {s.name && s.role ? ` · ${s.role}` : ""} · not scored until you finish
         </p>
       </div>
       <ButtonLink href={`/session/${s.session_id}`}>Resume</ButtonLink>
@@ -152,20 +165,28 @@ const STATUS_LABEL: Record<SessionStatus, string> = {
 };
 
 function SessionRow({ session: s }: { session: RecentSession }) {
-  // Only completed sessions have a report to read; an in-progress one resumes.
+  // An in-progress one resumes; everything else that has (or is getting) a
+  // report goes to the report page.
+  //
+  // `generating_report` and `error` MUST be reachable. The thank-you screen
+  // drops the candidate here five seconds after their last answer, while the
+  // report is still building — if this row weren't a link, the report they're
+  // waiting for would be unreachable from the only page they were sent to. The
+  // report page handles both: it polls while building, and re-kicks a failed one.
   const href =
-    s.status === "completed"
-      ? `/report/${s.session_id}`
-      : s.status === "in_progress"
-        ? `/session/${s.session_id}`
+    s.status === "in_progress"
+      ? `/session/${s.session_id}`
+      : s.status === "completed" || s.status === "generating_report" || s.status === "error"
+        ? `/report/${s.session_id}`
         : null;
 
   const body = (
     <div className="flex items-center justify-between gap-4 px-5 py-4">
       <div className="min-w-0">
-        <p className="truncate text-sm font-medium">{s.role ?? "Untitled interview"}</p>
-        <p className="mt-1 font-mono text-[11px] text-ink-muted">
+        <p className="truncate text-sm font-medium">{sessionTitle(s)}</p>
+        <p className="mt-1 truncate font-mono text-[11px] text-ink-muted">
           {s.date} · {STATUS_LABEL[s.status]}
+          {s.name && s.role ? ` · ${s.role}` : ""}
         </p>
       </div>
       <div className="flex shrink-0 items-center gap-4">

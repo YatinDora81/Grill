@@ -1,4 +1,5 @@
 import type { AnswerScores, DeliveryMetrics } from "@repo/types";
+import { interviewLabel, seniorityLabel } from "@/lib/interviewMeta";
 import type { SessionContext } from "./questionGen";
 
 export const REPORT_SYSTEM = `You write a candid, useful mock-interview report in Grill's voice:
@@ -29,7 +30,9 @@ export function reportPrompt(
     )
     .join("\n\n");
 
-  return `Role: ${s.role ?? "(unspecified)"} · Difficulty: ${s.config.difficulty} · Type: ${s.config.interview_type}
+  // The bar this report grades against: 3 years and 15 years answering the same
+  // question are not the same performance, and the report has to know that.
+  return `Role: ${s.role ?? "(unspecified)"} · Experience: ${s.config.years_experience} year(s) (${seniorityLabel(s.config.years_experience)}) · Interview: ${interviewLabel(s.config)}
 
 Full interview:
 ${body}

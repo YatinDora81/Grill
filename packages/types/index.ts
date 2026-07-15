@@ -88,8 +88,6 @@ export type SessionStatus =
   | "error";
 
 export interface InterviewConfig {
-  /** Required, and the user's own words: this is how they find it again. */
-  name: string;
   /** Bounded by `QUESTION_BOUNDS` in apps/web/lib/schemas.ts. */
   num_questions: number;
   /**
@@ -114,6 +112,16 @@ export interface InterviewConfig {
    * tool, so the same résumé must not produce the same interview twice.
    */
   allow_repeats: boolean;
+  /**
+   * Per-answer recording cap in seconds, derived from `num_questions` by
+   * `perAnswerCapSeconds` at creation and frozen here — never chosen by the
+   * user. Stored rather than recomputed so the room enforces the same limit the
+   * interview was created with, even if the model's constants are retuned
+   * later.
+   *
+   * Optional: sessions created before this field read as "use the flat default".
+   */
+  max_answer_seconds?: number;
 }
 
 /** Per-answer rubric — BACKEND_README §10. */
@@ -129,12 +137,14 @@ export interface StartRequest {
   /** The résumé text (extracted client-side via /resume/extract). Required. */
   source_text: string;
   source_type?: SourceType;
-  role?: string;
   /**
-   * Everything but the name has a server-side default; the name is the user's
-   * own words and can't be defaulted into existence.
+   * Required, and the user's own words — this is how they find the interview
+   * again among fifty others. A property of the session, not of the config:
+   * a retry re-runs the same config under a name of its own.
    */
-  config: Partial<InterviewConfig> & Pick<InterviewConfig, "name">;
+  name: string;
+  role?: string;
+  config: InterviewConfig;
 }
 
 export interface StartResponse {
@@ -179,7 +189,8 @@ export interface SessionStateResponse {
 
 export interface EndResponse {
   session_id: string;
-  report_id: string;
+  /** Null when the report is still queued — the common case now that /end is async. */
+  report_id: string | null;
   status: SessionStatus;
 }
 
@@ -268,6 +279,8 @@ export interface DashboardStats {
 export interface RecentSession {
   session_id: string;
   date: string;
+  /** Null only for sessions created before interviews were named. */
+  name: string | null;
   role: string | null;
   score: number | null;
   status: SessionStatus;

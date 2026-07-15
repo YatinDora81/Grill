@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { InterviewSource } from "@repo/types";
+import { QUESTION_BOUNDS, YEAR_BOUNDS } from "./interviewMeta";
 import { config } from "./env";
 
 // ── Auth ──────────────────────────────────────────────────────────
@@ -26,10 +27,6 @@ export const changePasswordSchema = z.object({
 });
 
 // ── Interview requests ────────────────────────────────────────────
-
-/** The bounds the form, the API and the prompt builder all agree on. */
-export const QUESTION_BOUNDS = { min: 3, max: 100 } as const;
-export const YEAR_BOUNDS = { min: 1, max: 20 } as const;
 
 export const interviewSourceSchema = z.enum(["resume", "topic", "cultural"]);
 export const exclusiveModeSchema = z.enum(["topic_only", "jd", "real", "weak_spots"]);
@@ -91,18 +88,23 @@ function migrateConfig(raw: unknown): unknown {
   }
   delete c.difficulty;
 
-  // Named after the change; legacy rows never had one to give.
-  if (typeof c.name !== "string" || c.name.trim() === "") c.name = "Untitled interview";
-
   return c;
 }
 
 const interviewConfigShape = z.object({
-  name: z.string().trim().min(1, "Give this interview a name.").max(80),
+  // Deliberately looser than QUESTION_BOUNDS, which is enforced on the way IN
+  // (see startRequestSchema). This shape also parses configs written years ago,
+  // and the old floor was 1 — rejecting a stored 2-question session here would
+  // mean its report can never build and its room page 500s, punishing the user
+  // for a limit that didn't exist when they ran it.
+  //
+  // Clamping instead of widening would be worse than either: bumping a finished
+  // 2-question interview up to 3 tells the room a question is still owed, and it
+  // would go and generate one.
   num_questions: z.coerce
     .number()
     .int()
-    .min(QUESTION_BOUNDS.min)
+    .min(1)
     .max(QUESTION_BOUNDS.max)
     .default(config.interview.defaultNumQuestions),
   years_experience: z.coerce
@@ -116,6 +118,12 @@ const interviewConfigShape = z.object({
   topic: z.string().trim().max(2_000).optional(),
   job_description: z.string().trim().max(20_000).optional(),
   allow_repeats: z.coerce.boolean().default(false),
+  // Optional, and must stay that way: sessions written before the cap existed
+  // have no value here, and requiring one would make their room page and their
+  // report unparseable — the same migration-on-read rule as num_questions above.
+  // A stored session keeps the cap it was created with; absent means "fall back
+  // to the flat env default".
+  max_answer_seconds: z.coerce.number().int().positive().optional(),
 });
 
 /**
@@ -158,24 +166,77 @@ export const interviewConfigSchema = interviewConfigShape.superRefine((v, ctx) =
 /** Reads a config off a session row, whatever shape it was written in. */
 export const storedConfigSchema = z.preprocess(migrateConfig, interviewConfigSchema);
 
-export const startRequestSchema = z.object({
-  // The résumé, always. Sources choose what to ask on top of it.
-  source_text: z.string().min(1).max(20_000),
-  source_type: z.enum(["resume", "jd", "topic"]).default("resume"),
-  role: z.string().max(200).optional(),
-  config: interviewConfigSchema,
+export const startRequestSchema = z
+  .object({
+    // The résumé, always. Sources choose what to ask on top of it.
+    source_text: z.string().min(1).max(20_000),
+    source_type: z.enum(["resume", "jd", "topic"]).default("resume"),
+    // No default: an interview without a name is one the user can't find again,
+    // and nothing we could invent here would be their words.
+    name: z.string().trim().min(1, "Give this interview a name.").max(80),
+    role: z.string().max(200).optional(),
+    config: interviewConfigSchema,
+  })
+  // The floor lives here, not in the config shape, because it only applies to
+  // interviews being CREATED. The same shape has to keep reading sessions
+  // recorded when the floor was 1.
+  .superRefine((v, ctx) => {
+    if (v.config.num_questions < QUESTION_BOUNDS.min) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["config", "num_questions"],
+        message: `An interview needs at least ${QUESTION_BOUNDS.min} questions.`,
+      });
+    }
+  });
+
+// ── Starred questions ─────────────────────────────────────────────
+
+export const starSchema = z.object({ turn_id: z.string().uuid() });
+/** sha256, lowercase hex — the shape repo.questionHash produces. */
+export const unstarSchema = z.object({ question_hash: z.string().regex(/^[a-f0-9]{64}$/) });
+
+// ── Session video ─────────────────────────────────────────────────
+
+export const videoStartSchema = z.object({
+  session_id: z.string().uuid(),
+  mime_type: z.string().min(1).max(100),
 });
+
+export const videoRefSchema = z.object({ video_id: z.string().uuid() });
+
+export const videoPartUrlSchema = z.object({
+  video_id: z.string().uuid(),
+  part_number: z.coerce.number().int().min(1).max(config.video.maxParts),
+});
+
+/**
+ * Where an answer sits in the session recording. Optional on every answer route:
+ * the camera may have been denied, the recording may not have started yet, and
+ * neither is a reason to reject the answer itself.
+ */
+export const answerVideoFields = {
+  video_id: z.string().uuid().optional(),
+  video_offset_ms: z.coerce.number().int().min(0).optional(),
+};
 
 /** Typed-text answer (text-only interview core, build order 4). */
 export const answerTextSchema = z.object({
   session_id: z.string().uuid(),
   turn_index: z.coerce.number().int().min(0),
   text: z.string().min(1).max(20_000),
+  ...answerVideoFields,
 });
 
 export const turnRefSchema = z.object({
   session_id: z.string().uuid(),
   turn_index: z.coerce.number().int().min(0),
+  // Multipart form values arrive as strings or null; `.optional()` alone would
+  // reject a null, so absent fields are normalised before the uuid check.
+  video_id: z
+    .preprocess((v) => (v === null || v === "" ? undefined : v), z.string().uuid().optional()),
+  video_offset_ms: z
+    .preprocess((v) => (v === null || v === "" ? undefined : v), z.coerce.number().int().min(0).optional()),
 });
 
 export const sessionIdSchema = z.object({ session_id: z.string().uuid() });

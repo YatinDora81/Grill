@@ -1,0 +1,82 @@
+# Grill — local stack
+#
+#   cp apps/web/.env.example .env   # fill GEMINI / GROQ / R2 / JWT_SECRET
+#   docker compose up --build
+#
+# Web  → http://localhost:4000
+# Audio → http://localhost:8000/health
+# DB   → localhost:5432 (grill / grill / grill)
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: grill
+      POSTGRES_PASSWORD: grill
+      POSTGRES_DB: grill
+    ports:
+      - "5432:5432"
+    volumes:
+      - grill_pg:/var/lib/postgresql/data
+      - ./docker/init-db.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U grill -d grill"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  audio:
+    build:
+      context: ./apps/audio
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      # Point the sweeper at the web container when you want report backstops.
+      # Leave CRON_SECRET empty / REPORT_CRON_ENABLED=false for plain /analyze.
+      REPORT_CRON_URL: ${REPORT_CRON_URL:-http://web:4000/api/cron/reports}
+      CRON_SECRET: ${CRON_SECRET:-}
+      REPORT_CRON_ENABLED: ${REPORT_CRON_ENABLED:-false}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    env_file:
+      - path: .env
+        required: false
+      - path: apps/web/.env.local
+        required: false
+    environment:
+      # Compose network overrides — win over env_file values.
+      DATABASE_URL: postgresql://grill:grill@db:5432/grill?schema=ai_interview
+      AUDIO_SERVICE_URL: http://audio:8000
+      PORT: "4000"
+      # Required secrets still come from .env / apps/web/.env.local:
+      # JWT_SECRET, GEMINI_API_KEYS, GROQ_API_KEYS, S3_*
+    depends_on:
+      db:
+        condition: service_healthy
+      audio:
+        condition: service_healthy
+
+volumes:
+  grill_pg:

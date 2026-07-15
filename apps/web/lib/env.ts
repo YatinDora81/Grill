@@ -6,7 +6,13 @@ import "server-only";
  */
 
 export interface NamedKey {
-  /** Human label for redacted logs, e.g. "DORA_YATIN_1". Never the secret. */
+  /**
+   * Human label for redacted logs, e.g. "DORA_YATIN_1". Never the secret.
+   *
+   * Display only, and NOT unique: it comes from operator-supplied env, and the
+   * `#N` fallback below is positional. Nothing may key behaviour off it — the
+   * rotation pool identifies keys by index for exactly this reason.
+   */
   label: string;
   key: string;
 }
@@ -71,16 +77,45 @@ export const config = {
     cookieMaxAgeS: num("AUTH_COOKIE_MAXAGE_S", 1_209_600),
     passwordMinLength: num("PASSWORD_MIN_LENGTH", 8),
   },
+  cron: {
+    // Vercel signs cron invocations with this as a bearer token. Soft-optional
+    // like storage: absent locally, and the sweep route refuses to run without
+    // it rather than defaulting open.
+    secret: process.env.CRON_SECRET || "",
+  },
   storage: {
     endpoint: process.env.S3_ENDPOINT || "",
     bucket: process.env.S3_BUCKET || "",
     accessKeyId: process.env.S3_ACCESS_KEY_ID || "",
     secretAccessKey: process.env.S3_SECRET_ACCESS_KEY || "",
   },
+  video: {
+    /** 100 days, per the retention decision. The sweep reads SessionVideo.expiresAt. */
+    retentionDays: num("VIDEO_RETENTION_DAYS", 100),
+    /** 640x480 talking head; low enough that an hour is ~180 MB, not 2 GB. */
+    bitsPerSecond: num("VIDEO_BITS_PER_SECOND", 400_000),
+    /** A part URL is used within seconds of minting; this is pure slack. */
+    partUrlExpirySeconds: num("VIDEO_PART_URL_EXPIRY_S", 900),
+    /**
+     * Playback needs a long expiry: a presigned GET is re-authorised on EVERY
+     * Range request the <video> element makes, so a 300s URL 403s mid-scrub on
+     * anything longer than five minutes.
+     */
+    playbackExpirySeconds: num("VIDEO_PLAYBACK_EXPIRY_S", 3_600),
+    /** 5 MiB parts x 2000 = ~10 GB, far past any real interview. */
+    maxParts: num("VIDEO_MAX_PARTS", 2_000),
+  },
   audio: {
     serviceUrl: process.env.AUDIO_SERVICE_URL || "http://localhost:8000",
     maxSeconds: num("MAX_AUDIO_SECONDS", 180),
     maxBytes: num("MAX_AUDIO_MB", 25) * 1024 * 1024,
+    /**
+     * Matches video's 100 days: both are recordings of the same interview, and
+     * keeping the voice a month after the picture went would be a retention
+     * promise we didn't make. Derived from Session.createdAt, not stored per
+     * clip — see Session.audioPurgedAt.
+     */
+    retentionDays: num("AUDIO_RETENTION_DAYS", 100),
   },
   interview: {
     defaultNumQuestions: num("DEFAULT_NUM_QUESTIONS", 8),

@@ -57,3 +57,13 @@ export async function apiGet<T>(path: string): Promise<T> {
   const res = await fetch(path, { cache: "no-store" });
   return unwrap<T>(res);
 }
+
+/** DELETE with a JSON body — the route reads it, so the body is not optional. */
+export async function apiDelete<T>(path: string, payload: unknown): Promise<T> {
+  const res = await fetch(path, {
+    method: "DELETE",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return unwrap<T>(res);
+}

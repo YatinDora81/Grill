@@ -4,7 +4,9 @@ import "server-only";
  * HARD RULE #11: every session/report query filters on the authenticated
  * user_id — a user can only ever touch their own data.
  */
+import { createHash } from "node:crypto";
 import { prisma, Prisma } from "@repo/db";
+import type { Session } from "@repo/db";
 import type {
   AnswerScores,
   InterviewConfig,
@@ -42,6 +44,8 @@ export interface CreateSessionInput {
   userId: string;
   sourceType: SourceType;
   sourceText: string;
+  /** The user's own name for this interview. */
+  name: string;
   role: string | null;
   config: InterviewConfig;
   /** Set to re-run an earlier session on identical questions. */
@@ -54,6 +58,7 @@ export function createSession(input: CreateSessionInput) {
       userId: input.userId,
       sourceType: input.sourceType,
       sourceText: input.sourceText,
+      name: input.name,
       role: input.role,
       config: json(input.config),
       status: "in_progress",
@@ -109,6 +114,252 @@ export function setStatus(id: string, status: SessionStatus, errorReason: string
   return prisma.session.update({ where: { id }, data: { status, errorReason } });
 }
 
+// ── Starred questions ─────────────────────────────────────────────
+
+/**
+ * The dedupe key for a question.
+ *
+ * Normalised before hashing so trivial differences don't split one question into
+ * two stars: case, surrounding space, and runs of whitespace (a question that
+ * came back through a retry can differ by a line break alone).
+ */
+export function questionHash(question: string): string {
+  const normalized = question.trim().toLowerCase().replace(/\s+/g, " ");
+  return createHash("sha256").update(normalized).digest("hex");
+}
+
+/**
+ * Star a question, by turn.
+ *
+ * The text is copied onto the star rather than referenced: Turn cascades away
+ * with its Session, and a star that vanished when you deleted the interview it
+ * came from would defeat the point of a collection.
+ *
+ * Upsert, not create: the unique index on (userId, questionHash) does the
+ * deduping, so starring the same question again — from a retry, or a double
+ * click — is idempotent instead of a 500.
+ */
+export function starQuestion(userId: string, turn: { id: string; question: string; questionType: QuestionType }) {
+  const hash = questionHash(turn.question);
+  return prisma.starredQuestion.upsert({
+    where: { userId_questionHash: { userId, questionHash: hash } },
+    create: {
+      userId,
+      turnId: turn.id,
+      question: turn.question,
+      questionType: turn.questionType,
+      questionHash: hash,
+    },
+    // Already starred: leave the original alone, including which turn it came
+    // from. The first time they liked it is the truthful answer.
+    update: {},
+  });
+}
+
+export function unstarQuestion(userId: string, hash: string) {
+  return prisma.starredQuestion.deleteMany({ where: { userId, questionHash: hash } });
+}
+
+export function listStarredQuestions(userId: string) {
+  return prisma.starredQuestion.findMany({
+    where: { userId },
+    orderBy: { createdAt: "desc" },
+    include: {
+      // Null once the source interview is deleted — the star survives it.
+      turn: { select: { sessionId: true, turnIndex: true } },
+    },
+  });
+}
+
+/** Which of these questions are already starred, as a set of hashes. */
+export async function starredHashesFor(userId: string, questions: string[]): Promise<Set<string>> {
+  const hashes = questions.map(questionHash);
+  const rows = await prisma.starredQuestion.findMany({
+    where: { userId, questionHash: { in: hashes } },
+    select: { questionHash: true },
+  });
+  return new Set(rows.map((r) => r.questionHash));
+}
+
+/** A turn, scoped to its owner (HARD RULE #11) — starring needs both. */
+export function getTurnForUser(turnId: string, userId: string) {
+  return prisma.turn.findFirst({
+    where: { id: turnId, session: { userId } },
+    select: { id: true, question: true, questionType: true },
+  });
+}
+
+// ── Session video ─────────────────────────────────────────────────
+
+export function createSessionVideo(input: {
+  /** Minted by the caller: the R2 object key embeds it, so it can't be defaulted. */
+  id: string;
+  sessionId: string;
+  key: string;
+  uploadId: string;
+  expiresAt: Date;
+}) {
+  return prisma.sessionVideo.create({ data: input });
+}
+
+/** User-scoped (HARD RULE #11): another user's video id is simply not found. */
+export function getSessionVideo(id: string, userId: string) {
+  return prisma.sessionVideo.findFirst({ where: { id, session: { userId } } });
+}
+
+/** Recordings for a session that never got completed — an upload that died. */
+export function listUnfinishedVideos(sessionId: string) {
+  return prisma.sessionVideo.findMany({
+    where: { sessionId, completedAt: null, uploadId: { not: null } },
+  });
+}
+
+export function completeSessionVideo(id: string) {
+  return prisma.sessionVideo.update({
+    where: { id },
+    // uploadId cleared: it's spent, and a null is what marks this row settled.
+    data: { completedAt: new Date(), uploadId: null },
+  });
+}
+
+export function deleteSessionVideo(id: string) {
+  return prisma.sessionVideo.delete({ where: { id } });
+}
+
+/** Playable recordings for a session, oldest first — the replay's timeline. */
+export function listSessionVideos(sessionId: string) {
+  return prisma.sessionVideo.findMany({
+    where: { sessionId, completedAt: { not: null } },
+    orderBy: { startedAt: "asc" },
+  });
+}
+
+/** The retention sweep's queue: past expiry, object still in R2. */
+export function listExpiredVideos(take = 100) {
+  return prisma.sessionVideo.findMany({
+    where: { expiresAt: { lt: new Date() } },
+    orderBy: { expiresAt: "asc" },
+    take,
+  });
+}
+
+// ── Audio retention ───────────────────────────────────────────────
+
+/**
+ * The audio sweep's queue: created before `cutoff` and not yet purged.
+ *
+ * Oldest first, so a backlog too big for one run drains in age order rather
+ * than starving the oldest clips — the ones we most owe a deletion.
+ */
+export function listSessionsWithExpiredAudio(cutoff: Date, take = 100) {
+  return prisma.session.findMany({
+    where: { createdAt: { lt: cutoff }, audioPurgedAt: null },
+    orderBy: { createdAt: "asc" },
+    select: { id: true },
+    take,
+  });
+}
+
+/**
+ * Record that a session's clips are gone, and drop the keys that named them.
+ *
+ * One transaction: a purge marked but keys left behind would leave the report
+ * and replay pointing at objects that 404, and keys cleared without the marker
+ * would re-list the session every night forever. Neither half stands alone.
+ */
+export function markAudioPurged(sessionId: string) {
+  return prisma.$transaction([
+    prisma.turn.updateMany({
+      where: { sessionId, audioKey: { not: null } },
+      data: { audioKey: null },
+    }),
+    prisma.session.update({
+      where: { id: sessionId },
+      data: { audioPurgedAt: new Date() },
+    }),
+  ]);
+}
+
+// ── Report queue ──────────────────────────────────────────────────
+
+/**
+ * How long a claim holds. Must comfortably exceed the worst-case build (two LLM
+ * passes, each up to 7 key-rotation attempts, plus a cold Render acoustics
+ * service) — a lease that expires mid-build invites a second worker in.
+ */
+export const REPORT_LEASE_MS = 6 * 60_000;
+
+/** Past this many claims a session is failed out rather than retried forever. */
+export const MAX_REPORT_ATTEMPTS = 5;
+
+/**
+ * Try to take the build lease on one session. Returns the session on success,
+ * null if someone else holds it, it's already built, or it's out of attempts.
+ *
+ * The whole no-double-processing guarantee lives in this one statement.
+ * `updateMany` compiles to a single `UPDATE ... WHERE`, which Postgres executes
+ * atomically: concurrent callers serialise on the row, and only the one whose
+ * WHERE still matches gets count === 1. The loser sees 0 and walks away.
+ *
+ * Deliberately NOT raw SQL. Tables live in the `ai_interview` schema (packages/db
+ * derives it from the URL) and @prisma/adapter-pg never sets search_path, so a
+ * hand-written `UPDATE sessions` would fail with "relation does not exist" —
+ * and there is no other raw SQL here to have taught us that. Going through the
+ * query engine gets the schema qualification for free.
+ *
+ * Not user-scoped, and it's the one exception to HARD RULE #11 in this file:
+ * the worker acts for the system, not a user, and the session id comes from the
+ * queue rather than a request. Every caller that IS user-facing must have
+ * checked ownership before getting here.
+ */
+export async function claimReportLease(sessionId: string): Promise<Session | null> {
+  const now = new Date();
+  const { count } = await prisma.session.updateMany({
+    where: {
+      id: sessionId,
+      status: "generating_report",
+      reportAttempts: { lt: MAX_REPORT_ATTEMPTS },
+      // Free, or the previous holder's lease has run out (it died).
+      OR: [{ reportLeaseUntil: null }, { reportLeaseUntil: { lt: now } }],
+    },
+    data: {
+      reportLeaseUntil: new Date(now.getTime() + REPORT_LEASE_MS),
+      reportAttempts: { increment: 1 },
+    },
+  });
+  if (count !== 1) return null;
+  return prisma.session.findUnique({ where: { id: sessionId } });
+}
+
+/** Hand the lease back without finishing — the next pass may pick it straight up. */
+export function releaseReportLease(sessionId: string) {
+  return prisma.session.update({
+    where: { id: sessionId },
+    data: { reportLeaseUntil: null },
+  });
+}
+
+/**
+ * Sessions waiting on a report, oldest first.
+ *
+ * Leased rows are excluded rather than skipped later: this is what stops a
+ * sweep from handing out work another run is still holding.
+ */
+export function listPendingReportSessions(take = 25) {
+  const now = new Date();
+  return prisma.session.findMany({
+    where: {
+      status: "generating_report",
+      report: { is: null },
+      reportAttempts: { lt: MAX_REPORT_ATTEMPTS },
+      OR: [{ reportLeaseUntil: null }, { reportLeaseUntil: { lt: now } }],
+    },
+    orderBy: { updatedAt: "asc" },
+    take,
+    select: { id: true },
+  });
+}
+
 export function getTurns(sessionId: string) {
   return prisma.turn.findMany({ where: { sessionId }, orderBy: { turnIndex: "asc" } });
 }
@@ -151,12 +402,20 @@ export function recordAnswer(
     transcript: string;
     transcriptWords?: TranscriptWord[] | null;
     answerScores: AnswerScores;
+    /** Where this answer sits in the session recording, if there was one. */
+    videoId?: string | null;
+    videoOffsetMs?: number | null;
   },
 ) {
   return prisma.turn.update({
     where: { sessionId_turnIndex: { sessionId, turnIndex } },
     data: {
       audioKey: data.audioKey ?? undefined,
+      // `?? undefined` throughout: an absent value must leave the column alone,
+      // never null it out. A retry of a failed submit can arrive without the
+      // video fields, and it must not erase the offsets the first one wrote.
+      videoId: data.videoId ?? undefined,
+      videoOffsetMs: data.videoOffsetMs ?? undefined,
       transcript: data.transcript,
       transcriptWords: data.transcriptWords ? json(data.transcriptWords) : undefined,
       answerScores: json(data.answerScores),

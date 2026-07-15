@@ -124,8 +124,16 @@ export function Field({
   );
 }
 
+// `text-base sm:text-sm`, not a flat `text-sm`: iOS Safari force-zooms the
+// whole page when you focus a field whose computed font-size is under 16px, and
+// it does not zoom back out. Every login/signup/profile field did this. 16px on
+// phones buys immunity; desktop keeps the intended 14px density.
+//
+// Callers that restyle the size must override with `sm:`-only classes — `cx` is
+// a plain join, not tailwind-merge, so a bare `text-xs` here would not replace
+// `text-base`, it would just race it in the cascade and win at every width.
 const CONTROL =
-  "w-full rounded-lg border border-line-strong bg-paper-raised px-3.5 py-2.5 text-sm text-ink placeholder:text-ink-muted focus:border-ember focus:outline-none focus:ring-2 focus:ring-ember/20";
+  "w-full rounded-lg border border-line-strong bg-paper-raised px-3.5 py-2.5 text-base text-ink placeholder:text-ink-muted focus:border-ember focus:outline-none focus:ring-2 focus:ring-ember/20 sm:text-sm";
 
 export function Input({ className, ...props }: ComponentProps<"input">) {
   return <input className={cx(CONTROL, className)} {...props} />;

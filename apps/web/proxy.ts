@@ -42,13 +42,24 @@ export async function proxy(req: NextRequest) {
 }
 
 export const config = {
+  // Every signed-in surface belongs here. Missing one isn't a hole — each route
+  // re-checks auth itself, and this gate is UX — but it's the difference between
+  // a clean redirect to /login and an error page.
+  //
+  // NOT listed on purpose: /api/cron/* (bearer-token auth, no user cookie) and
+  // /api/health/* (deliberately unauthenticated, so the sign-in page can keep
+  // the acoustics service warm).
   matcher: [
     "/dashboard/:path*",
     "/new/:path*",
     "/session/:path*",
     "/report/:path*",
+    "/profile/:path*",
+    "/starred/:path*",
     "/api/interview/:path*",
     "/api/report/:path*",
+    "/api/starred/:path*",
+    "/api/profile/:path*",
     "/api/dashboard",
   ],
 };

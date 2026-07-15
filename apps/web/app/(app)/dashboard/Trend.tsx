@@ -64,7 +64,11 @@ export function Trend({ scores }: { scores: number[] }) {
         <svg
           width={width}
           height={HEIGHT}
-          className="touch-none select-none"
+          // `touch-none` here meant a vertical swipe that happened to start on
+          // the chart scrolled nothing — the dashboard just stuck. Only the
+          // horizontal axis carries the hover readout, so give the browser back
+          // vertical panning and pinch-zoom and keep the rest.
+          className="touch-pan-y touch-pinch-zoom select-none"
           onPointerMove={onMove}
           onPointerLeave={() => setHover(null)}
           role="img"

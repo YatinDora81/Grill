@@ -1,7 +1,8 @@
 import "server-only";
 import type { Session, Turn } from "@repo/db";
-import type { AnswerScores, DeliveryMetrics, TranscriptWord } from "@repo/types";
+import type { AcousticMetrics, AnswerScores, DeliveryMetrics, TranscriptWord } from "@repo/types";
 import { generateJson } from "@/lib/clients/llmJson";
+import { ANSWER_CAP_MODEL } from "@/lib/interviewMeta";
 import { REPORT_SYSTEM, reportPrompt, type ReportTurn } from "@/lib/prompts/report";
 import { reportResponseSchema } from "@/lib/schemas";
 import * as repo from "@/lib/db/repo";
@@ -22,28 +23,51 @@ function scores(t: Turn): AnswerScores | null {
   return (t.answerScores as AnswerScores | null) ?? null;
 }
 
-/** Delivery metrics for a session (text math + one-clip-at-a-time acoustics). */
+async function turnAcoustics(t: Turn): Promise<AcousticMetrics | null> {
+  if (!t.audioKey) return null;
+  try {
+    const audio = await getAudio(t.audioKey);
+    const ext = t.audioKey.split(".").pop() || "webm";
+    return await analyzeAcoustics(audio, `turn.${ext}`, `audio/${ext}`);
+  } catch (err) {
+    console.warn(`[reportService] acoustics failed for ${t.audioKey}: ${(err as Error).message}`);
+    return null;
+  }
+}
+
+/**
+ * Delivery metrics for a session (text math + bounded-concurrency acoustics).
+ *
+ * The clip loop is what makes the per-answer caps in `perAnswerCapSeconds`
+ * honest: that model divides the build budget by `N / concurrency` batches, so
+ * the concurrency here is imported rather than declared. Serialising this loop
+ * again without dropping ANSWER_CAP_MODEL.concurrency to 1 would let every
+ * report overrun its 300s budget.
+ *
+ * Workers pull from a shared cursor rather than running fixed batches: an
+ * 8-second answer shouldn't hold a slot open waiting on a 4-minute one in the
+ * same batch. Results are written back by index, so `acoustics[i]` is always
+ * `turns[i]` — aggregateAcoustics and the report rely on that alignment.
+ */
 export async function computeDelivery(turns: Turn[]): Promise<DeliveryMetrics> {
   const text = textDeliveryMetrics(
     turns.map((t) => ({ transcript: t.transcript, transcriptWords: words(t) })),
   );
 
-  const acoustics: (Awaited<ReturnType<typeof analyzeAcoustics>>)[] = [];
+  const acoustics: (AcousticMetrics | null)[] = new Array(turns.length).fill(null);
   if (config.storageConfigured) {
-    for (const t of turns) {
-      if (!t.audioKey) {
-        acoustics.push(null);
-        continue;
+    let next = 0;
+    const worker = async () => {
+      while (next < turns.length) {
+        const i = next++;
+        // turnAcoustics never throws — a bad clip is one null slot, not a
+        // failed report, so one worker's bad luck can't reject the pool.
+        acoustics[i] = await turnAcoustics(turns[i]!);
       }
-      try {
-        const audio = await getAudio(t.audioKey);
-        const ext = t.audioKey.split(".").pop() || "webm";
-        acoustics.push(await analyzeAcoustics(audio, `turn.${ext}`, `audio/${ext}`));
-      } catch (err) {
-        console.warn(`[reportService] acoustics failed for ${t.audioKey}: ${(err as Error).message}`);
-        acoustics.push(null);
-      }
-    }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(ANSWER_CAP_MODEL.concurrency, turns.length) }, worker),
+    );
   }
 
   return combineDelivery(text, aggregateAcoustics(acoustics));

@@ -33,9 +33,10 @@ export default async function SessionPage({
   if (session.status !== "in_progress") redirect("/dashboard");
 
   const ctx = toSessionContext(session);
-  // Read off the narrowed value here: renderSeat below is a nested function, so
+  // Read off the narrowed values here: renderSeat below is a nested function, so
   // TS can't carry the `if (!session)` narrowing into it.
   const role = session.role;
+  const name = session.name;
   const turns = await repo.getTurns(sessionId);
   const state: TurnState[] = turns.map((t) => ({
     turn_index: t.turnIndex,
@@ -46,6 +47,10 @@ export default async function SessionPage({
   }));
 
   const numQuestions = ctx.config.num_questions;
+  // The cap this interview was created with, not today's model. A session
+  // predating the field has none — those fall back to the flat env default,
+  // which is exactly the limit they were recorded under.
+  const maxSeconds = ctx.config.max_answer_seconds ?? config.audio.maxSeconds;
   const current = state.find((t) => t.transcript === null);
 
   if (!current) {
@@ -100,14 +105,16 @@ export default async function SessionPage({
         // than leave the old turn's state in place.
         key={turnIndex}
         sessionId={sessionId}
+        name={name}
         role={role}
         numQuestions={numQuestions}
         answered={state.filter((t) => t.transcript !== null).length}
         turnIndex={turnIndex}
         question={question}
         questionType={questionType}
-        maxSeconds={config.audio.maxSeconds}
+        maxSeconds={maxSeconds}
         maxBytes={config.audio.maxBytes}
+        videoBitrate={config.video.bitsPerSecond}
       />
     );
   }

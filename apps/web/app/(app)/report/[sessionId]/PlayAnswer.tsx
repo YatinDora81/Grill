@@ -57,8 +57,10 @@ export function PlayAnswer({
   return (
     <button
       onClick={toggle}
+      // The pill renders 26px tall; the pseudo-element lifts the touch target to
+      // ~44px without changing a pixel of the pill or the row it sits in.
       className={cx(
-        "inline-flex items-center gap-1.5 rounded-full border border-line-strong px-2.5 py-1 text-xs transition-colors hover:bg-paper-sunken",
+        "relative inline-flex items-center gap-1.5 rounded-full border border-line-strong px-2.5 py-1 text-xs transition-colors after:absolute after:-inset-x-1 after:-inset-y-2.5 after:content-[''] hover:bg-paper-sunken",
         state === "playing" ? "text-ember" : "text-ink-soft",
       )}
       aria-label={state === "playing" ? "Pause your answer" : "Play your answer"}

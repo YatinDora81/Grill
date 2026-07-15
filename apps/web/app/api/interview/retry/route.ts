@@ -5,6 +5,7 @@ import { badRequest, notFound } from "@/lib/errors";
 import { json, errorResponse } from "@/lib/http";
 import { sessionIdSchema } from "@/lib/schemas";
 import { requireUserId } from "@/lib/auth";
+import { retryName } from "@/lib/interviewMeta";
 import * as repo from "@/lib/db/repo";
 
 /**
@@ -31,12 +32,33 @@ export async function POST(req: Request) {
       throw badRequest("That interview has no questions to retry.", "nothing_to_retry");
     }
 
+    // getTurns sorts by turnIndex, and copyQuestionsInto reproduces those
+    // indices verbatim — so the retry's first question is the parent's first,
+    // whatever it was numbered. The room then decides "answered everything"
+    // with `turnIndex + 1 >= numQuestions`, which silently assumes 0-based
+    // contiguous indices. That holds today (/start writes 0..n-1 and nothing
+    // deletes a turn), but no type enforces it, so check before we create
+    // anything rather than let a violation surface as a retry that ends the
+    // interview early.
+    const first = turns[0]!;
+    if (first.turnIndex !== 0) {
+      throw badRequest(
+        "That interview's questions are numbered unexpectedly and can't be retried.",
+        "nonzero_first_turn",
+      );
+    }
+
     const session = await repo.createSession({
       userId,
       // Same material, verbatim — a retry that changed the inputs wouldn't be
       // measuring the same thing.
       sourceType: parent.sourceType,
       sourceText: parent.sourceText,
+      // Derived, never asked for: a retry is started from one button on the
+      // report, and stopping to demand a name would be a form in the way of a
+      // single click. `retryName` counts the chain so a retry of a retry reads
+      // "… (retry 2)" rather than "… (retry) (retry)".
+      name: retryName(parent.name),
       role: parent.role,
       config: parent.config as never,
       retryOfId: parent.id,
@@ -44,7 +66,6 @@ export async function POST(req: Request) {
 
     await repo.copyQuestionsInto(session.id, parent.id);
 
-    const first = turns[0]!;
     return json({
       session_id: session.id,
       turn_index: first.turnIndex,

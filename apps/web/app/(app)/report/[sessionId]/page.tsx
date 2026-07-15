@@ -62,6 +62,12 @@ export default async function ReportPage({
 
   // Which turns were spoken — a typed answer has nothing to play back.
   const turns = await repo.getTurns(sessionId);
+  // One query for the whole replay rather than one per turn: a 100-question
+  // report would otherwise open 100 connections to paint 100 star icons.
+  const starredHashes = await repo.starredHashesFor(
+    userId,
+    turns.map((t) => t.question),
+  );
   const audioTurns = new Set(turns.filter((t) => t.audioKey).map((t) => t.turnIndex));
 
   // If this run retried an earlier one, the questions were identical — so the
@@ -82,8 +88,12 @@ export default async function ReportPage({
       {/* Hero: the number they came for, and the verdict in plain words. */}
       <header className="mt-6 flex flex-wrap items-start justify-between gap-6">
         <div className="min-w-0 flex-1">
-          <p className="text-xs text-ink-muted">
-            {session.role ?? "Interview"} · {report.created_at.slice(0, 10)}
+          <p className="truncate text-xs text-ink-muted">
+            {[session.name?.trim() || session.role?.trim() || "Interview"]
+              // The role only earns a slot once the name isn't already it.
+              .concat(session.name?.trim() && session.role?.trim() ? [session.role.trim()] : [])
+              .concat(report.created_at.slice(0, 10))
+              .join(" · ")}
           </p>
           <h1 className="mt-2 font-display text-4xl leading-tight tracking-tight">
             {report.verdict}
@@ -194,13 +204,21 @@ export default async function ReportPage({
 
       <Replay
         sessionId={sessionId}
-        turns={turns.map((t) => ({
-          turn_index: t.turnIndex,
-          question: t.question,
-          question_type: t.questionType,
-          transcript: t.transcript,
-          has_audio: Boolean(t.audioKey),
-        }))}
+        turns={turns.map((t) => {
+          const hash = repo.questionHash(t.question);
+          return {
+            turn_id: t.id,
+            turn_index: t.turnIndex,
+            question: t.question,
+            question_type: t.questionType,
+            transcript: t.transcript,
+            has_audio: Boolean(t.audioKey),
+            video_id: t.videoId,
+            video_offset_ms: t.videoOffsetMs,
+            question_hash: hash,
+            starred: starredHashes.has(hash),
+          };
+        })}
       />
 
       <div className="mt-10 flex flex-wrap gap-3 border-t border-line pt-8">

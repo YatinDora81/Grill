@@ -59,11 +59,16 @@ function Row({ label, before, now }: { label: string; before: number; now: numbe
     delta > 0 ? "text-strong" : delta < 0 ? "text-weak" : "text-ink-muted";
 
   return (
-    <li className="flex items-center gap-4">
-      <span className="w-32 shrink-0 text-sm text-ink-soft">{label}</span>
+    // The three fixed tracks (128 + 96 + 48) plus gaps need 320px, but a 375px
+    // phone only leaves 277px inside the card. Unwrapped, the bar is the sole
+    // flexible item, so it ate the whole 43px deficit and rendered at zero width
+    // — the one thing this row exists to show. Wrapping gives the label its own
+    // line below `sm`; above it, the row is byte-for-byte what it always was.
+    <li className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+      <span className="w-full text-sm text-ink-soft sm:w-32 sm:shrink-0">{label}</span>
 
       {/* Two bars on one track: where you were, and where you are now. */}
-      <span className="relative h-1.5 flex-1 overflow-hidden rounded-full bg-paper-sunken">
+      <span className="relative h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-paper-sunken">
         <span
           className="absolute inset-y-0 left-0 rounded-full bg-line-strong"
           style={{ width: `${clamp(before)}%` }}

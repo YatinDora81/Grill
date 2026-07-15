@@ -21,6 +21,7 @@ export async function getDashboardData(userId: string): Promise<DashboardData> {
   const recent: RecentSession[] = sessions.map((s) => ({
     session_id: s.id,
     date: s.createdAt.toISOString().slice(0, 10),
+    name: s.name,
     role: s.role,
     score: s.report?.overallScore ?? null,
     status: s.status,

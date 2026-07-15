@@ -60,6 +60,11 @@ export class KeyPool {
     if (!k) throw new Error(`empty key pool: ${this.name}`);
     return k;
   }
+  /** Position of `current()`. The only stable identity a key has — labels are
+   * display strings and may repeat. */
+  get index(): number {
+    return this.i;
+  }
   advance(): void {
     this.i = (this.i + 1) % this.keys.length;
   }
@@ -99,13 +104,18 @@ export async function callWithRotation<T>(
   // Keys that answered 401/403 this request. Because `attempts` can exceed the
   // pool size we come back around, and re-asking a revoked key is a guaranteed
   // waste of a turn.
-  const dead = new Set<string>();
+  //
+  // Keyed by pool index, not label: labels come from operator-supplied env
+  // (`NAME__SPLIT__KEY`) and nothing forces them to be unique, so two keys
+  // sharing one would make the first 401 retire both — including a key that
+  // still works. The index is unique by construction.
+  const dead = new Set<number>();
 
   for (let n = 0; n < attempts; n++) {
     if (dead.size >= pool.size) break; // every key rejected us outright
 
     // Land on a key that hasn't already been ruled out.
-    for (let hop = 0; hop < pool.size && dead.has(pool.current().label); hop++) {
+    for (let hop = 0; hop < pool.size && dead.has(pool.index); hop++) {
       pool.advance();
     }
 
@@ -120,7 +130,7 @@ export async function callWithRotation<T>(
 
       if (cls === "dead") {
         // No backoff: the key isn't busy, it's gone. Move straight on.
-        dead.add(k.label);
+        dead.add(pool.index);
         pool.advance();
         continue;
       }

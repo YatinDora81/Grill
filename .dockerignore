@@ -1,0 +1,35 @@
+# Git / editors
+.git
+.github
+.claude
+.vscode
+.idea
+**/.DS_Store
+
+# Deps & build output (rebuilt inside the image)
+**/node_modules
+**/.next
+**/.turbo
+**/dist
+**/build
+**/.venv
+**/__pycache__
+**/coverage
+packages/db/generated
+
+# Local secrets & env — compose injects these at runtime
+**/.env
+**/.env.*
+!**/.env.example
+**/*.local
+
+# Logs / caches
+**/*.log
+**/.bun
+**/npm-debug.log*
+**/.eslintcache
+
+# Compose / docs (not needed in the image)
+docker-compose*.yml
+README.md
+*.md

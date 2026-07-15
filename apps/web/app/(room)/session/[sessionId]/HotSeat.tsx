@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 import type { AnswerResponse, EndResponse, QuestionType } from "@repo/types";
@@ -9,11 +9,14 @@ import { cx } from "@/components/ui";
 import { GrillToaster } from "@/components/toast";
 import { useSpeech } from "@/hooks/useSpeech";
 import { useRecorder } from "./useRecorder";
+import { useSessionVideo } from "./useSessionVideo";
 import { Interviewer } from "./Interviewer";
 import { SelfView, CameraToggle } from "./SelfView";
 
 interface Props {
   sessionId: string;
+  /** Null only for sessions created before interviews were named. */
+  name: string | null;
   role: string | null;
   numQuestions: number;
   answered: number;
@@ -22,6 +25,12 @@ interface Props {
   questionType: QuestionType;
   maxSeconds: number;
   maxBytes: number;
+  /**
+   * Threaded from the server page rather than imported: the config lives in
+   * lib/env.ts, which is `server-only`, and importing it from a client component
+   * pulls server secrets into the browser bundle.
+   */
+  videoBitrate: number;
 }
 
 type Phase = "answering" | "sending" | "finishing";
@@ -52,6 +61,9 @@ export function HotSeat(props: Props) {
   const router = useRouter();
   const rec = useRecorder(props.maxSeconds);
   const speech = useSpeech();
+  // Always recording — no switch. The camera prompt is still the browser's to
+  // ask, and a denial just means the replay has no picture.
+  const video = useSessionVideo(props.sessionId, props.videoBitrate);
 
   const [turnIndex, setTurnIndex] = useState(props.turnIndex);
   const [question, setQuestion] = useState(props.question);
@@ -62,9 +74,32 @@ export function HotSeat(props: Props) {
   const [text, setText] = useState("");
   const [phase, setPhase] = useState<Phase>("answering");
   const [error, setError] = useState("");
-  const [cameraOn, setCameraOn] = useState(false);
+  // Whether the picture-in-picture is on SCREEN — not whether the camera is on.
+  // Recording is unconditional; this only hides the preview.
+  const [pipOpen, setPipOpen] = useState(true);
 
   const busy = phase !== "answering";
+
+  /**
+   * When this question appeared, on the same monotonic clock the recording uses.
+   * Captured here rather than at submit time because the replay should open on
+   * the question being asked, not on the answer already finishing.
+   */
+  const turnShownAt = useRef(performance.now());
+  useEffect(() => {
+    turnShownAt.current = performance.now();
+  }, [turnIndex]);
+
+  /** The tail flush, handed to ThankYou so it can wait for it before leaving. */
+  const finishVideo = useRef<Promise<void> | null>(null);
+
+  /** The video fields to stamp on this answer, or nothing if there's no camera. */
+  const videoFields = () => {
+    const offset = video.offsetAt(turnShownAt.current);
+    return video.videoId && offset !== null
+      ? { video_id: video.videoId, video_offset_ms: offset }
+      : {};
+  };
 
   // Read each new question aloud, a beat after it lands — speaking over the
   // question's own entrance animation makes both feel rushed. `speak` is
@@ -94,20 +129,23 @@ export function HotSeat(props: Props) {
       setPhase("answering");
       return;
     }
-    // Last answer in: build the report. This is the slow call.
+    // Last answer in. /end only queues the report now and returns at once, so
+    // this is a fast call — the build happens behind the thank-you screen.
     setPhase("finishing");
+    // Fire the flush now, but do NOT await it here: ThankYou waits on it before
+    // starting its countdown. Awaiting here would leave the candidate staring at
+    // a frozen room while the tail uploads.
+    finishVideo.current = video.finish();
     try {
       await apiPost<EndResponse>("/api/interview/end", {
         session_id: props.sessionId,
       });
-    } catch (err) {
-      // The report may still exist (or be retryable) — the report page handles
-      // both, so send them there rather than trapping them in the room.
-      if (!(err instanceof ApiClientError) || err.code !== "report_in_progress") {
-        setError(err instanceof ApiClientError ? err.message : "Couldn't build the report.");
-      }
+    } catch {
+      // Swallowed deliberately. `processAnswer` already queued this session
+      // before it told us `done`, so the report is safe whatever happens here —
+      // /end only makes it faster. Nothing the candidate could do with the error
+      // anyway, and the report page reports the real state when they open it.
     }
-    router.push(`/report/${props.sessionId}`);
   }
 
   /**
@@ -151,6 +189,7 @@ export function HotSeat(props: Props) {
         session_id: props.sessionId,
         turn_index: turnIndex,
         text: text.trim(),
+        ...videoFields(),
       });
       await afterAnswer(res);
     };
@@ -182,6 +221,7 @@ export function HotSeat(props: Props) {
       form.append("session_id", props.sessionId);
       form.append("turn_index", String(turnIndex));
       form.append("audio", blob, `turn_${turnIndex}.webm`);
+      for (const [k, v] of Object.entries(videoFields())) form.append(k, String(v));
       const res = await apiPostForm<AnswerResponse>("/api/interview/answer", form);
       await afterAnswer(res);
     };
@@ -205,7 +245,9 @@ export function HotSeat(props: Props) {
     router.push("/dashboard");
   }
 
-  if (phase === "finishing") return <BuildingReport />;
+  if (phase === "finishing") {
+    return <ThankYou sessionId={props.sessionId} saving={finishVideo.current} />;
+  }
 
   return (
     // The room is a fixed pane, not a document: it is exactly the viewport and
@@ -214,29 +256,47 @@ export function HotSeat(props: Props) {
     // mid-answer is worse than a short scroll.
     <div className="flex h-dvh flex-col overflow-hidden bg-room text-room-ink">
       <GrillToaster />
-      {/* Unmounting is what releases the camera — see the cleanup in SelfView. */}
-      {cameraOn && <SelfView onClose={() => setCameraOn(false)} />}
+      {/* Purely a preview. Unmounting it no longer touches the camera — the
+          stream belongs to useSessionVideo, and the recording outlives this. */}
+      {pipOpen && video.stream && <SelfView stream={video.stream} onClose={() => setPipOpen(false)} />}
       {/* Room header: progress, and a way out. */}
       <header className="shrink-0 border-b border-room-line">
-        <div className="mx-auto flex max-w-3xl items-center justify-between gap-4 px-6 py-4">
-          <div className="min-w-0">
-            <p className="truncate text-sm font-medium">{props.role ?? "Interview"}</p>
-            <p className="tabular mt-0.5 font-mono text-xs text-room-muted">
+        {/* Wraps to two lines on a phone: title + controls, then the bar
+            across the full width. Unwrapped, the control cluster's `flex-1`
+            (basis 0 ⇒ scaled shrink factor 0 ⇒ cannot shrink) pinned it at its
+            134px min-content and left the bar 0px of the 327px available.
+            Above `sm` the order classes rebuild the original single row. */}
+        <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 sm:flex-nowrap sm:px-6 sm:py-4">
+          <div className="order-1 min-w-0 flex-1 sm:flex-none">
+            {/* The name the candidate gave this interview, with the role
+                demoted to a subtitle — the role is what the questions aim at,
+                but the name is what they called it. */}
+            <p className="truncate text-sm font-medium">
+              {props.name?.trim() || props.role?.trim() || "Interview"}
+            </p>
+            <p className="tabular mt-0.5 truncate font-mono text-xs text-room-muted">
               {Math.min(answered + 1, props.numQuestions)} / {props.numQuestions}
+              {props.name && props.role ? ` · ${props.role}` : ""}
             </p>
           </div>
-          <div className="flex flex-1 items-center gap-3">
-            <div className="h-1 flex-1 overflow-hidden rounded-full bg-room-line">
-              <div
-                className="h-full rounded-full bg-ember transition-[width] duration-500"
-                style={{ width: `${(answered / props.numQuestions) * 100}%` }}
-              />
-            </div>
-            <CameraToggle on={cameraOn} onClick={() => setCameraOn((c) => !c)} />
+          <div className="order-3 h-1 w-full overflow-hidden rounded-full bg-room-line sm:order-2 sm:w-auto sm:flex-1">
+            <div
+              className="h-full rounded-full bg-ember transition-[width] duration-500"
+              style={{ width: `${(answered / props.numQuestions) * 100}%` }}
+            />
+          </div>
+          <div className="order-2 flex shrink-0 items-center gap-3 sm:order-3">
+            <RecDot state={video.state} />
+            {video.stream && (
+              <CameraToggle on={pipOpen} onClick={() => setPipOpen((c) => !c)} />
+            )}
             <button
               onClick={quit}
               disabled={busy}
-              className="shrink-0 text-xs text-room-muted underline underline-offset-4 hover:text-room-ink disabled:opacity-50"
+              // The pseudo-element grows the touch target to ~49x44 without
+              // occupying a single pixel of layout — `min-h-11` here would tax
+              // the header's height on every viewport to fix a phone problem.
+              className="relative shrink-0 text-xs text-room-muted underline underline-offset-4 after:absolute after:-inset-x-2 after:-inset-y-3.5 after:content-[''] hover:text-room-ink disabled:opacity-50"
             >
               Leave
             </button>
@@ -329,7 +389,11 @@ export function HotSeat(props: Props) {
                   rec.reset();
                 }}
                 disabled={busy || rec.state === "recording"}
-                className="text-xs text-room-muted underline underline-offset-4 hover:text-room-ink disabled:opacity-40"
+                // ~113x44 touch target via the pseudo-element, with the type
+                // scale and the room's vertical rhythm both left alone. This is
+                // the only way out when the mic is unavailable, so it has to be
+                // hittable on a phone.
+                className="relative text-xs text-room-muted underline underline-offset-4 after:absolute after:-inset-x-2 after:-inset-y-3.5 after:content-[''] hover:text-room-ink disabled:opacity-40"
               >
                 {mode === "voice" ? "Type it instead" : "Answer out loud instead"}
               </button>
@@ -338,12 +402,55 @@ export function HotSeat(props: Props) {
         </div>
       </main>
 
-      <footer className="shrink-0 pb-6 text-center text-xs text-room-muted">
-        {mode === "voice"
-          ? "Spoken answers get delivery scoring — pace, pauses, fillers, tone."
-          : "Typed answers are scored on content only."}
+      {/* Recording is always on and there is no way to turn it off, so saying so
+          is the minimum this screen owes the candidate. The REC dot in the header
+          says it's happening; this says what happens to it. */}
+      <footer className="shrink-0 space-y-1 px-6 pb-6 text-center text-xs text-room-muted">
+        <p>
+          {mode === "voice"
+            ? "Spoken answers get delivery scoring — pace, pauses, fillers, tone."
+            : "Typed answers are scored on content only."}
+        </p>
+        {video.state === "recording" ? (
+          <p>This interview is being recorded so you can watch it back. Deleted after 100 days.</p>
+        ) : null}
       </footer>
     </div>
+  );
+}
+
+/**
+ * The recording indicator.
+ *
+ * There is no opt-out, so this is the only thing telling the candidate the
+ * camera is running — which makes it the honest minimum, not decoration. It also
+ * doubles as the answer to "is it actually working?", which is why a denied
+ * camera says so plainly rather than showing nothing.
+ */
+function RecDot({ state }: { state: ReturnType<typeof useSessionVideo>["state"] }) {
+  if (state === "starting") {
+    return <span className="font-mono text-[10px] tracking-wider text-room-muted">CAM…</span>;
+  }
+  if (state === "denied" || state === "failed") {
+    return (
+      <span
+        className="font-mono text-[10px] tracking-wider text-room-muted"
+        title={
+          state === "denied"
+            ? "Camera blocked — the interview still works, but the replay will have no video."
+            : "Camera unavailable — the interview still works, but the replay will have no video."
+        }
+      >
+        NO CAM
+      </span>
+    );
+  }
+  if (state !== "recording") return null;
+  return (
+    <span className="flex shrink-0 items-center gap-1.5" title="This interview is being recorded">
+      <span aria-hidden className="size-2 animate-pulse-rec rounded-full bg-weak" />
+      <span className="font-mono text-[10px] tracking-wider text-room-muted">REC</span>
+    </span>
   );
 }
 
@@ -526,15 +633,84 @@ function TextPanel({
   );
 }
 
-function BuildingReport() {
+/** How long the thank-you screen holds before it sends them to the dashboard. */
+const REDIRECT_MS = 5_000;
+
+/**
+ * The end of the interview.
+ *
+ * The report is built behind this screen now, not in front of it, so this says
+ * the interview is over and lets them leave rather than holding them hostage to
+ * a spinner. Five seconds, then the dashboard — where the session shows as
+ * scoring, and turns into a report when it's ready.
+ *
+ * The screen this replaced told them not to close the tab. That instruction is
+ * now a lie worth deleting: the session was queued server-side before the client
+ * was ever told the interview was over, so closing the tab costs nothing.
+ */
+function ThankYou({ sessionId, saving }: { sessionId: string; saving: Promise<void> | null }) {
+  const router = useRouter();
+  const [flushing, setFlushing] = useState(Boolean(saving));
+
+  /**
+   * The countdown starts only once the recording's tail is in R2.
+   *
+   * These two requirements fight: the last part of the video can only upload
+   * after the final answer, and it used to have a 30-120s synchronous report
+   * build to hide behind. Against a 5s redirect it would lose — a buffered tail
+   * on a slow uplink takes longer than that, and navigating away kills the
+   * in-flight PUTs. So the five seconds are counted from when the upload lands,
+   * not from when the screen appears. In the normal case the flush is already
+   * done and this is indistinguishable from a plain 5s wait.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const leave = () => {
+      if (!cancelled) timer = setTimeout(() => router.push("/dashboard"), REDIRECT_MS);
+    };
+    if (!saving) {
+      setFlushing(false);
+      leave();
+    } else {
+      // Never rejects — finish() swallows its own errors, leaving the parts in
+      // R2 for the salvage path rather than trapping the candidate here.
+      void saving.then(() => {
+        if (cancelled) return;
+        setFlushing(false);
+        leave();
+      });
+    }
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [saving, router]);
+
   return (
     <div className="flex min-h-dvh flex-col items-center justify-center bg-room px-6 text-center text-room-ink">
-      <span className="size-8 animate-spin rounded-full border-2 border-ember border-t-transparent" />
-      <h1 className="mt-6 font-display text-3xl tracking-tight">Reading you back</h1>
-      <p className="mt-2 max-w-sm text-sm leading-relaxed text-room-muted">
-        Scoring every answer and measuring how you sounded. This takes up to a minute — don&apos;t
-        close the tab.
-      </p>
+      <div className="animate-rise">
+        <h1 className="font-display text-4xl tracking-tight">That&apos;s the interview</h1>
+        <p className="mx-auto mt-3 max-w-sm text-sm leading-relaxed text-room-muted">
+          {flushing
+            ? "Saving the last of your recording — this only takes a moment."
+            : "You can close this — we're scoring every answer and measuring how you sounded. Your report will be waiting on the dashboard."}
+        </p>
+        <div className="mt-8 flex flex-col items-center gap-3">
+          <button
+            onClick={() => router.push(`/report/${sessionId}`)}
+            className="rounded-full bg-ember px-6 py-2.5 text-sm font-medium text-paper transition-colors hover:bg-ember-hot"
+          >
+            Wait for it
+          </button>
+          <button
+            onClick={() => router.push("/dashboard")}
+            className="text-xs text-room-muted underline underline-offset-4 hover:text-room-ink"
+          >
+            Go to the dashboard now
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

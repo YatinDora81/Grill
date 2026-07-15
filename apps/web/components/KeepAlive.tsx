@@ -3,19 +3,24 @@
 import { useEffect } from "react";
 
 /**
- * Keeps the Python acoustics service warm.
+ * Keeps the Python acoustics service (Render) warm.
  *
- * Free-tier hosts idle a service out after ~15 minutes and then take 30s+ to
- * cold-start. That's survivable on the dashboard; it is not survivable when it
- * happens between two answers, because the report is built the moment the last
- * one lands. So every page pings — the interview isn't the only place that
- * matters, it's just the worst place to discover the service is asleep.
+ * Render idles a free service out after ~15 minutes and then takes 30s+ to cold
+ * start. That's survivable on the dashboard; it is not survivable mid-interview,
+ * where a cold start lands on the answer the candidate just recorded. So every
+ * page pings — the interview isn't the only place that matters, it's just the
+ * worst place to discover the service is asleep.
+ *
+ * 10s costs ~360 requests per hour per open tab, and since this proxies through
+ * a Next route, on Vercel each one is a billable function invocation. That is
+ * far more often than Render's ~15 minute idle timeout needs — the headroom is
+ * deliberate, so a run of failed pings still can't let the service fall asleep.
  *
  * Fire-and-forget by design: the ping's only job is to arrive. A failure means
  * the service is down or waking, which the page can do nothing about and the
  * user should never see.
  */
-const PING_MS = 5_000;
+const PING_MS = 10_000;
 
 export function KeepAlive() {
   useEffect(() => {
