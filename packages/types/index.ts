@@ -76,7 +76,7 @@ export type InterviewStage =
   | "intro_followup"
   /** Their actual history. */
   | "resume"
-  /** Fundamentals, pitched at their years of experience. */
+  /** Fundamentals, pitched at the stated difficulty. */
   | "concepts"
   /** Where it gets hard: trade-offs, failure, judgement. */
   | "depth"
