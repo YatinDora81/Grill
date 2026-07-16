@@ -3,6 +3,11 @@ import "server-only";
  * Data access. Thin wrappers over the shared Prisma client (@repo/db).
  * HARD RULE #11: every session/report query filters on the authenticated
  * user_id — a user can only ever touch their own data.
+ *
+ * Soft-delete: a session with `deletedAt` set must be treated as if it never
+ * existed for the user — dashboard, reports, media, starring links, and especially
+ * the do-not-reuse / weak_spots question lists. Retention sweeps may still see
+ * deleted rows; every user-facing read uses `aliveSession` below.
  */
 import { createHash } from "node:crypto";
 import { prisma, Prisma } from "@repo/db";
@@ -17,6 +22,9 @@ import type {
 } from "@repo/types";
 
 const json = (v: unknown) => v as Prisma.InputJsonValue;
+
+/** Nested under `session: { … }` or as a session `where` — not soft-deleted. */
+const aliveSession = { deletedAt: null } as const;
 
 // ── Users ─────────────────────────────────────────────────────────
 export function getUserByEmail(email: string) {
@@ -100,14 +108,43 @@ export async function copyQuestionsInto(
 export function getRetryParent(session: { retryOfId: string | null }, userId: string) {
   if (!session.retryOfId) return Promise.resolve(null);
   return prisma.session.findFirst({
-    where: { id: session.retryOfId, userId },
+    where: { id: session.retryOfId, userId, ...aliveSession },
     include: { report: true },
   });
 }
 
-/** Fetch a session that belongs to this user (null otherwise). */
+/** Fetch a session that belongs to this user (null otherwise). Soft-deleted rows are invisible. */
 export function getSession(id: string, userId: string) {
-  return prisma.session.findFirst({ where: { id, userId } });
+  return prisma.session.findFirst({ where: { id, userId, ...aliveSession } });
+}
+
+/**
+ * Soft-delete an interview. Rows stay (turns, report, media keys) so retention
+ * sweeps can still run; every user-facing read filters `deletedAt: null`.
+ *
+ * Stars keep the question text but lose the link back — same as a hard delete's
+ * SetNull on `turnId` — so the collection doesn't point at a ghost report.
+ */
+export async function softDeleteSession(id: string, userId: string): Promise<boolean> {
+  return prisma.$transaction(async (tx) => {
+    const { count } = await tx.session.updateMany({
+      where: { id, userId, ...aliveSession },
+      data: { deletedAt: new Date() },
+    });
+    if (count !== 1) return false;
+
+    const turns = await tx.turn.findMany({
+      where: { sessionId: id },
+      select: { id: true },
+    });
+    if (turns.length) {
+      await tx.starredQuestion.updateMany({
+        where: { turnId: { in: turns.map((t) => t.id) } },
+        data: { turnId: null },
+      });
+    }
+    return true;
+  });
 }
 
 export function setStatus(id: string, status: SessionStatus, errorReason: string | null = null) {
@@ -160,15 +197,35 @@ export function unstarQuestion(userId: string, hash: string) {
   return prisma.starredQuestion.deleteMany({ where: { userId, questionHash: hash } });
 }
 
-export function listStarredQuestions(userId: string) {
-  return prisma.starredQuestion.findMany({
+export async function listStarredQuestions(userId: string) {
+  const rows = await prisma.starredQuestion.findMany({
     where: { userId },
     orderBy: { createdAt: "desc" },
     include: {
-      // Null once the source interview is deleted — the star survives it.
-      turn: { select: { sessionId: true, turnIndex: true } },
+      // Soft-deleted sessions still have Turn rows; hide the link so the star
+      // behaves as if that interview never existed.
+      turn: {
+        select: {
+          sessionId: true,
+          turnIndex: true,
+          session: { select: { deletedAt: true } },
+        },
+      },
     },
   });
+  return rows.map((r) => ({
+    id: r.id,
+    userId: r.userId,
+    question: r.question,
+    questionType: r.questionType,
+    questionHash: r.questionHash,
+    turnId: r.turnId,
+    createdAt: r.createdAt,
+    turn:
+      r.turn && r.turn.session.deletedAt === null
+        ? { sessionId: r.turn.sessionId, turnIndex: r.turn.turnIndex }
+        : null,
+  }));
 }
 
 /** Which of these questions are already starred, as a set of hashes. */
@@ -184,7 +241,7 @@ export async function starredHashesFor(userId: string, questions: string[]): Pro
 /** A turn, scoped to its owner (HARD RULE #11) — starring needs both. */
 export function getTurnForUser(turnId: string, userId: string) {
   return prisma.turn.findFirst({
-    where: { id: turnId, session: { userId } },
+    where: { id: turnId, session: { userId, ...aliveSession } },
     select: { id: true, question: true, questionType: true },
   });
 }
@@ -204,7 +261,9 @@ export function createSessionVideo(input: {
 
 /** User-scoped (HARD RULE #11): another user's video id is simply not found. */
 export function getSessionVideo(id: string, userId: string) {
-  return prisma.sessionVideo.findFirst({ where: { id, session: { userId } } });
+  return prisma.sessionVideo.findFirst({
+    where: { id, session: { userId, ...aliveSession } },
+  });
 }
 
 /** Recordings for a session that never got completed — an upload that died. */
@@ -317,6 +376,7 @@ export async function claimReportLease(sessionId: string): Promise<Session | nul
   const { count } = await prisma.session.updateMany({
     where: {
       id: sessionId,
+      ...aliveSession,
       status: "generating_report",
       reportAttempts: { lt: MAX_REPORT_ATTEMPTS },
       // Free, or the previous holder's lease has run out (it died).
@@ -357,6 +417,7 @@ export function listStrandedReportSessions(take = 25) {
   const now = new Date();
   return prisma.session.findMany({
     where: {
+      ...aliveSession,
       status: "generating_report",
       report: { is: null },
       reportAttempts: { gte: MAX_REPORT_ATTEMPTS },
@@ -378,6 +439,7 @@ export function listPendingReportSessions(take = 25) {
   const now = new Date();
   return prisma.session.findMany({
     where: {
+      ...aliveSession,
       status: "generating_report",
       report: { is: null },
       reportAttempts: { lt: MAX_REPORT_ATTEMPTS },
@@ -464,6 +526,7 @@ export interface CreateReportInput {
   bestAnswer: unknown;
   worstAnswer: unknown;
   nextSteps: unknown;
+  questionFeedback: unknown;
   raw: unknown;
 }
 
@@ -483,6 +546,7 @@ export function createReport(input: CreateReportInput) {
     bestAnswer: input.bestAnswer ? json(input.bestAnswer) : Prisma.JsonNull,
     worstAnswer: input.worstAnswer ? json(input.worstAnswer) : Prisma.JsonNull,
     nextSteps: json(input.nextSteps),
+    questionFeedback: json(input.questionFeedback ?? []),
     raw: json(input.raw),
   };
   return prisma.report.upsert({
@@ -508,6 +572,9 @@ export async function getReportForUser(sessionId: string, userId: string) {
  * Every question this user has already been asked, newest first. Feeds the
  * do-not-reuse list when "repeat questions" is off.
  *
+ * Soft-deleted interviews are omitted entirely — deleting an interview means
+ * those questions may be asked again (as if that session never happened).
+ *
  * Capped: someone practising weekly racks up hundreds of questions, and the
  * whole list would be pasted into every prompt — that's real tokens on every
  * turn, for questions they last saw months ago. The recent ones are the ones
@@ -515,7 +582,7 @@ export async function getReportForUser(sessionId: string, userId: string) {
  */
 export async function listAskedQuestions(userId: string, take = 60): Promise<string[]> {
   const turns = await prisma.turn.findMany({
-    where: { session: { userId } },
+    where: { session: { userId, ...aliveSession } },
     orderBy: { createdAt: "desc" },
     take,
     select: { question: true },
@@ -532,12 +599,13 @@ export interface WeakTurn {
 
 /**
  * Answered turns this user scored worst on — the raw material for `weak_spots`.
+ * Soft-deleted interviews are ignored (same as listAskedQuestions).
  * Only turns with both a transcript and scores can be judged, and scoring is
  * done here rather than in SQL because answer_scores is a JSON blob.
  */
 export async function listWeakTurns(userId: string, take = 8): Promise<WeakTurn[]> {
   const turns = await prisma.turn.findMany({
-    where: { session: { userId }, transcript: { not: null } },
+    where: { session: { userId, ...aliveSession }, transcript: { not: null } },
     orderBy: { createdAt: "desc" },
     take: 120,
     select: { question: true, questionType: true, transcript: true, answerScores: true },
@@ -569,7 +637,7 @@ export async function listWeakTurns(userId: string, take = 8): Promise<WeakTurn[
 
 export function listUserSessions(userId: string, take = 10) {
   return prisma.session.findMany({
-    where: { userId },
+    where: { userId, ...aliveSession },
     orderBy: { createdAt: "desc" },
     take,
     include: { report: { select: { overallScore: true } } },
@@ -578,7 +646,7 @@ export function listUserSessions(userId: string, take = 10) {
 
 export function listUserReports(userId: string) {
   return prisma.report.findMany({
-    where: { session: { userId } },
+    where: { session: { userId, ...aliveSession } },
     orderBy: { createdAt: "asc" },
     select: { overallScore: true, createdAt: true },
   });

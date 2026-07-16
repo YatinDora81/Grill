@@ -291,6 +291,12 @@ const highlightSchema = z.object({
   why: z.string(),
 });
 
+const questionFeedbackSchema = z.object({
+  turn_index: z.coerce.number().int(),
+  possible_answers: z.array(z.string()).default([]),
+  improvements: z.array(z.string()).default([]),
+});
+
 export const reportResponseSchema = z.object({
   overall_score: z.coerce.number().min(0).max(100),
   verdict: z.string().min(1),
@@ -306,6 +312,7 @@ export const reportResponseSchema = z.object({
   best_answer: highlightSchema.nullable().default(null),
   worst_answer: highlightSchema.nullable().default(null),
   next_steps: z.array(z.string()).default([]),
+  question_feedback: z.array(questionFeedbackSchema).default([]),
 });
 
 export type QuestionResponse = z.infer<typeof questionResponseSchema>;

@@ -107,6 +107,7 @@ export async function buildAndSaveReport(session: Session) {
     bestAnswer: value.best_answer,
     worstAnswer: value.worst_answer,
     nextSteps: value.next_steps,
+    questionFeedback: value.question_feedback,
     raw: { report: value, raw_text: raw },
   });
 }

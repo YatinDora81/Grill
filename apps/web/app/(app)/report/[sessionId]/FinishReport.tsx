@@ -6,6 +6,7 @@ import type { EndResponse } from "@repo/types";
 import { apiGet, apiPost, ApiClientError } from "@/lib/apiClient";
 import type { ReportStatusResponse } from "@/app/api/report/[sessionId]/status/route";
 import { Button, Card, ErrorNote, Spinner } from "@/components/ui";
+import { DeleteInterviewButton } from "./DeleteInterviewButton";
 
 /** Gap between polls. Builds take ~30s, so this is ~12 cheap requests. */
 const POLL_MS = 2_500;
@@ -119,7 +120,7 @@ export function FinishReport({ sessionId }: { sessionId: string }) {
         )}
 
         {stopped ? (
-          <div className="mt-6 flex justify-center">
+          <div className="mt-6 flex flex-wrap justify-center gap-3">
             <Button
               size="lg"
               onClick={() => {
@@ -131,6 +132,7 @@ export function FinishReport({ sessionId }: { sessionId: string }) {
             >
               Try again
             </Button>
+            <DeleteInterviewButton sessionId={sessionId} />
           </div>
         ) : null}
 

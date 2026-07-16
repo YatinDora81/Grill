@@ -135,3 +135,10 @@ test("the system prompt tells the model that NOT MEASURED means absent, not zero
   // the transcript — without that bar it would just infer the pace it wasn't given.
   expect(REPORT_SYSTEM).toContain("NEVER infer tone/confidence from the transcript text");
 });
+
+test("the report prompt asks for per-question possible answers and improvements", () => {
+  const p = build(FULL);
+  expect(p).toContain("question_feedback");
+  expect(p).toContain("possible_answers");
+  expect(p).toContain("improvements");
+});

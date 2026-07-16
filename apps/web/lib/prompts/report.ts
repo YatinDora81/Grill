@@ -84,7 +84,10 @@ ${body}
 
 ${deliveryBlock(delivery)}
 
-Write the final report. The verdict must be one honest sentence. Return JSON:
+Write the final report. The verdict must be one honest sentence. For every answered
+turn, include coaching in question_feedback: 1–3 possible_answers (strong example
+answers or angles — not a transcript of theirs), and 1–4 improvements (concrete
+things to change or add in THEIR answer). Return JSON:
 {
   "overall_score": number,                       // 0-100
   "verdict": string,                             // one honest sentence
@@ -93,6 +96,13 @@ Write the final report. The verdict must be one honest sentence. Return JSON:
   "weaknesses": [ { "point": string, "example": string, "fix": string } ],
   "best_answer":  { "turn_index": number, "quote": string, "why": string },
   "worst_answer": { "turn_index": number, "quote": string, "why": string },
-  "next_steps": [ string ]
+  "next_steps": [ string ],
+  "question_feedback": [
+    {
+      "turn_index": number,
+      "possible_answers": [ string ],             // strong example answers / angles
+      "improvements": [ string ]                  // what to change or add in their answer
+    }
+  ]
 }`;
 }

@@ -15,7 +15,9 @@ import { questionResponseSchema, type QuestionResponse } from "@/lib/schemas";
  *
  * - Past questions, unless they opted into repeats. This is a repeat-practice
  *   tool: the same résumé must not produce the same interview twice.
- * - Weak answers, only for `weak_spots` — that mode is entirely about them.
+ *   Soft-deleted interviews do not count — those questions are fair game again.
+ * - Weak answers, only for `weak_spots` — that mode is entirely about them
+ *   (also ignoring soft-deleted sessions).
  */
 export async function questionInputs(
   ctx: SessionContext,

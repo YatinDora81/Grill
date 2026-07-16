@@ -1,4 +1,4 @@
-import type { QuestionType } from "@repo/types";
+import type { QuestionFeedback, QuestionType } from "@repo/types";
 import { Card, Eyebrow, cx } from "@/components/ui";
 import { PlayAnswer } from "./PlayAnswer";
 import { WatchAnswer } from "./WatchAnswer";
@@ -17,6 +17,7 @@ export interface ReplayTurn {
   /** Computed server-side so the star paints correctly on first render. */
   question_hash: string;
   starred: boolean;
+  feedback: QuestionFeedback | null;
 }
 
 const TYPE_LABEL: Record<QuestionType, string> = {
@@ -29,8 +30,8 @@ const TYPE_LABEL: Record<QuestionType, string> = {
 
 /**
  * The whole interview, in order: what was asked, what you actually said, and
- * the recording. The scores tell you how it went; this is the only place that
- * shows you *what you said* — which is the thing worth re-reading.
+ * the recording. Per-question coaching (possible answers + improvements) sits
+ * in accordions under each turn when the report has them.
  */
 export function Replay({ sessionId, turns }: { sessionId: string; turns: ReplayTurn[] }) {
   if (!turns.length) return null;
@@ -73,9 +74,70 @@ export function Replay({ sessionId, turns }: { sessionId: string; turns: ReplayT
             >
               {t.transcript || "No answer recorded."}
             </p>
+
+            <TurnCoaching feedback={t.feedback} />
           </Card>
         ))}
       </ol>
     </section>
+  );
+}
+
+function TurnCoaching({ feedback }: { feedback: QuestionFeedback | null }) {
+  if (!feedback) return null;
+  const answers = feedback.possible_answers.filter(Boolean);
+  const improvements = feedback.improvements.filter(Boolean);
+  if (!answers.length && !improvements.length) return null;
+
+  return (
+    <div className="mt-4 space-y-2">
+      {answers.length > 0 ? (
+        <details className="group rounded-xl border border-line bg-paper-sunken/40 open:bg-paper-sunken/60">
+          <summary className="cursor-pointer list-none px-4 py-3 text-sm font-medium text-ink-soft marker:content-none [&::-webkit-details-marker]:hidden">
+            <span className="flex items-center justify-between gap-3">
+              Possible answers
+              <span className="font-mono text-[11px] text-ink-muted group-open:hidden">show</span>
+              <span className="hidden font-mono text-[11px] text-ink-muted group-open:inline">
+                hide
+              </span>
+            </span>
+          </summary>
+          <ul className="space-y-3 border-t border-line px-4 py-3">
+            {answers.map((a, i) => (
+              <li key={i} className="flex gap-3 text-sm leading-relaxed text-ink-soft">
+                <span className="shrink-0 font-mono text-[11px] text-ember">
+                  {String(i + 1).padStart(2, "0")}
+                </span>
+                <span>{a}</span>
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+
+      {improvements.length > 0 ? (
+        <details className="group rounded-xl border border-line bg-paper-sunken/40 open:bg-paper-sunken/60">
+          <summary className="cursor-pointer list-none px-4 py-3 text-sm font-medium text-ink-soft marker:content-none [&::-webkit-details-marker]:hidden">
+            <span className="flex items-center justify-between gap-3">
+              How to improve your answer
+              <span className="font-mono text-[11px] text-ink-muted group-open:hidden">show</span>
+              <span className="hidden font-mono text-[11px] text-ink-muted group-open:inline">
+                hide
+              </span>
+            </span>
+          </summary>
+          <ul className="space-y-3 border-t border-line px-4 py-3">
+            {improvements.map((tip, i) => (
+              <li key={i} className="flex gap-3 text-sm leading-relaxed text-ink-soft">
+                <span className="shrink-0 font-mono text-[11px] text-ember">
+                  {String(i + 1).padStart(2, "0")}
+                </span>
+                <span>{tip}</span>
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+    </div>
   );
 }

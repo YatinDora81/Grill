@@ -237,6 +237,15 @@ export interface AnswerHighlight {
   why: string;
 }
 
+/** Per-question coaching attached to the report — possible answers + improvements. */
+export interface QuestionFeedback {
+  turn_index: number;
+  /** Strong example answers for this question (can be several angles). */
+  possible_answers: string[];
+  /** Concrete things to change or add in the candidate's own answer. */
+  improvements: string[];
+}
+
 export interface Report {
   id: string;
   session_id: string;
@@ -249,7 +258,13 @@ export interface Report {
   best_answer: AnswerHighlight | null;
   worst_answer: AnswerHighlight | null;
   next_steps: string[];
+  question_feedback: QuestionFeedback[];
   created_at: string;
+}
+
+export interface DeleteSessionResponse {
+  session_id: string;
+  deleted: true;
 }
 
 export interface ProgressEntry {

@@ -6,6 +6,7 @@ import { getUserId } from "@/lib/auth";
 import * as repo from "@/lib/db/repo";
 import { settleUnfinishedVideos } from "@/lib/services/videoService";
 import { ButtonLink, Card, ScoreMeter, cx, scoreTone } from "@/components/ui";
+import { DeleteInterviewButton } from "./DeleteInterviewButton";
 import { Delivery } from "./Delivery";
 import { FinishReport } from "./FinishReport";
 import { PlayAnswer } from "./PlayAnswer";
@@ -58,8 +59,13 @@ export default async function ReportPage({
     best_answer: row.bestAnswer as unknown as ReportDTO["best_answer"],
     worst_answer: row.worstAnswer as unknown as ReportDTO["worst_answer"],
     next_steps: row.nextSteps as unknown as ReportDTO["next_steps"],
+    question_feedback: (row.questionFeedback as unknown as ReportDTO["question_feedback"]) ?? [],
     created_at: row.createdAt.toISOString(),
   };
+
+  const feedbackByTurn = new Map(
+    report.question_feedback.map((f) => [f.turn_index, f] as const),
+  );
 
   // Which turns were spoken — a typed answer has nothing to play back.
   const turns = await repo.getTurns(sessionId);
@@ -235,6 +241,7 @@ export default async function ReportPage({
             video_offset_ms: t.videoOffsetMs,
             question_hash: hash,
             starred: starredHashes.has(hash),
+            feedback: feedbackByTurn.get(t.turnIndex) ?? null,
           };
         })}
       />
@@ -247,6 +254,7 @@ export default async function ReportPage({
         <ButtonLink href="/dashboard" variant="secondary">
           Back to dashboard
         </ButtonLink>
+        <DeleteInterviewButton sessionId={sessionId} />
       </div>
     </main>
   );

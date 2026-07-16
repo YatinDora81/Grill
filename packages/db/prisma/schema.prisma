@@ -108,6 +108,13 @@ model Session {
   /// exchange for not carrying a row per clip.
   audioPurgedAt DateTime? @map("audio_purged_at") @db.Timestamptz(6)
 
+  /// Soft delete. Set when the user removes the interview from their history.
+  /// Rows stay (turns, report, media) so retention can still run later.
+  /// User-facing reads treat these as gone — including do-not-reuse /
+  /// weak_spots question lists — so deleting an interview makes those
+  /// questions askable again.
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
   user   User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   turns  Turn[]
   report Report?
@@ -118,6 +125,7 @@ model Session {
   @@index([retryOfId])
   /// The audio sweep's only query: old enough to expire, not yet purged.
   @@index([audioPurgedAt, createdAt])
+  @@index([userId, deletedAt])
   @@map("sessions")
 }
 
@@ -235,6 +243,8 @@ model Report {
   bestAnswer      Json?    @map("best_answer")
   worstAnswer     Json?    @map("worst_answer")
   nextSteps       Json     @map("next_steps")
+  /// Per-turn coaching: possible answers + what to improve, keyed by turn_index.
+  questionFeedback Json    @default("[]") @map("question_feedback")
   raw             Json
   createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
