@@ -36,8 +36,15 @@ jobs:
       # pkg-config and pixman. It is optional because unpdf works without it, so
       # skipping it keeps `bun install` from failing the job over a dependency
       # nothing here uses.
+      #
+      # The same flag also drops lightningcss / @tailwindcss/oxide platform
+      # binaries, which next build needs — reinstall just those for this runner.
       - name: Install
-        run: bun install --frozen-lockfile --omit=optional
+        run: |
+          bun install --frozen-lockfile --omit=optional
+          bun add --no-save \
+            lightningcss-linux-x64-gnu@1.32.0 \
+            @tailwindcss/oxide-linux-x64-gnu@4.3.2
 
       - name: Lint
         run: bun run lint
