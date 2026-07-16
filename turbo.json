@@ -33,6 +33,10 @@
       "inputs": ["$TURBO_DEFAULT$", ".env*"],
       "outputs": [".next/**", "!.next/cache/**", "!.next/dev/**"]
     },
+    "@repo/db#build": {
+      "inputs": ["prisma/**", "prisma.config.ts", "package.json"],
+      "outputs": ["generated/**"]
+    },
     "lint": {
       "dependsOn": ["^lint"]
     },
