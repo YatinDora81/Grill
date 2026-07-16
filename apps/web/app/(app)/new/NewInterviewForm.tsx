@@ -2,16 +2,15 @@
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { ExclusiveMode, InterviewSource, StartResponse } from "@repo/types";
+import type { Difficulty, ExclusiveMode, InterviewSource, StartResponse } from "@repo/types";
 import { apiPost, apiPostForm, ApiClientError } from "@/lib/apiClient";
 import {
+  DIFFICULTIES,
+  DIFFICULTY_META,
   MODE_META,
   QUESTION_BOUNDS,
-  SENIORITY_LADDER,
   SOURCE_META,
-  YEAR_BOUNDS,
   perAnswerCapSeconds,
-  seniorityFor,
 } from "@/lib/interviewMeta";
 
 import {
@@ -27,7 +26,7 @@ import {
 } from "@/components/ui";
 
 const SOURCES: InterviewSource[] = ["resume", "topic", "cultural"];
-const MODES: ExclusiveMode[] = ["jd", "real", "topic_only", "weak_spots"];
+const MODES: ExclusiveMode[] = ["jd", "real", "topic_only", "cultural_only", "weak_spots"];
 
 /** Roughly how long an interview of N questions runs. */
 function estimateMinutes(n: number): number {
@@ -55,7 +54,7 @@ export function NewInterviewForm() {
   const [numQuestions, setNumQuestions] = useState(8);
   // What the server will derive for this count. Cheap enough to just recompute.
   const answerCap = perAnswerCapSeconds(numQuestions);
-  const [years, setYears] = useState(6);
+  const [difficulty, setDifficulty] = useState<Difficulty>("medium");
   // Off by default: this is a practice tool, so running the same résumé twice
   // must not produce the same interview twice.
   const [allowRepeats, setAllowRepeats] = useState(false);
@@ -165,7 +164,7 @@ export function NewInterviewForm() {
         ...(role.trim() ? { role: role.trim() } : {}),
         config: {
           num_questions: numQuestions,
-          years_experience: years,
+          difficulty,
           sources,
           mode,
           allow_repeats: allowRepeats,
@@ -331,7 +330,8 @@ export function NewInterviewForm() {
         </div>
 
         <p className="text-xs text-ink-muted">
-          These bring their own shape, so they run on their own.
+          These bring their own shape, so they run on their own. Cultural only
+          ignores your résumé — use it for a pure culture-fit screen.
         </p>
         <div className="mt-2.5 grid gap-2 sm:grid-cols-2">
           {MODES.map((m) => (
@@ -409,7 +409,7 @@ export function NewInterviewForm() {
           />
         </Field>
 
-        <Level years={years} onChange={setYears} />
+        <DifficultyPicker value={difficulty} onChange={setDifficulty} />
 
         <div>
           <div className="mb-2 flex items-baseline justify-between gap-3">
@@ -525,84 +525,60 @@ function Mark({ selected, round }: { selected: boolean; round: boolean }) {
   );
 }
 
-/** Where a given year sits along the track, 0–100. */
-function yearPct(years: number): number {
-  return ((years - YEAR_BOUNDS.min) / (YEAR_BOUNDS.max - YEAR_BOUNDS.min)) * 100;
-}
-
 /**
- * The track's colour bands, each ending halfway between its last year and the
- * next rung's first — the same rounding the thumb does, so the two agree.
+ * Easy → Extreme. Colour is the signal: green is warm-up, red is a promise the
+ * questions will be brutal — not a flattering job title.
  */
-const RAMP_STOPS = SENIORITY_LADDER.flatMap((rung, i) => {
-  const start = i === 0 ? 0 : yearPct(SENIORITY_LADDER[i - 1]!.maxYears + 0.5);
-  const end = i === SENIORITY_LADDER.length - 1 ? 100 : yearPct(rung.maxYears + 0.5);
-  return [`${rung.color} ${start}%`, `${rung.color} ${end}%`];
-}).join(", ");
-
-/**
- * Years of experience, 1–20.
- *
- * The rung label and its colour are the point: nobody knows what "level 14"
- * means, but everyone knows what Principal means, and the green→red ramp says
- * plainly that this is a dial for how hard you want it — not a boast.
- */
-function Level({ years, onChange }: { years: number; onChange: (v: number) => void }) {
-  const rung = seniorityFor(years);
-  const pct = yearPct(years);
-
+function DifficultyPicker({
+  value,
+  onChange,
+}: {
+  value: Difficulty;
+  onChange: (d: Difficulty) => void;
+}) {
+  const meta = DIFFICULTY_META[value];
   return (
     <div>
       <div className="mb-2 flex items-baseline justify-between gap-3">
-        <label htmlFor="years" className="block text-sm font-medium">
-          Level
-        </label>
-        <span className="flex items-baseline gap-2">
-          <span
-            className="rounded-full px-2 py-0.5 font-mono text-[11px] font-medium tracking-wide"
-            style={{ backgroundColor: `${rung.color}1f`, color: rung.color }}
-          >
-            {rung.label}
-          </span>
-          <span className="tabular font-mono text-sm text-ink-soft">
-            {years} {years === 1 ? "yr" : "yrs"}
-          </span>
+        <span className="block text-sm font-medium">Difficulty</span>
+        <span
+          className="rounded-full px-2 py-0.5 font-mono text-[11px] font-medium tracking-wide"
+          style={{ backgroundColor: `${meta.color}1f`, color: meta.color }}
+        >
+          {meta.label}
         </span>
       </div>
-
-      <div className="relative">
-        {/* The ramp is the track, in hard bands rather than a smooth blend: the
-            thumb has to sit on the exact colour of the rung it selects, and the
-            rungs aren't evenly spaced (they end at 2, 5, 9, 13, 17, 20 years).
-            An evenly-spaced gradient puts an amber "Senior" thumb over lime
-            track, which reads as a bug in the control. */}
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 rounded-full"
-          style={{ background: `linear-gradient(to right, ${RAMP_STOPS})` }}
-        />
-        <div
-          aria-hidden
-          className="pointer-events-none absolute top-1/2 h-1.5 -translate-y-1/2 rounded-r-full bg-paper-sunken"
-          style={{ left: `${pct}%`, right: 0 }}
-        />
-        <input
-          id="years"
-          type="range"
-          min={YEAR_BOUNDS.min}
-          max={YEAR_BOUNDS.max}
-          value={years}
-          onChange={(e) => onChange(Number(e.target.value))}
-          aria-valuetext={`${years} years — ${rung.label}`}
-          // The thumb needs an explicit background: styling it without one
-          // leaves the browser's default accent square showing through the ring.
-          // It carries the rung's own colour, so it reads as a bead riding the
-          // ramp rather than a control painted on top of one.
-          className="relative w-full appearance-none bg-transparent [&::-webkit-slider-runnable-track]:h-1.5 [&::-webkit-slider-runnable-track]:bg-transparent [&::-webkit-slider-thumb]:mt-[-7px] [&::-webkit-slider-thumb]:size-5 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-paper [&::-webkit-slider-thumb]:bg-[var(--thumb)] [&::-webkit-slider-thumb]:shadow-[0_2px_8px_rgba(0,0,0,0.5)] [&::-moz-range-thumb]:size-5 [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-2 [&::-moz-range-thumb]:border-paper [&::-moz-range-thumb]:bg-[var(--thumb)]"
-          style={{ "--thumb": rung.color } as React.CSSProperties}
-        />
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" role="radiogroup" aria-label="Difficulty">
+        {DIFFICULTIES.map((d) => {
+          const m = DIFFICULTY_META[d];
+          const selected = value === d;
+          return (
+            <button
+              key={d}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              onClick={() => onChange(d)}
+              className={cx(
+                "rounded-xl border px-3 py-2.5 text-left transition-colors",
+                selected
+                  ? "border-ember bg-ember-soft"
+                  : "border-line text-ink-soft hover:border-line-strong hover:bg-paper-sunken",
+              )}
+            >
+              <span className="flex items-center gap-2">
+                <span
+                  aria-hidden
+                  className="size-2.5 shrink-0 rounded-full"
+                  style={{ backgroundColor: m.color }}
+                />
+                <span className={cx("text-sm", selected && "font-medium text-ink")}>{m.label}</span>
+              </span>
+            </button>
+          );
+        })}
       </div>
-      <p className="mt-1.5 text-xs text-ink-muted">{rung.blurb}</p>
+      <p className="mt-1.5 text-xs text-ink-muted">{meta.blurb}</p>
     </div>
   );
 }

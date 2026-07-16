@@ -6,7 +6,7 @@ import type {
   QuestionType,
   SourceType,
 } from "@repo/types";
-import { seniorityLabel } from "@/lib/interviewMeta";
+import { DIFFICULTY_META, difficultyLabel } from "@/lib/interviewMeta";
 
 export interface WeakSpot {
   question: string;
@@ -35,28 +35,36 @@ export interface QuestionInputs {
  * the brief just asked to be about people.
  */
 export function questionSystem(c: InterviewConfig): string {
-  const role = culturalOnly(c)
-    ? "a sharp, fair interviewer running a mock behavioural interview"
-    : "a sharp, fair technical interviewer running a mock interview";
-  return `You are ${role}.
+  if (culturalOnly(c)) {
+    return `You are a sharp, fair interviewer running a culture-fit / behavioural interview.
+Ask ONE question at a time about how this person works with people, takes feedback, handles
+pressure, and decides what kind of workplace they thrive in.
+Pitch every question at the stated difficulty, and follow the interview brief.
+Do not ask about systems, code, architecture, or résumé projects. Do not answer for the candidate.
+
+${CULTURAL_QUALITY_BAR}
+
+Respond with JSON only — no prose, no code fences.`;
+  }
+  return `You are a sharp, fair technical interviewer running a mock interview.
 Ask ONE question at a time. Questions must be specific and grounded in the provided context.
-Pitch every question at the candidate's stated years of experience, and follow the interview brief.
+Pitch every question at the stated difficulty, and follow the interview brief.
 Do not answer for the candidate.
 
-${QUALITY_BAR}
+${TECHNICAL_QUALITY_BAR}
 
 Respond with JSON only — no prose, no code fences.`;
 }
 
 /**
- * The bar a question has to clear.
+ * The bar a technical / résumé interview question has to clear.
  *
  * Left to itself the model writes the interview question it has seen most often
  * — stock, compound, and answerable by anyone — because nothing in the prompt
  * ever said what a bad question looks like. Naming the failure modes is what
  * moves it; "ask a good question" does not.
  */
-const QUALITY_BAR = `A question earns its place only if it clears all of this:
+const TECHNICAL_QUALITY_BAR = `A question earns its place only if it clears all of this:
 - It names something concrete from the context — this system, that project, that
   decision. If the question could be asked of any other candidate unchanged, it is
   the wrong question. No stock prompts ("greatest strength", "where do you see
@@ -69,6 +77,24 @@ const QUALITY_BAR = `A question earns its place only if it clears all of this:
 - No preamble, no praise, no "great answer" — the question text is the question only.`;
 
 /**
+ * Culture-fit interviews are about the person, not the stack. The technical bar
+ * above demands project grounding; handed a résumé it quietly rewrites every
+ * "how do you work" ask into "tell me about that Postgres ledger". This bar is
+ * the opposite: situations, values, working style — never systems.
+ */
+const CULTURAL_QUALITY_BAR = `A question earns its place only if it clears all of this:
+- It is about people, values, or working style — not technology. Forbidden topics:
+  how a system works, why something broke technically, architecture, languages,
+  frameworks, or "walk me through a project on your résumé".
+- It forces a real choice or a real story: preferred environment, feedback style,
+  conflict, motivation under pressure, what would make them leave, how they push
+  for change. Vague fluff ("are you a team player?") is a failed question.
+- It cannot be answered yes/no. Dig into why, what they'd do, what it cost them
+  or the people around them.
+- It doesn't telegraph the "right" corporate answer.
+- No preamble, no praise — the question text is the question only.`;
+
+/**
  * Follow-ups are where a cultural interview leaks back into a technical one.
  *
  * Source-aware angles only govern the *new area* branch; the other branch tells
@@ -79,9 +105,9 @@ const QUALITY_BAR = `A question earns its place only if it clears all of this:
  * source. The thread is worth following; the *technology* in it is not.
  */
 const CULTURAL_THREAD = `
-This is a behavioural interview. When the answer contains technical detail, do not follow the
+This is a culture-fit interview. When the answer contains technical detail, do not follow the
 technology — follow the person in it: the judgement, the pressure, who else was affected, what
-they'd do differently. Never ask how a system works or why it broke.
+they'd do differently. Never ask how a system works, why it broke, or about résumé projects.
 `;
 
 /**
@@ -106,8 +132,12 @@ Delete the weaker half; keep the sharper one. You get to ask the other next turn
 Bad:  "What was the bottleneck, and how did you fix it?"
 Good: "What was the bottleneck?"`;
 
-/** No technical ground at all — every source this interview draws on is people. */
-function culturalOnly(c: InterviewConfig): boolean {
+/**
+ * No technical ground at all — exclusive Cultural only, or every blend source
+ * is cultural. Either way the résumé must not enter the prompt.
+ */
+export function culturalOnly(c: InterviewConfig): boolean {
+  if (c.mode === "cultural_only") return true;
   return c.mode === null && c.sources.length > 0 && c.sources.every((s) => s === "cultural");
 }
 
@@ -142,13 +172,19 @@ const TOPIC_OPENERS = [
 ] as const;
 
 const CULTURAL_OPENERS = [
-  "why they're leaving — what stopped working where they are now",
-  "the work they're proudest of, and why that one rather than something bigger",
+  "whether they prefer working alone or as part of a team — and why that fits how they show up",
+  "the kind of work environment where they are most productive",
+  "how they prefer to get feedback — formal reviews vs daily/weekly check-ins — and why",
+  "what they hope to achieve in their first six months somewhere new",
+  "what would make them quit a job in the first month",
+  "how they motivate a team (or themselves) during a challenging project",
+  "one thing from a prior job they'd want to keep wherever they go next",
+  "a company policy they found unfair or inefficient — what it was and why",
+  "their manager assigns a big task right before the end of the day — how they reply",
+  "how they'd change an institutional \"this is how we always do it\" attitude if they saw a better way",
   "a disagreement with someone they still had to work with the next day",
   "a call they got wrong, and what it cost the people around them",
-  "a time they had to say no — to a manager, a customer, or a date",
   "feedback that stung at the time and turned out to be right",
-  "what they want next, and why this role is it",
   "what they're like when the pressure is on and the deadline isn't moving",
 ] as const;
 
@@ -166,7 +202,10 @@ const CULTURAL_NEXT_AREAS = [
   "what they do once it's clear they're the one who's wrong",
   "working with someone whose style is nothing like theirs",
   "what actually keeps them somewhere, and what makes them start looking",
-  "something that broke and was theirs to own",
+  "how they take hard feedback without getting defensive",
+  "aligning with company values when the easy path cuts against them",
+  "adapting when priorities flip mid-project and someone is unhappy",
+  "owning a miss that affected other people — not just the work product",
   "an area that is conspicuously vague",
 ] as const;
 
@@ -200,6 +239,7 @@ const SOURCE_NEXT_AREAS: Record<InterviewSource, readonly string[]> = {
  */
 const MODE_OPENERS: Record<ExclusiveMode, readonly string[]> = {
   topic_only: TOPIC_OPENERS,
+  cultural_only: CULTURAL_OPENERS,
   jd: RESUME_OPENERS,
   real: RESUME_OPENERS,
   weak_spots: RESUME_OPENERS,
@@ -207,6 +247,7 @@ const MODE_OPENERS: Record<ExclusiveMode, readonly string[]> = {
 
 const MODE_NEXT_AREAS: Record<ExclusiveMode, readonly string[]> = {
   topic_only: TOPIC_NEXT_AREAS,
+  cultural_only: CULTURAL_NEXT_AREAS,
   jd: TECHNICAL_NEXT_AREAS,
   real: TECHNICAL_NEXT_AREAS,
   weak_spots: TECHNICAL_NEXT_AREAS,
@@ -236,6 +277,8 @@ function pick<T>(xs: readonly T[]): T {
 const MODE_BRIEF: Record<ExclusiveMode, (c: InterviewConfig) => string> = {
   topic_only: (c) =>
     `Drill them on: ${c.topic}. Ignore the résumé entirely; this is a pure subject examination.`,
+  cultural_only: () =>
+    "Run a culture-fit interview. Ignore the résumé and any technical depth entirely. Ask about working style, values, conflict, feedback, motivation, and the kind of environment where they thrive — the questions a hiring manager uses to see whether someone will flourish on this team.",
   jd: () =>
     "Interview them for the job description below, using the résumé to judge whether they can actually do it. Probe the gaps between the two.",
   real: () =>
@@ -250,7 +293,7 @@ const SOURCE_BRIEF: Record<InterviewSource, (c: InterviewConfig) => string> = {
   topic: (c) =>
     `the subject "${c.topic}" — tie it back to work they have actually done wherever you can`,
   cultural: () =>
-    "how they work with people — conflict, failure, judgement calls, what they're like to sit next to",
+    "culture fit — working style, values, conflict, feedback, motivation, and the environment where they thrive (not technology or résumé projects)",
 };
 
 /**
@@ -324,7 +367,7 @@ const STAGE_PLAN: {
     stage: "concepts",
     share: 0.35,
     brief:
-      "Fundamentals, pitched at their years of experience — not textbook recall, but whether they understand why the thing works. Scale this with the experience level given above: a 2-year candidate gets the basics, a 15-year candidate gets the questions that separate knowing from having done it.",
+      "Fundamentals, pitched at the stated difficulty — not textbook recall, but whether they understand why the thing works. Easy stays approachable; Extreme separates knowing from having done it.",
   },
   {
     stage: "depth",
@@ -425,22 +468,31 @@ function contextBlock(s: SessionContext): string {
   const c = s.config;
   const parts = [`Interview target role: ${s.role ?? "(unspecified)"}`];
 
-  // topic_only is the one mode that must not see the résumé — including it
-  // "just as context" is exactly how a pure-subject drill drifts back into
-  // being a résumé interview.
-  if (c.mode !== "topic_only") {
+  // topic_only and cultural-only must not see the résumé — including it
+  // "just as context" is exactly how those interviews drift back into asking
+  // about projects, systems, and tech the brief told them to ignore.
+  if (c.mode !== "topic_only" && !culturalOnly(c)) {
     parts.push(`${SOURCE_LABEL[s.sourceType]}:`, s.sourceText.slice(0, 6000));
+  } else if (culturalOnly(c)) {
+    parts.push(
+      "No résumé is provided for this interview — do not invent one, and do not ask about projects or technology as if you had one.",
+    );
   }
   if (c.job_description) {
     parts.push("The job description they are targeting:", c.job_description.slice(0, 4000));
   }
-  // Years, not a difficulty label: "senior" means something different to every
-  // model and every company, whereas "11 years" is a fact it can pitch against.
+  const diff = DIFFICULTY_META[c.difficulty];
   parts.push(
-    `Candidate experience level: ${c.years_experience} year(s) — ${seniorityLabel(c.years_experience)}. Pitch the questions at someone with that much time in the field.`,
+    `Difficulty: ${difficultyLabel(c.difficulty)}. ${diff.pitch}`,
     `Total questions: ${c.num_questions}.`,
   );
   return parts.join("\n");
+}
+
+/** What the model may emit for this interview shape. */
+function typeUnionFor(c: InterviewConfig): string {
+  if (culturalOnly(c)) return `"cultural" | "followup"`;
+  return TYPE_UNION;
 }
 
 function askedBlock(asked: string[] | undefined): string {
@@ -482,7 +534,10 @@ export function firstQuestionPrompt(
   const opener =
     mode === "real"
       ? "Follow the stage brief above."
-      : `Do not use a stock opener ("tell me about yourself", "walk me through your resume/background").
+      : culturalOnly(s.config)
+        ? `Do not use a stock opener ("tell me about yourself", "walk me through your resume", "greatest strength").
+Go straight at a culture-fit angle — working style, values, conflict, feedback, or environment.`
+        : `Do not use a stock opener ("tell me about yourself", "walk me through your resume/background").
 Go straight at something concrete.`;
 
   return `${contextBlock(s)}
@@ -492,8 +547,8 @@ ${stage}${weakSpotBlock(inputs.weakSpots)}${askedBlock(inputs.askedBefore)}
 Ask the FIRST interview question.
 ${aim}
 ${opener}
-${ONE_QUESTION}
-Return JSON: { "question": string, "question_type": ${TYPE_UNION} }`;
+${culturalOnly(s.config) ? CULTURAL_THREAD : ""}${ONE_QUESTION}
+Return JSON: { "question": string, "question_type": ${typeUnionFor(s.config)} }`;
 }
 
 export function followUpPrompt(
@@ -535,7 +590,7 @@ Ask the NEXT question. If the last answer opens a worthwhile thread, ask a targe
 that digs into something the candidate actually said; otherwise move to a new area${areaHint}
 Never re-ask something already covered above, and don't rephrase a question they've answered.
 ${culturalOnly(s.config) ? CULTURAL_THREAD : ""}${ONE_QUESTION}
-Return JSON: { "question": string, "question_type": ${TYPE_UNION} }`;
+Return JSON: { "question": string, "question_type": ${typeUnionFor(s.config)} }`;
 }
 
 export type QuestionTypeOut = QuestionType;

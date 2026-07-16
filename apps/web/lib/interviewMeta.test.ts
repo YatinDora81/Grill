@@ -1,13 +1,15 @@
 import { describe, expect, test } from "bun:test";
-import type { ExclusiveMode, InterviewConfig, InterviewSource } from "@repo/types";
+import type { Difficulty, ExclusiveMode, InterviewConfig, InterviewSource } from "@repo/types";
 import {
   ANSWER_CAP_MODEL,
+  DIFFICULTIES,
+  DIFFICULTY_META,
   MODE_META,
   QUESTION_BOUNDS,
   SOURCE_META,
+  difficultyLabel,
   interviewLabel,
   perAnswerCapSeconds,
-  seniorityLabel,
 } from "./interviewMeta";
 
 /**
@@ -20,8 +22,9 @@ import {
 // The unions are restated as literals rather than read back off MODE_META /
 // SOURCE_META. Deriving the expectation from the thing under test would make the
 // coverage assertions below unable to fail.
-const ALL_MODES: ExclusiveMode[] = ["topic_only", "jd", "real", "weak_spots"];
+const ALL_MODES: ExclusiveMode[] = ["topic_only", "cultural_only", "jd", "real", "weak_spots"];
 const ALL_SOURCES: InterviewSource[] = ["resume", "topic", "cultural"];
+const ALL_DIFFICULTIES: Difficulty[] = ["easy", "medium", "hard", "extreme"];
 
 describe("perAnswerCapSeconds", () => {
   /**
@@ -78,35 +81,23 @@ describe("perAnswerCapSeconds", () => {
   });
 });
 
-describe("seniorityLabel", () => {
-  /**
-   * Every rung boundary, from both sides. The ladder is what the prompt is
-   * briefed with, so a rung shifting by a year re-pitches every interview at
-   * that experience level without anything else changing.
-   */
+describe("difficultyLabel", () => {
   test.each([
-    [1, "Junior"],
-    [2, "Junior"],
-    [3, "Mid"],
-    [5, "Mid"],
-    [6, "Senior"],
-    [9, "Senior"],
-    [10, "Staff"],
-    [13, "Staff"],
-    [14, "Principal"],
-    [17, "Principal"],
-    [18, "VP"],
-    [20, "VP"],
-  ])("calls %i years %s", (years, label) => {
-    expect(seniorityLabel(years as number)).toBe(label);
+    ["easy", "Easy"],
+    ["medium", "Medium"],
+    ["hard", "Hard"],
+    ["extreme", "Extreme"],
+  ])("labels %s as %s", (d, label) => {
+    expect(difficultyLabel(d as Difficulty)).toBe(label);
   });
 
-  test("treats the top rung as a ceiling rather than falling off the ladder", () => {
-    // seniorityFor's `?? last` fallback. A stored config can hold a year count
-    // past YEAR_BOUNDS if the bounds are ever tightened, and undefined here is a
-    // crash on `.label` rather than a slightly wrong word.
-    expect(seniorityLabel(21)).toBe("VP");
-    expect(seniorityLabel(999)).toBe("VP");
+  test("covers every difficulty the form can pick", () => {
+    expect([...DIFFICULTIES]).toEqual(ALL_DIFFICULTIES);
+    expect(Object.keys(DIFFICULTY_META).sort()).toEqual([...ALL_DIFFICULTIES].sort());
+    for (const d of ALL_DIFFICULTIES) {
+      expect(DIFFICULTY_META[d].pitch.length).toBeGreaterThan(0);
+      expect(DIFFICULTY_META[d].blurb.length).toBeGreaterThan(0);
+    }
   });
 });
 
@@ -114,7 +105,7 @@ describe("interviewLabel", () => {
   function cfg(over: Partial<InterviewConfig>): InterviewConfig {
     return {
       num_questions: 8,
-      years_experience: 6,
+      difficulty: "medium",
       sources: [],
       mode: null,
       allow_repeats: false,
@@ -146,18 +137,15 @@ describe("interviewLabel", () => {
   });
 
   test("joins blended sources in the order they were picked", () => {
-    // The order is the user's, not the union's: the picker's meaning is "these,
-    // in this order", and re-sorting them would describe a different interview.
-    expect(interviewLabel(cfg({ sources: ["resume", "topic", "cultural"] }))).toBe(
-      "Résumé + Topic + Cultural",
+    expect(interviewLabel(cfg({ sources: ["cultural", "resume", "topic"] }))).toBe(
+      "Cultural + Résumé + Topic",
     );
-    expect(interviewLabel(cfg({ sources: ["cultural", "resume"] }))).toBe("Cultural + Résumé");
   });
 
   test("lets the mode win over sources, since a mode never blends", () => {
-    // Not reachable through the schema — it rejects mode+sources together — but
-    // this is the tiebreak the function actually implements, and a stored row
-    // that predates the invariant still reaches it.
-    expect(interviewLabel(cfg({ mode: "jd", sources: ["resume"] }))).toBe(MODE_META.jd.label);
+    // sources should be empty under a mode, but if a stale row somehow carries
+    // both, the label must still name the mode — that is what the interviewer
+    // was briefed with.
+    expect(interviewLabel(cfg({ mode: "real", sources: ["resume"] }))).toBe("Real interview");
   });
 });

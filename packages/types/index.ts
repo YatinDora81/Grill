@@ -5,12 +5,13 @@
 export type SourceType = "resume" | "jd" | "topic";
 
 /**
- * Legacy. Level is years of experience now (1–20), which says the same thing
- * with more resolution and without making the user translate their career into
- * three buckets. Sessions recorded before the change still carry `difficulty`,
- * so it's read on the way in and mapped to years; never write it.
+ * How hard the interview is pitched. The form writes one of these four.
+ *
+ * Older sessions may still carry `junior` / `mid` / `senior`, or a year count
+ * in `years_experience` — both are migrated on read to this union. Never write
+ * the legacy values.
  */
-export type Difficulty = "junior" | "mid" | "senior";
+export type Difficulty = "easy" | "medium" | "hard" | "extreme";
 
 /**
  * Legacy. "Focus" was a third axis that only ever restated what the sources
@@ -49,6 +50,8 @@ export type InterviewSource =
 export type ExclusiveMode =
   /** A subject they name, résumé deliberately ignored. */
   | "topic_only"
+  /** Culture-fit only — people, values, how they work. Résumé ignored. */
+  | "cultural_only"
   /** A real posting they're going for, probed against their résumé. */
   | "jd"
   /** The full arc, opening to close. See `InterviewStage`. */
@@ -91,10 +94,10 @@ export interface InterviewConfig {
   /** Bounded by `QUESTION_BOUNDS` in apps/web/lib/schemas.ts. */
   num_questions: number;
   /**
-   * Years of experience, bounded by `YEAR_BOUNDS` in apps/web/lib/schemas.ts.
-   * Drives how hard the questions are pitched. Replaces junior/mid/senior.
+   * How hard questions are pitched. See `DIFFICULTY_META` in interviewMeta.
+   * Replaces the old years-of-experience slider and the junior/mid/senior buckets.
    */
-  years_experience: number;
+  difficulty: Difficulty;
   /**
    * What to draw questions from, blended. Non-empty exactly when `mode` is null
    * — an exclusive mode brings its own material, so the two are never both set.

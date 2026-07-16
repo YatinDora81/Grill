@@ -12,7 +12,7 @@ mock.module("server-only", () => ({}));
 process.env.GEMINI_API_KEYS ||= "TEST__SPLIT__not-a-real-key";
 process.env.JWT_SECRET ||= "test-secret";
 
-const { QUESTION_BOUNDS, YEAR_BOUNDS } = await import("./interviewMeta");
+const { DIFFICULTIES, QUESTION_BOUNDS } = await import("./interviewMeta");
 const {
   interviewConfigSchema,
   questionResponseSchema,
@@ -68,6 +68,12 @@ describe("the mode XOR sources invariant", () => {
     expect(r.data!.sources).toEqual([]);
   });
 
+  test("accepts cultural_only as an exclusive mode with no extra material", () => {
+    const r = interviewConfigSchema.safeParse(cfg({ mode: "cultural_only", sources: [] }));
+    expect(r.success).toBe(true);
+    expect(r.data!.mode).toBe("cultural_only");
+  });
+
   test("accepts blended sources with a null mode", () => {
     const r = interviewConfigSchema.safeParse(cfg({ mode: null, sources: ["resume", "topic", "cultural"], topic: "Kafka" }));
     expect(r.success).toBe(true);
@@ -112,7 +118,7 @@ describe("bounds", () => {
     // Restated as literals so a change to the product limits has to be a
     // deliberate edit here, not a silent follow-on from another file.
     expect(QUESTION_BOUNDS).toEqual({ min: 3, max: 100 });
-    expect(YEAR_BOUNDS).toEqual({ min: 1, max: 20 });
+    expect([...DIFFICULTIES]).toEqual(["easy", "medium", "hard", "extreme"]);
   });
 
   test("accepts a new interview at both question bounds", () => {
@@ -145,11 +151,11 @@ describe("bounds", () => {
     expect(storedConfigSchema.safeParse({ ...cfg(), num_questions: 0 }).success).toBe(false);
   });
 
-  test("accepts years of experience at both bounds and rejects one either side", () => {
-    expect(interviewConfigSchema.safeParse(cfg({ years_experience: YEAR_BOUNDS.min })).success).toBe(true);
-    expect(interviewConfigSchema.safeParse(cfg({ years_experience: YEAR_BOUNDS.max })).success).toBe(true);
-    expect(interviewConfigSchema.safeParse(cfg({ years_experience: YEAR_BOUNDS.min - 1 })).success).toBe(false);
-    expect(interviewConfigSchema.safeParse(cfg({ years_experience: YEAR_BOUNDS.max + 1 })).success).toBe(false);
+  test("accepts every difficulty mode and rejects an invented one", () => {
+    for (const d of DIFFICULTIES) {
+      expect(interviewConfigSchema.safeParse(cfg({ difficulty: d })).success).toBe(true);
+    }
+    expect(interviewConfigSchema.safeParse(cfg({ difficulty: "nightmare" })).success).toBe(false);
   });
 
   test("rejects a fractional question count", () => {
@@ -182,12 +188,12 @@ describe("defaults", () => {
     expect(interviewConfigSchema.safeParse(cfg({ allow_repeats: true })).data!.allow_repeats).toBe(true);
   });
 
-  test("pitches a config with no stated experience at mid, not at the floor", () => {
-    // Years drives how hard every question is pitched, so the fallback for a row
-    // that never stated one is a product decision, not an implementation detail:
-    // defaulting to YEAR_BOUNDS.min would re-pitch it as a junior interview.
-    expect(interviewConfigSchema.safeParse(cfg()).data!.years_experience).toBe(6);
-    expect(storedConfigSchema.safeParse(cfg()).data!.years_experience).toBe(6);
+  test("pitches a config with no stated difficulty at medium, not at easy", () => {
+    // Difficulty drives how hard every question is pitched, so the fallback for
+    // a row that never stated one is a product decision: defaulting to easy
+    // would silently under-pitch every legacy session.
+    expect(interviewConfigSchema.safeParse(cfg()).data!.difficulty).toBe("medium");
+    expect(storedConfigSchema.safeParse(cfg()).data!.difficulty).toBe("medium");
   });
 
   test("carries a stored per-answer cap through, and treats its absence as 'use the default'", () => {
@@ -235,24 +241,38 @@ describe("configs written under older shapes", () => {
   });
 
   test.each([
-    ["junior", 2],
-    ["mid", 6],
-    ["senior", 12],
-  ])("reads the legacy %s difficulty as %i years, mid-bucket", (difficulty, years) => {
-    // Mid-bucket, not edge: the bucket said "roughly here", and pretending it
-    // said more would silently re-pitch every legacy session's replay.
-    const r = storedConfigSchema.safeParse({ ...cfg(), difficulty });
+    ["junior", "easy"],
+    ["mid", "medium"],
+    ["senior", "hard"],
+  ])("reads the legacy %s bucket as %s", (legacy, difficulty) => {
+    const r = storedConfigSchema.safeParse({ ...cfg(), difficulty: legacy });
     expect(r.success).toBe(true);
-    expect(r.data!.years_experience).toBe(years as number);
+    expect(r.data!.difficulty).toBe(difficulty);
   });
 
-  test("falls back to mid rather than failing on an unrecognised difficulty", () => {
-    expect(storedConfigSchema.safeParse({ ...cfg(), difficulty: "staff" }).data!.years_experience).toBe(6);
+  test.each([
+    [1, "easy"],
+    [2, "easy"],
+    [3, "medium"],
+    [6, "medium"],
+    [7, "hard"],
+    [12, "hard"],
+    [13, "extreme"],
+    [20, "extreme"],
+  ])("maps stored years_experience %i to %s", (years, difficulty) => {
+    const r = storedConfigSchema.safeParse({ ...cfg(), years_experience: years });
+    expect(r.success).toBe(true);
+    expect(r.data!.difficulty).toBe(difficulty);
+    expect(r.data!).not.toHaveProperty("years_experience");
   });
 
-  test("lets an explicit year count win over a difficulty left on the row", () => {
+  test("falls back to medium rather than failing on an unrecognised difficulty", () => {
+    expect(storedConfigSchema.safeParse({ ...cfg(), difficulty: "staff" }).data!.difficulty).toBe("medium");
+  });
+
+  test("lets an explicit year count win over a legacy difficulty left on the row", () => {
     const r = storedConfigSchema.safeParse({ ...cfg(), difficulty: "junior", years_experience: 15 });
-    expect(r.data!.years_experience).toBe(15);
+    expect(r.data!.difficulty).toBe("extreme");
   });
 
   test.each(["cultural", "behavioral"])(
@@ -296,7 +316,7 @@ describe("configs written under older shapes", () => {
     expect(r.success).toBe(true);
     expect(r.data).toMatchObject({
       num_questions: 5,
-      years_experience: 12,
+      difficulty: "hard",
       sources: ["resume", "topic", "cultural"],
       mode: null,
       topic: "Kafka",

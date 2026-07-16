@@ -1,6 +1,6 @@
 import { z } from "zod";
-import type { InterviewSource } from "@repo/types";
-import { QUESTION_BOUNDS, YEAR_BOUNDS } from "./interviewMeta";
+import type { Difficulty, InterviewSource } from "@repo/types";
+import { QUESTION_BOUNDS } from "./interviewMeta";
 import { config } from "./env";
 
 // ── Auth ──────────────────────────────────────────────────────────
@@ -29,24 +29,44 @@ export const changePasswordSchema = z.object({
 // ── Interview requests ────────────────────────────────────────────
 
 export const interviewSourceSchema = z.enum(["resume", "topic", "cultural"]);
-export const exclusiveModeSchema = z.enum(["topic_only", "jd", "real", "weak_spots"]);
+export const exclusiveModeSchema = z.enum([
+  "topic_only",
+  "cultural_only",
+  "jd",
+  "real",
+  "weak_spots",
+]);
+export const difficultySchema = z.enum(["easy", "medium", "hard", "extreme"]);
 
 /** Legacy: the single-mode union that `sources` + `mode` replaced. */
 export const interviewModeSchema = z.enum([
   "resume",
   "topic",
   "topic_only",
+  "cultural_only",
   "jd",
   "real",
   "weak_spots",
 ]);
 
-/**
- * Where each old difficulty bucket lands on the 1–20 scale. Mid-bucket rather
- * than edge: the bucket said "roughly here", and pretending it said more than
- * that would silently re-pitch every legacy session's replay.
- */
-const LEGACY_YEARS: Record<string, number> = { junior: 2, mid: 6, senior: 12 };
+/** Old junior/mid/senior buckets → current four-mode difficulty. */
+const LEGACY_DIFFICULTY: Record<string, Difficulty> = {
+  junior: "easy",
+  mid: "medium",
+  senior: "hard",
+  easy: "easy",
+  medium: "medium",
+  hard: "hard",
+  extreme: "extreme",
+};
+
+/** Old years-of-experience slider → current difficulty. Mid-bucket mapping. */
+function yearsToDifficulty(years: number): Difficulty {
+  if (years <= 2) return "easy";
+  if (years <= 6) return "medium";
+  if (years <= 12) return "hard";
+  return "extreme";
+}
 
 /** Legacy single modes that carried the résumé along with them. */
 const LEGACY_SOURCES: Record<string, InterviewSource[]> = {
@@ -83,10 +103,21 @@ function migrateConfig(raw: unknown): unknown {
   }
   delete c.interview_type;
 
-  if (c.years_experience === undefined && typeof c.difficulty === "string") {
-    c.years_experience = LEGACY_YEARS[c.difficulty] ?? 6;
+  // Difficulty: modern value wins; else map years (the field that replaced
+  // junior/mid/senior); else map a legacy bucket; else medium.
+  const rawDiff = typeof c.difficulty === "string" ? c.difficulty : undefined;
+  const modern =
+    rawDiff === "easy" || rawDiff === "medium" || rawDiff === "hard" || rawDiff === "extreme";
+  if (modern) {
+    /* already current */
+  } else if (typeof c.years_experience === "number") {
+    c.difficulty = yearsToDifficulty(c.years_experience);
+  } else if (rawDiff && LEGACY_DIFFICULTY[rawDiff]) {
+    c.difficulty = LEGACY_DIFFICULTY[rawDiff];
+  } else {
+    c.difficulty = "medium";
   }
-  delete c.difficulty;
+  delete c.years_experience;
 
   return c;
 }
@@ -107,12 +138,7 @@ const interviewConfigShape = z.object({
     .min(1)
     .max(QUESTION_BOUNDS.max)
     .default(config.interview.defaultNumQuestions),
-  years_experience: z.coerce
-    .number()
-    .int()
-    .min(YEAR_BOUNDS.min)
-    .max(YEAR_BOUNDS.max)
-    .default(6),
+  difficulty: difficultySchema.default("medium"),
   sources: z.array(interviewSourceSchema).max(3).default([]),
   mode: exclusiveModeSchema.nullable().default(null),
   topic: z.string().trim().max(2_000).optional(),

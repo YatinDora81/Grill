@@ -19,7 +19,7 @@ const ctx: SessionContext = {
   role: "Backend Engineer",
   config: {
     num_questions: 8,
-    years_experience: 11,
+    difficulty: "hard",
     sources: ["resume"],
     mode: null,
     allow_repeats: false,

@@ -1,4 +1,4 @@
-import type { ExclusiveMode, InterviewConfig, InterviewSource } from "@repo/types";
+import type { Difficulty, ExclusiveMode, InterviewConfig, InterviewSource } from "@repo/types";
 
 /**
  * How an interview describes itself — to the candidate picking one, and to the
@@ -17,7 +17,9 @@ import type { ExclusiveMode, InterviewConfig, InterviewSource } from "@repo/type
  * server config into the client bundle. Nothing in this file may import `env`.
  */
 export const QUESTION_BOUNDS = { min: 3, max: 100 } as const;
-export const YEAR_BOUNDS = { min: 1, max: 20 } as const;
+
+/** The four difficulty modes the form offers, in pitch order. */
+export const DIFFICULTIES: readonly Difficulty[] = ["easy", "medium", "hard", "extreme"] as const;
 
 /**
  * Per-answer time cap, derived from question count.
@@ -72,45 +74,61 @@ export function perAnswerCapSeconds(numQuestions: number): number | null {
 }
 
 /**
- * Years of experience → what that rung is called, and how hot it runs.
+ * How hard an interview runs — green → red, easy → extreme.
  *
- * The colour ramp runs green → red, easy → extreme. It's the honest signal:
- * picking VP is not a flattering job title to select, it's a promise that the
- * questions will be brutal.
+ * Picking Extreme is not a flattering title; it's a promise the questions will
+ * be brutal. Labels here are what the form shows and what the prompt is briefed
+ * with, so the two stay in lockstep.
  */
-export interface SeniorityRung {
+export interface DifficultyMeta {
   label: string;
-  /** Inclusive upper bound of this rung, in years. */
-  maxYears: number;
-  /** Hex, straight from the room palette — green through ember to red. */
+  /** Hex, straight from the room palette. */
   color: string;
-  /** What the candidate is being measured against at this rung. */
+  /** What the candidate is being measured against at this level. */
   blurb: string;
+  /** One-line instruction the interviewer prompt quotes. */
+  pitch: string;
 }
 
-export const SENIORITY_LADDER: readonly SeniorityRung[] = [
-  { label: "Junior", maxYears: 2, color: "#4ade80", blurb: "Fundamentals, and whether you can explain them." },
-  { label: "Mid", maxYears: 5, color: "#a3e635", blurb: "You own features end to end and defend the how." },
-  { label: "Senior", maxYears: 9, color: "#f6a64e", blurb: "Trade-offs, failure, and the calls you got wrong." },
-  { label: "Staff", maxYears: 13, color: "#fb923c", blurb: "Systems, blast radius, and influence without authority." },
-  { label: "Principal", maxYears: 17, color: "#f2642f", blurb: "Strategy, ambiguity, and bets that take a year to prove." },
-  { label: "VP", maxYears: 20, color: "#f87171", blurb: "Org design, hard people calls, and answering for outcomes." },
-] as const;
+export const DIFFICULTY_META: Record<Difficulty, DifficultyMeta> = {
+  easy: {
+    label: "Easy",
+    color: "#4ade80",
+    blurb: "Fundamentals and clear explanations. Warm-up pace.",
+    pitch: "Keep questions approachable — core concepts, straightforward scenarios, room to think out loud.",
+  },
+  medium: {
+    label: "Medium",
+    color: "#a3e635",
+    blurb: "You own features end to end and can defend the how.",
+    pitch: "Solid working-level depth — real decisions, trade-offs, and concrete examples from practice.",
+  },
+  hard: {
+    label: "Hard",
+    color: "#f6a64e",
+    blurb: "Trade-offs, failure, and the calls you got wrong.",
+    pitch: "Push hard on judgement, failure modes, and ambiguity — answers need sharp reasoning, not slogans.",
+  },
+  extreme: {
+    label: "Extreme",
+    color: "#f87171",
+    blurb: "Systems, blast radius, and answering for outcomes under pressure.",
+    pitch: "Brutal but fair — staff/principal depth, uncomfortable edge cases, and no soft landings.",
+  },
+};
 
-export function seniorityFor(years: number): SeniorityRung {
-  // The last rung is the ceiling: anything past it is still VP, not undefined.
-  return SENIORITY_LADDER.find((r) => years <= r.maxYears) ?? SENIORITY_LADDER[SENIORITY_LADDER.length - 1]!;
-}
-
-export function seniorityLabel(years: number): string {
-  return seniorityFor(years).label;
+export function difficultyLabel(d: Difficulty): string {
+  return DIFFICULTY_META[d].label;
 }
 
 /** How each source reads in the picker. These combine. */
 export const SOURCE_META: Record<InterviewSource, { label: string; blurb: string }> = {
   resume: { label: "Résumé", blurb: "Your own history — what you built, and what you'd rather skip." },
   topic: { label: "Topic", blurb: "A subject you name, tied back to work you've actually done." },
-  cultural: { label: "Cultural", blurb: "How you work with people: conflict, failure, judgement." },
+  cultural: {
+    label: "Cultural",
+    blurb: "How you work with people: conflict, feedback, judgement. Combines with Résumé when both are on.",
+  },
 };
 
 /** How each exclusive mode reads in the picker. These don't combine. */
@@ -126,6 +144,10 @@ export const MODE_META: Record<ExclusiveMode, { label: string; blurb: string }> 
   topic_only: {
     label: "Topic only",
     blurb: "Pure subject examination. Your résumé is ignored entirely.",
+  },
+  cultural_only: {
+    label: "Cultural only",
+    blurb: "Culture-fit screen: work style, values, conflict, feedback. Your résumé is ignored.",
   },
   weak_spots: {
     label: "Weak spots",

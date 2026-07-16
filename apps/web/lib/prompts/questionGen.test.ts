@@ -1,6 +1,12 @@
 import { test, expect } from "bun:test";
 import type { InterviewConfig } from "@repo/types";
-import { firstQuestionPrompt, followUpPrompt, questionSystem, stageFor } from "./questionGen";
+import {
+  culturalOnly,
+  firstQuestionPrompt,
+  followUpPrompt,
+  questionSystem,
+  stageFor,
+} from "./questionGen";
 import type { SessionContext } from "./questionGen";
 
 /**
@@ -18,7 +24,7 @@ function ctx(config: Partial<InterviewConfig>): SessionContext {
     role: "Backend Engineer",
     config: {
       num_questions: 8,
-      years_experience: 11,
+      difficulty: "hard",
       sources: [],
       mode: null,
       allow_repeats: false,
@@ -77,14 +83,30 @@ test("a résumé + cultural blend draws openers from both pools", () => {
   expect(blend.size).toBe(resume.size + cultural.size);
 });
 
-test("the interviewer is only stripped of 'technical' when every source is cultural", () => {
+test("the interviewer is only stripped of 'technical' when the interview is cultural-only", () => {
   expect(questionSystem(ctx({ sources: ["cultural"] }).config)).not.toContain("technical interviewer");
+  expect(questionSystem(ctx({ mode: "cultural_only" }).config)).not.toContain("technical interviewer");
   expect(questionSystem(ctx({ sources: ["resume"] }).config)).toContain("technical interviewer");
   expect(questionSystem(ctx({ sources: ["cultural", "resume"] }).config)).toContain(
     "technical interviewer",
   );
-  // An exclusive mode carries its own material and is never cultural-only.
   expect(questionSystem(ctx({ mode: "real" }).config)).toContain("technical interviewer");
+});
+
+test("a cultural-only interview never receives the résumé text", () => {
+  const fingerprint = "Staff engineer. Shipped a billing ledger on Postgres.";
+  for (const config of [{ sources: ["cultural"] as const }, { mode: "cultural_only" as const }]) {
+    const first = firstQuestionPrompt(ctx(config));
+    const next = followUpPrompt(ctx(config), [{ question: "Q", answer: "A" }], 3);
+    expect(first).not.toContain(fingerprint);
+    expect(next).not.toContain(fingerprint);
+    expect(first).toContain("No résumé is provided");
+    expect(first).toContain("culture-fit");
+    expect(culturalOnly(ctx(config).config)).toBe(true);
+  }
+
+  // A résumé interview still gets the document — the omission is deliberate, not a bug.
+  expect(firstQuestionPrompt(ctx({ sources: ["resume"] }))).toContain(fingerprint);
 });
 
 test("a cultural-only follow-up is told to follow the person, not the technology", () => {
@@ -94,7 +116,11 @@ test("a cultural-only follow-up is told to follow the person, not the technology
     3,
   );
   expect(cultural).toContain("do not follow the\ntechnology — follow the person in it");
-  expect(cultural).toContain("Never ask how a system works or why it broke.");
+  expect(cultural).toContain("Never ask how a system works");
+
+  expect(followUpPrompt(ctx({ mode: "cultural_only" }), [{ question: "Q", answer: "A" }], 3)).toContain(
+    "follow the person in it",
+  );
 
   expect(followUpPrompt(ctx({ sources: ["resume"] }), [{ question: "Q", answer: "A" }], 3)).not.toContain(
     "follow the person in it",
