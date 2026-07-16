@@ -12,6 +12,14 @@ import { processAnswer } from "@/lib/services/answerService";
 import { transcribe } from "@/lib/clients/sttClient";
 import { audioKey, putAudio } from "@/lib/storage/objectStore";
 
+/**
+ * Slack for the multipart envelope — boundaries, part headers, the text fields —
+ * so the Content-Length gate below never refuses a clip that is itself within
+ * the cap. It only has to be generous enough to not fire early; file.size is
+ * what actually decides.
+ */
+const MULTIPART_OVERHEAD_BYTES = 16 * 1024;
+
 export async function POST(req: Request) {
   try {
     const userId = await requireUserId();
@@ -19,6 +27,17 @@ export async function POST(req: Request) {
     // alternating routes. Checked before formData() below, which would
     // otherwise buffer the whole upload before we decide to refuse it.
     rateLimit(`answer:${userId}`, { limit: 30, windowMs: 60_000 });
+
+    // The file.size check further down is the real cap, but it can't run until
+    // formData() has already pulled the entire body into memory — which is the
+    // thing the cap exists to prevent. Refusing on the declared length first
+    // means an oversized upload costs us nothing. It's client-supplied and
+    // trivially omitted or lied about, so it narrows the window rather than
+    // closing it; the post-parse check stays authoritative.
+    const declared = Number(req.headers.get("content-length"));
+    if (Number.isFinite(declared) && declared > config.audio.maxBytes + MULTIPART_OVERHEAD_BYTES) {
+      throw badRequest("Audio clip is too large.", "audio_too_large");
+    }
 
     const form = await req.formData();
     const { session_id, turn_index, video_id, video_offset_ms } = turnRefSchema.parse({

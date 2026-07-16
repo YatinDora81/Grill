@@ -18,6 +18,7 @@ from collections.abc import AsyncIterator
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from analysis import analyze
 from sweeper import Config, Sweeper, build_client
@@ -32,6 +33,116 @@ logging.basicConfig(
 )
 
 log = logging.getLogger("audio")
+
+
+def _max_audio_bytes() -> int:
+    """The clip cap, read from the same env var apps/web reads for its own."""
+    raw = os.getenv("MAX_AUDIO_MB", "").strip()
+    if not raw:
+        return 25 * 1024 * 1024
+    try:
+        return int(float(raw) * 1024 * 1024)
+    except ValueError:
+        log.warning("MAX_AUDIO_MB=%r is not a number; using 25", raw)
+        return 25 * 1024 * 1024
+
+
+# What the multipart envelope costs on top of the clip: the boundaries, the part
+# headers, the filename. Counting the body against a bare clip cap would reject a
+# clip that is exactly at the limit — legal by apps/web's reckoning, over by ours,
+# and the caller has no way to tell which of the two refused it. apps/web allows
+# itself the same slack for the same reason.
+MULTIPART_OVERHEAD_BYTES = 16 * 1024
+
+MAX_AUDIO_BYTES = _max_audio_bytes()
+
+#: The ceiling this middleware enforces. Bounds the REQUEST BODY, which is the
+#: clip plus its envelope — deliberately not the same number as the clip cap.
+MAX_UPLOAD_BYTES = MAX_AUDIO_BYTES + MULTIPART_OVERHEAD_BYTES
+
+
+class _BodyTooLarge(Exception):
+    pass
+
+
+class LimitUploadSize:
+    """Counts bytes off the receive channel and aborts once past the cap.
+
+    apps/web checks the clip size before it POSTs, but that is one caller's good
+    manners rather than a property of this service: /analyze is unauthenticated,
+    so anything that can reach the port can hand us a body of any length. The
+    cost of not bounding it is paid twice — the read OOM-kills the process, and
+    this process is also the sweeper, so one oversized upload takes the report
+    backstop down with it.
+
+    This has to sit on the ASGI stream rather than inside the handler. By the
+    time FastAPI resolves an UploadFile it has already run the multipart parser
+    over the whole body, so any check in /analyze is one made after the bytes
+    have already landed. Refusing here means they are never accumulated at all.
+    """
+
+    def __init__(self, app: ASGIApp, max_bytes: int) -> None:
+        self.app = app
+        self.max_bytes = max_bytes
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        # Content-Length only buys a cheap early refusal: it is absent on chunked
+        # bodies and freely lied about on hostile ones. The counter below is what
+        # actually holds the line.
+        if self._declared_length(scope) > self.max_bytes:
+            await self._too_large(scope, receive, send)
+            return
+
+        read = 0
+        tripped = False
+
+        async def counted_receive() -> Message:
+            nonlocal read, tripped
+            message = await receive()
+            if message["type"] == "http.request":
+                read += len(message.get("body", b""))
+                if read > self.max_bytes:
+                    tripped = True
+                    raise _BodyTooLarge
+            return message
+
+        async def guarded_send(message: Message) -> None:
+            # Whatever the app has to say once the cap trips is wrong: FastAPI
+            # wraps form parsing in a bare `except Exception` and reports the
+            # aborted read as its generic 400 "error parsing the body". Drop that
+            # and let the 413 below be the answer.
+            if tripped:
+                return
+            await send(message)
+
+        with contextlib.suppress(_BodyTooLarge):
+            await self.app(scope, counted_receive, guarded_send)
+
+        if tripped:
+            # Nothing reached the client — the parser gave up mid-body and the
+            # send above was swallowed — so the response is still ours to write.
+            await self._too_large(scope, receive, send)
+
+    @staticmethod
+    def _declared_length(scope: Scope) -> int:
+        for key, value in scope["headers"]:
+            if key == b"content-length":
+                try:
+                    return int(value)
+                except ValueError:
+                    return 0  # unparseable: let the counter judge it
+        return 0
+
+    async def _too_large(self, scope: Scope, receive: Receive, send: Send) -> None:
+        response = JSONResponse(
+            {"detail": f"audio too large (limit {self.max_bytes} bytes)"},
+            status_code=413,
+        )
+        await response(scope, receive, send)
 
 
 @contextlib.asynccontextmanager
@@ -66,6 +177,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="ai-interview audio service", lifespan=lifespan)
+app.add_middleware(LimitUploadSize, max_bytes=MAX_UPLOAD_BYTES)
 
 
 @app.get("/health")
