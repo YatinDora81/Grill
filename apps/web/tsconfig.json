@@ -19,5 +19,6 @@
     "next.config.js",
     ".next/types/**/*.ts"
   ],
-  "exclude": ["node_modules"]
+  "//": "Test files are excluded from the build typecheck: they are not shipped, and bun:test's runner transpiles without typechecking, so holding fixtures to the app's strict config buys nothing the test run doesn't already cover. `bun run test` is their check.",
+  "exclude": ["node_modules", "**/*.test.ts", "**/*.test.tsx", "test/**"]
 }

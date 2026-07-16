@@ -8,7 +8,9 @@
     "build": "next build",
     "start": "next start --port 4000",
     "lint": "eslint --max-warnings 0",
-    "check-types": "next typegen && tsc --noEmit"
+    "check-types": "next typegen && tsc --noEmit",
+    "test": "bun test/run.ts",
+    "test:watch": "bun test --watch"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.0.2",
@@ -27,13 +29,17 @@
     "zod": "^4.1.13"
   },
   "devDependencies": {
+    "@happy-dom/global-registrator": "^20.10.6",
     "@repo/eslint-config": "*",
     "@repo/typescript-config": "*",
     "@tailwindcss/postcss": "^4.3.2",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/react": "^16.3.2",
     "@types/node": "^22.15.3",
     "@types/react": "19.2.2",
     "@types/react-dom": "19.2.2",
     "eslint": "^9.39.1",
+    "happy-dom": "^20.10.6",
     "tailwindcss": "^4.3.2",
     "typescript": "5.9.2"
   }

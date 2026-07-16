@@ -6,7 +6,7 @@ import pluginReactHooks from "eslint-plugin-react-hooks";
 import pluginReact from "eslint-plugin-react";
 import globals from "globals";
 import pluginNext from "@next/eslint-plugin-next";
-import { config as baseConfig } from "./base.js";
+import { config as baseConfig, testOverrides } from "./base.js";
 
 /**
  * A custom ESLint configuration for libraries that use Next.js.
@@ -54,4 +54,7 @@ export const nextJsConfig = [
       "react/react-in-jsx-scope": "off",
     },
   },
+  // Last, so it wins over the tseslint recommended set spread in above — which
+  // otherwise turns no-explicit-any back on for test files.
+  testOverrides,
 ];

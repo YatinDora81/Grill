@@ -1,0 +1,4 @@
+# Test-only. Kept out of requirements.txt so the deployed image doesn't carry
+# a test runner — the Dockerfile installs requirements.txt alone.
+-r requirements.txt
+pytest==8.3.4

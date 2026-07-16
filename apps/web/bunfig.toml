@@ -1,0 +1,5 @@
+[test]
+# Registers a DOM and React's act environment before any test file is imported.
+# See test/setup.ts — this has to happen at preload, not per-file, because React
+# is imported at module scope by everything it renders.
+preload = ["./test/setup.ts"]

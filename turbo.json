@@ -1,7 +1,7 @@
 {
   "$schema": "https://turborepo.dev/schema.json",
   "ui": "tui",
-  "//": "globalEnv: every env var the app reads. Declared so a config change busts the build cache — an undeclared var means turbo happily replays a build made with different secrets.",
+  "//": "globalEnv: every env var the app reads. Declared so a config change busts the build cache \u2014 an undeclared var means turbo happily replays a build made with different secrets.",
   "globalEnv": [
     "NODE_ENV",
     "DATABASE_URL",
@@ -46,6 +46,10 @@
     "dev": {
       "cache": false,
       "persistent": true
+    },
+    "test": {
+      "dependsOn": ["^build"],
+      "outputs": []
     }
   }
 }
