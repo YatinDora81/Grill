@@ -40,6 +40,14 @@ function classify(err: unknown): { cls: ErrClass; retryAfterMs?: number } {
   const status = err instanceof ProviderError ? err.status : 0;
   if (status === 0) return { cls: "rotate" }; // network/timeout → transient
   if (status === 401 || status === 403) return { cls: "dead" }; // revoked key / denied project
+  // 404 reads like "our request" but Gemini scopes model access per project: one
+  // key answers `This model is no longer available` while every other key serves
+  // the same model fine. Treating it as fatal let a single restricted key kill a
+  // request the healthy keys could serve — and because generateText only reaches
+  // Groq on AllKeysExhausted, a fatal skipped the fallback too. It's a key fact,
+  // so it kills the key, not the request. A genuinely wrong model name now 404s
+  // every key, exhausts the pool, and degrades to Groq instead of hard-failing.
+  if (status === 404) return { cls: "dead" };
   if (status === 429 || (status >= 500 && status <= 599)) {
     return {
       cls: "rotate",

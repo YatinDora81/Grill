@@ -29,11 +29,87 @@ export interface QuestionInputs {
   weakSpots?: WeakSpot[];
 }
 
-export const QUESTION_SYSTEM = `You are a sharp, fair technical interviewer running a mock interview.
+/**
+ * A cultural-only interview has no technical ground to stand on, and calling
+ * the model a "technical interviewer" there quietly re-technicalises questions
+ * the brief just asked to be about people.
+ */
+export function questionSystem(c: InterviewConfig): string {
+  const role = culturalOnly(c)
+    ? "a sharp, fair interviewer running a mock behavioural interview"
+    : "a sharp, fair technical interviewer running a mock interview";
+  return `You are ${role}.
 Ask ONE question at a time. Questions must be specific and grounded in the provided context.
 Pitch every question at the candidate's stated years of experience, and follow the interview brief.
 Do not answer for the candidate.
+
+${QUALITY_BAR}
+
 Respond with JSON only — no prose, no code fences.`;
+}
+
+/**
+ * The bar a question has to clear.
+ *
+ * Left to itself the model writes the interview question it has seen most often
+ * — stock, compound, and answerable by anyone — because nothing in the prompt
+ * ever said what a bad question looks like. Naming the failure modes is what
+ * moves it; "ask a good question" does not.
+ */
+const QUALITY_BAR = `A question earns its place only if it clears all of this:
+- It names something concrete from the context — this system, that project, that
+  decision. If the question could be asked of any other candidate unchanged, it is
+  the wrong question. No stock prompts ("greatest strength", "where do you see
+  yourself", "explain REST").
+- It cannot be answered from the résumé alone. If the text already says it, asking
+  it back wastes the turn.
+- It cannot be answered yes/no, and it isn't definition recall. Go at judgement:
+  why that way, what it cost, what they'd do differently, what they got wrong.
+- It doesn't telegraph the answer you're fishing for.
+- No preamble, no praise, no "great answer" — the question text is the question only.`;
+
+/**
+ * Follow-ups are where a cultural interview leaks back into a technical one.
+ *
+ * Source-aware angles only govern the *new area* branch; the other branch tells
+ * the model to dig into whatever the candidate just said. Candidates answer
+ * behavioural questions with technical detail ("the ledger drifted so I re-ran
+ * the job"), the model pulls that thread, and the next question is "what caused
+ * the drift?" — a technical question in an interview that has no technical
+ * source. The thread is worth following; the *technology* in it is not.
+ */
+const CULTURAL_THREAD = `
+This is a behavioural interview. When the answer contains technical detail, do not follow the
+technology — follow the person in it: the judgement, the pressure, who else was affected, what
+they'd do differently. Never ask how a system works or why it broke.
+`;
+
+/**
+ * The one-question rule, as the last thing the model reads.
+ *
+ * Compound questions ("...what was the trade-off, and how did you fix it?") are
+ * the strongest failure mode here — both providers default to them, because a
+ * stapled question is what the training data calls an interview question. The
+ * rule is in QUALITY_BAR too and there it did nothing; position and bluntness
+ * are what move it. Measured stapled rates, small samples but consistent across
+ * two models: Gemini 43% over 30 questions with a polite mid-prompt rule; the
+ * wording below scored 17% (Gemini, n=12) and 20% (Groq, n=5) against 67% and
+ * 86% for the polite version. Treat those as direction, not precision.
+ *
+ * If this regresses, the next step is mechanical rather than rhetorical: detect
+ * the staple and re-ask, instead of asking the model more nicely.
+ */
+const ONE_QUESTION = `
+HARD CONSTRAINT — one question, one ask. Reread your question before answering: if it contains
+", and " followed by another ask, or more than one "?", you have FAILED and must rewrite it.
+Delete the weaker half; keep the sharper one. You get to ask the other next turn.
+Bad:  "What was the bottleneck, and how did you fix it?"
+Good: "What was the bottleneck?"`;
+
+/** No technical ground at all — every source this interview draws on is people. */
+function culturalOnly(c: InterviewConfig): boolean {
+  return c.mode === null && c.sources.length > 0 && c.sources.every((s) => s === "cultural");
+}
 
 /**
  * The same résumé produced the same interview every time. Temperature wasn't
@@ -41,8 +117,13 @@ Respond with JSON only — no prose, no code fences.`;
  * constrained the model still walks to its single most-likely opener. So vary
  * the *instruction* — each session draws an angle of attack, which changes what
  * is being asked for rather than just how it's sampled.
+ *
+ * The pools are per-source because the angle is the most specific instruction in
+ * the prompt, and the most specific instruction is the one that gets obeyed: a
+ * résumé angle handed to a cultural interview overrides its own brief and asks
+ * a technical question anyway.
  */
-const OPENING_ANGLES = [
+const RESUME_OPENERS = [
   "the most recent role in the résumé — what they actually shipped, not what the team shipped",
   "a specific technology the résumé claims depth in — find out how deep it really runs",
   "a project the résumé highlights — go at the part they'd rather gloss over",
@@ -53,7 +134,25 @@ const OPENING_ANGLES = [
   "the oldest or least-explained thing in the résumé",
 ] as const;
 
-const NEXT_AREA_ANGLES = [
+const TOPIC_OPENERS = [
+  "the core of the subject — whether they understand why it works, not just that it does",
+  "the subject as it shows up in work they've actually done",
+  "a common misconception about the subject — see whether they hold it",
+  "where the subject stops being textbook and starts being a judgement call",
+] as const;
+
+const CULTURAL_OPENERS = [
+  "why they're leaving — what stopped working where they are now",
+  "the work they're proudest of, and why that one rather than something bigger",
+  "a disagreement with someone they still had to work with the next day",
+  "a call they got wrong, and what it cost the people around them",
+  "a time they had to say no — to a manager, a customer, or a date",
+  "feedback that stung at the time and turned out to be right",
+  "what they want next, and why this role is it",
+  "what they're like when the pressure is on and the deadline isn't moving",
+] as const;
+
+const TECHNICAL_NEXT_AREAS = [
   "a technology or system that hasn't come up yet",
   "how they work with other people",
   "a failure, regression or incident implied by the context",
@@ -61,6 +160,73 @@ const NEXT_AREA_ANGLES = [
   "depth on something they mentioned only in passing",
   "an area that is conspicuously vague",
 ] as const;
+
+const CULTURAL_NEXT_AREAS = [
+  "conflict, when the other person was never going to budge",
+  "what they do once it's clear they're the one who's wrong",
+  "working with someone whose style is nothing like theirs",
+  "what actually keeps them somewhere, and what makes them start looking",
+  "something that broke and was theirs to own",
+  "an area that is conspicuously vague",
+] as const;
+
+const SOURCE_OPENERS: Record<InterviewSource, readonly string[]> = {
+  resume: RESUME_OPENERS,
+  topic: TOPIC_OPENERS,
+  cultural: CULTURAL_OPENERS,
+};
+
+const TOPIC_NEXT_AREAS = [
+  "a part of the subject that hasn't come up yet",
+  "where the subject's usual advice stops being true",
+  "the cost side of something they just praised",
+  "how they'd know their answer was wrong in production",
+  "depth on something they mentioned only in passing",
+  "an area that is conspicuously vague",
+] as const;
+
+const SOURCE_NEXT_AREAS: Record<InterviewSource, readonly string[]> = {
+  resume: TECHNICAL_NEXT_AREAS,
+  topic: TOPIC_NEXT_AREAS,
+  cultural: CULTURAL_NEXT_AREAS,
+};
+
+/**
+ * Exclusive modes carry no sources, so the pool is chosen by mode instead.
+ *
+ * `topic_only` may not use TECHNICAL_NEXT_AREAS: those angles reach for the
+ * résumé and for how they work with people, and a pure subject drill is defined
+ * by ignoring both. `real` never reads these — its stage brief picks the area.
+ */
+const MODE_OPENERS: Record<ExclusiveMode, readonly string[]> = {
+  topic_only: TOPIC_OPENERS,
+  jd: RESUME_OPENERS,
+  real: RESUME_OPENERS,
+  weak_spots: RESUME_OPENERS,
+};
+
+const MODE_NEXT_AREAS: Record<ExclusiveMode, readonly string[]> = {
+  topic_only: TOPIC_NEXT_AREAS,
+  jd: TECHNICAL_NEXT_AREAS,
+  real: TECHNICAL_NEXT_AREAS,
+  weak_spots: TECHNICAL_NEXT_AREAS,
+};
+
+/**
+ * The angles this interview is allowed to draw from: the union of its sources'
+ * pools, so a blend can go anywhere its brief allows while a single-source
+ * interview can only go where that source lives. An exclusive mode has no
+ * sources, so it draws from the pool its own shape implies.
+ */
+function anglesFor(
+  c: InterviewConfig,
+  table: Record<InterviewSource, readonly string[]>,
+  modeTable: Record<ExclusiveMode, readonly string[]>,
+): readonly string[] {
+  const pool = c.sources.flatMap((s) => table[s]);
+  if (pool.length) return pool;
+  return c.mode ? modeTable[c.mode] : table.resume;
+}
 
 function pick<T>(xs: readonly T[]): T {
   return xs[Math.floor(Math.random() * xs.length)]!;
@@ -105,8 +271,18 @@ Move between them as a real interviewer would — follow what the candidate says
 working through the list in order. By the end, every one of them must have been covered.`;
 }
 
-/** The instruction that tells the model what interview it is running. */
-function brief(c: InterviewConfig): string {
+/**
+ * The instruction that tells the model what interview it is running.
+ *
+ * `weak_spots` is briefed on "the questions below" — so with no scored history
+ * to draw on, that brief points at a list that isn't there and the model is left
+ * inventing what it was supposed to be re-asking. A first-time user reaching the
+ * mode early gets a plain résumé interview instead of a dangling reference.
+ */
+function brief(c: InterviewConfig, hasWeakSpots = true): string {
+  if (c.mode === "weak_spots" && !hasWeakSpots) {
+    return `Interview them on ${SOURCE_BRIEF.resume(c)}.`;
+  }
   return c.mode ? MODE_BRIEF[c.mode](c) : sourcesBrief(c);
 }
 
@@ -284,7 +460,7 @@ ${weak.map((w) => `- Q: ${w.question}\n  Their weak answer: ${(w.transcript || "
 export function firstQuestionPrompt(
   s: SessionContext,
   inputs: QuestionInputs = {},
-  angle = pick(OPENING_ANGLES),
+  angle = pick(anglesFor(s.config, SOURCE_OPENERS, MODE_OPENERS)),
 ): string {
   const mode = s.config.mode;
   const stage = mode === "real" ? `\n${stageBlock(0, s.config.num_questions)}\n` : "";
@@ -311,11 +487,12 @@ Go straight at something concrete.`;
 
   return `${contextBlock(s)}
 
-${brief(s.config)}
+${brief(s.config, !!inputs.weakSpots?.length)}
 ${stage}${weakSpotBlock(inputs.weakSpots)}${askedBlock(inputs.askedBefore)}
 Ask the FIRST interview question.
 ${aim}
 ${opener}
+${ONE_QUESTION}
 Return JSON: { "question": string, "question_type": ${TYPE_UNION} }`;
 }
 
@@ -324,12 +501,23 @@ export function followUpPrompt(
   history: { question: string; answer: string }[],
   turnsRemaining: number,
   inputs: QuestionInputs = {},
-  newArea = pick(NEXT_AREA_ANGLES),
+  newArea = pick(anglesFor(s.config, SOURCE_NEXT_AREAS, MODE_NEXT_AREAS)),
 ): string {
   const mode = s.config.mode;
   const total = s.config.num_questions;
   const index = history.length;
   const stage = mode === "real" ? `\n${stageBlock(index, total)}\n` : "";
+
+  // `real` already knows what this question is: the stage brief says so, by
+  // name. A random angle here is the same mistake that made cultural-only ask
+  // technical questions — the more specific instruction wins, and this one is
+  // both more specific and read later than the brief. At the last question that
+  // costs the interview its ending: the close is "do you have any questions for
+  // us?", and "lean toward a technology that hasn't come up yet" is not that.
+  const areaHint =
+    mode === "real"
+      ? " that the stage brief above calls for."
+      : ` — this time, lean toward: ${newArea}`;
 
   const transcript = history
     .map((h, i) => `Q${i + 1}: ${h.question}\nA${i + 1}: ${h.answer || "(no clear answer)"}`)
@@ -337,16 +525,16 @@ export function followUpPrompt(
 
   return `${contextBlock(s)}
 
-${brief(s.config)}
+${brief(s.config, !!inputs.weakSpots?.length)}
 ${stage}${weakSpotBlock(inputs.weakSpots)}${askedBlock(inputs.askedBefore)}
 Conversation so far:
 ${transcript}
 
 There are ${turnsRemaining} question(s) left after this one.
 Ask the NEXT question. If the last answer opens a worthwhile thread, ask a targeted follow-up
-that digs into something the candidate actually said; otherwise move to a new area — this time,
-lean toward: ${newArea}
+that digs into something the candidate actually said; otherwise move to a new area${areaHint}
 Never re-ask something already covered above, and don't rephrase a question they've answered.
+${culturalOnly(s.config) ? CULTURAL_THREAD : ""}${ONE_QUESTION}
 Return JSON: { "question": string, "question_type": ${TYPE_UNION} }`;
 }
 
