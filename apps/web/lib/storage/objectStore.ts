@@ -161,6 +161,8 @@ export function presignUploadPart(
 export interface UploadedPart {
   partNumber: number;
   etag: string;
+  /** When R2 received this part. The only evidence of whether anyone is still writing. */
+  lastModified: number | null;
 }
 
 /**
@@ -186,7 +188,11 @@ export async function listParts(key: string, uploadId: string): Promise<Uploaded
     for (const block of xml.match(/<Part>[\s\S]*?<\/Part>/g) ?? []) {
       const n = xmlTag(block, "PartNumber");
       const etag = xmlTag(block, "ETag");
-      if (n && etag) parts.push({ partNumber: Number(n), etag });
+      const at = xmlTag(block, "LastModified");
+      if (n && etag) {
+        const t = at ? Date.parse(at) : NaN;
+        parts.push({ partNumber: Number(n), etag, lastModified: Number.isNaN(t) ? null : t });
+      }
     }
     marker =
       xmlTag(xml, "IsTruncated") === "true"

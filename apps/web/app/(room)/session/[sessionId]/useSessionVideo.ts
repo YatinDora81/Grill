@@ -127,6 +127,9 @@ export function useSessionVideo(sessionId: string, bitsPerSecond: number): Sessi
   /** Uploads are serialised through this: parts must arrive in order. */
   const chainRef = useRef<Promise<void>>(Promise.resolve());
   const finishedRef = useRef(false);
+  /** Parts that exhausted their retries. Their numbers are already spent, so the
+   *  sequence has a hole and the object must never be stitched. */
+  const lostPartsRef = useRef<number[]>([]);
 
   /** PUT one part straight to R2. Retries — a lost part is a corrupt file. */
   const uploadPart = useCallback(async (blob: Blob, partNumber: number) => {
@@ -145,6 +148,11 @@ export function useSessionVideo(sessionId: string, bitsPerSecond: number): Sessi
       }
       await new Promise((r) => setTimeout(r, 500 * 2 ** attempt));
     }
+    // Nothing can rescue this part now — its number is spent and the recording
+    // has moved on. Recorded rather than thrown: the chain carries the remaining
+    // parts, which are still worth uploading for salvage, and a rejection here
+    // would take them down with it. finish() is where it becomes fatal.
+    lostPartsRef.current.push(partNumber);
     console.warn(`[video] part ${partNumber} failed after 3 attempts`);
   }, []);
 
@@ -281,10 +289,21 @@ export function useSessionVideo(sessionId: string, bitsPerSecond: number): Sessi
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
     setStream(null);
-    setState("stopped");
 
     drain(true);
     await chainRef.current;
+
+    // A lost part is a hole in the middle of the object, and completing would
+    // stitch straight across it into a file that plays wrong while claiming to
+    // be whole. Better an upload left open — the row keeps its uploadId, so the
+    // salvage path can still make what did arrive count — than a corrupt replay
+    // nobody knows is corrupt.
+    if (lostPartsRef.current.length) {
+      console.error(`[video] parts ${lostPartsRef.current.join(", ")} lost; not completing upload`);
+      setState("failed");
+      return;
+    }
+    setState("stopped");
 
     if (videoIdRef.current) {
       try {

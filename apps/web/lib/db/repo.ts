@@ -340,6 +340,35 @@ export function releaseReportLease(sessionId: string) {
 }
 
 /**
+ * Sessions the queue has quietly given up on.
+ *
+ * `generating_report` with the attempts spent is a state nothing can leave on
+ * its own: `claimReportLease` and `listPendingReportSessions` both require
+ * `attempts < MAX`, so the row is invisible to every worker while its status
+ * still promises a report is coming. The build's own catch normally fails such a
+ * session out, but it only runs if the build *threw* — one killed mid-flight
+ * (the function timing out is the common way) never reaches it, and a re-queue
+ * of an already-failed session walks straight back in.
+ *
+ * These are those rows, and the sweep exists to give them the ending the build
+ * never got to write.
+ */
+export function listStrandedReportSessions(take = 25) {
+  const now = new Date();
+  return prisma.session.findMany({
+    where: {
+      status: "generating_report",
+      report: { is: null },
+      reportAttempts: { gte: MAX_REPORT_ATTEMPTS },
+      OR: [{ reportLeaseUntil: null }, { reportLeaseUntil: { lt: now } }],
+    },
+    orderBy: { updatedAt: "asc" },
+    take,
+    select: { id: true },
+  });
+}
+
+/**
  * Sessions waiting on a report, oldest first.
  *
  * Leased rows are excluded rather than skipped later: this is what stops a

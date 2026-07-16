@@ -30,7 +30,10 @@ export type BuildOutcome = "built" | "already_built" | "not_claimed" | "failed";
  * Safe to call concurrently with itself and with the sweep: whoever loses the
  * claim returns `not_claimed` and does nothing.
  */
-export async function claimAndBuild(sessionId: string): Promise<BuildOutcome> {
+export async function claimAndBuild(
+  sessionId: string,
+  opts: { videoGraceMs?: number } = {},
+): Promise<BuildOutcome> {
   // Cheap pre-check. The claim below is what actually decides — this only
   // avoids burning an attempt on a session that's already finished.
   if (await repo.getReportBySession(sessionId)) return "already_built";
@@ -47,7 +50,15 @@ export async function claimAndBuild(sessionId: string): Promise<BuildOutcome> {
   //
   // Before the build, not after: the build is the part that can throw and
   // burn the session's attempts, and the footage must not be hostage to it.
-  await settleUnfinishedVideos(sessionId).catch((err) => {
+  //
+  // The grace is what keeps that from eating the recording it means to save.
+  // /end reaches here through after(), within a moment of a browser that fired
+  // video.finish() without awaiting it and is still pushing its tail; settling
+  // there stitches the upload shut mid-flush and the remainder never lands. The
+  // sweep arrives long after any writer is gone and passes no grace, so an
+  // upload that really was abandoned still gets settled — just not by the caller
+  // racing it.
+  await settleUnfinishedVideos(sessionId, { graceMs: opts.videoGraceMs }).catch((err) => {
     /* best-effort by contract — a report must never fail over housekeeping */
     console.warn(`[reportQueue] could not settle videos for ${sessionId}:`, err);
   });
@@ -101,5 +112,36 @@ export async function drainReports(budgetMs: number, max = 25): Promise<BuildOut
     }
     outcomes.push(await claimAndBuild(id));
   }
+
+  await failStrandedReports();
   return outcomes;
+}
+
+/**
+ * Close out sessions that ran out of attempts without anyone saying so.
+ *
+ * A build killed mid-flight never reaches the catch that would fail it, and it
+ * leaves behind the one state no worker will touch again: `generating_report`
+ * with the attempts spent. The candidate is left watching a spinner for a report
+ * that nobody is building and nobody will. Whatever the cause, the honest ending
+ * is the same one the catch would have written.
+ *
+ * Last, not first: a session stranded by *this* sweep's own final attempt should
+ * be told so now rather than after another day of spinning.
+ */
+async function failStrandedReports(): Promise<void> {
+  try {
+    const stranded = await repo.listStrandedReportSessions();
+    for (const { id } of stranded) {
+      await repo.setStatus(
+        id,
+        "error",
+        `Report generation failed after ${repo.MAX_REPORT_ATTEMPTS} attempts.`,
+      );
+      console.error(`[reportQueue] ${id} stranded out of attempts; failed out`);
+    }
+  } catch (err) {
+    /* the sweep's own result must survive its housekeeping */
+    console.error("[reportQueue] could not fail out stranded sessions:", err);
+  }
 }

@@ -9,7 +9,7 @@ import { videoRefSchema } from "@/lib/schemas";
 import { requireUserId } from "@/lib/auth";
 import { config } from "@/lib/env";
 import * as repo from "@/lib/db/repo";
-import { settleUnfinishedVideos } from "@/lib/services/videoService";
+import { settleUnfinishedVideos, VIDEO_FLUSH_GRACE_MS } from "@/lib/services/videoService";
 import { presignGet } from "@/lib/storage/objectStore";
 
 /** Mint a playback URL for a finished recording. */
@@ -37,7 +37,12 @@ export async function POST(req: Request) {
       // and no server-side event to settle it, so rather than 409ing forever at
       // footage that is sitting right there, stitch it now and serve it.
       // Idempotent and cheap: with nothing to settle this is one indexed read.
-      await settleUnfinishedVideos(video.sessionId).catch(() => {
+      // The grace covers the gap the status check above cannot: a candidate who
+      // reaches their report while the tail is still uploading has a session that
+      // is no longer `in_progress`, so only the parts themselves still say anyone
+      // is writing. Leaving it alone falls through to the 409, which is the
+      // honest answer — it really is still uploading.
+      await settleUnfinishedVideos(video.sessionId, { graceMs: VIDEO_FLUSH_GRACE_MS }).catch(() => {
         /* best-effort — fall through to the 409 below */
       });
       // Re-read: settling either completed the row or, for an upload that never

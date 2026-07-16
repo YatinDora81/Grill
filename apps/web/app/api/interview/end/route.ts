@@ -12,6 +12,8 @@ import { sessionIdSchema } from "@/lib/schemas";
 import { requireUserId } from "@/lib/auth";
 import * as repo from "@/lib/db/repo";
 import { claimAndBuild } from "@/lib/services/reportQueue";
+import { VIDEO_FLUSH_GRACE_MS } from "@/lib/services/videoService";
+
 
 /**
  * Finish an interview: queue its report and return immediately.
@@ -50,6 +52,16 @@ export async function POST(req: Request) {
       throw conflict("Session was cancelled.", "session_cancelled");
     }
 
+    // Re-queuing a session whose attempts are spent is worse than refusing it:
+    // `setStatus` would clear `errorReason` and promise a report, while
+    // `claimReportLease` — which requires `attempts < MAX` — would never take it
+    // again. The candidate would trade a stated failure for a spinner that
+    // outlives them. /interview/retry is how a failed interview is run again.
+    // (The early return above already proved there is no report to serve.)
+    if (session.reportAttempts >= repo.MAX_REPORT_ATTEMPTS) {
+      throw conflict("Report generation failed for this session.", "report_failed");
+    }
+
     // Enqueue. Idempotent: already-queued sessions just get re-kicked, which the
     // lease makes harmless — a second builder can't claim what the first holds.
     if (session.status !== "generating_report") {
@@ -61,7 +73,7 @@ export async function POST(req: Request) {
     // no client left listening by the time this runs.
     after(async () => {
       try {
-        await claimAndBuild(session_id);
+        await claimAndBuild(session_id, { videoGraceMs: VIDEO_FLUSH_GRACE_MS });
       } catch (err) {
         console.error(`[end] background build for ${session_id} threw:`, err);
       }
