@@ -31,20 +31,14 @@ jobs:
         with:
           bun-version: "1.3.7"
 
-      # unpdf declares `canvas` as an OPTIONAL dependency; it has no prebuilt
-      # binary for every runner and falls back to a source build that needs
-      # pkg-config and pixman. It is optional because unpdf works without it, so
-      # skipping it keeps `bun install` from failing the job over a dependency
-      # nothing here uses.
-      #
-      # The same flag also drops lightningcss / @tailwindcss/oxide platform
-      # binaries, which next build needs — reinstall just those for this runner.
+      # unpdf pulls optional `canvas`, which tries a native build (pkg-config /
+      # pixman) we don't need. --ignore-scripts skips that build while still
+      # installing platform optional packages — lightningcss / @tailwindcss/oxide
+      # .node binaries that `next build` requires. --omit=optional would drop
+      # those too and break the CSS step with:
+      #   Cannot find module '../lightningcss.linux-x64-gnu.node'
       - name: Install
-        run: |
-          bun install --frozen-lockfile --omit=optional
-          bun add --no-save \
-            lightningcss-linux-x64-gnu@1.32.0 \
-            @tailwindcss/oxide-linux-x64-gnu@4.3.2
+        run: bun install --frozen-lockfile --ignore-scripts
 
       - name: Lint
         run: bun run lint
