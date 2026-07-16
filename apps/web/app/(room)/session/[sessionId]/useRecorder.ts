@@ -21,6 +21,7 @@ function pickMimeType(): string | undefined {
 export function useRecorder(maxSeconds: number) {
   const [state, setState] = useState<RecorderState>("idle");
   const [seconds, setSeconds] = useState(0);
+  const [capped, setCapped] = useState(false);
   const [level, setLevel] = useState(0);
   const [error, setError] = useState("");
 
@@ -43,6 +44,12 @@ export function useRecorder(maxSeconds: number) {
   const rafRef = useRef<number | null>(null);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const resolveRef = useRef<((b: Blob | null) => void) | null>(null);
+  /**
+   * The take is promised from the moment recording starts, not from the moment
+   * someone asks for it: the cap stops the recorder on its own schedule, and a
+   * promise created later would have missed the only `onstop` there is.
+   */
+  const takeRef = useRef<Promise<Blob | null> | null>(null);
 
   const teardown = useCallback(() => {
     if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
@@ -62,7 +69,11 @@ export function useRecorder(maxSeconds: number) {
 
   const start = useCallback(async () => {
     setError("");
+    setCapped(false);
     setState("requesting");
+    // Drop the previous take up front: if this start never reaches a recorder,
+    // `stop()` must not hand back the last one.
+    takeRef.current = null;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true },
@@ -117,6 +128,9 @@ export function useRecorder(maxSeconds: number) {
         resolveRef.current = null;
       };
       recorderRef.current = rec;
+      takeRef.current = new Promise<Blob | null>((resolve) => {
+        resolveRef.current = resolve;
+      });
       rec.start();
       setSeconds(0);
       setState("recording");
@@ -125,7 +139,15 @@ export function useRecorder(maxSeconds: number) {
         setSeconds((s) => {
           const next = s + 1;
           // Hard stop at the server's limit rather than letting the upload 413.
-          if (next >= maxSeconds && rec.state === "recording") rec.stop();
+          if (next >= maxSeconds && rec.state === "recording") {
+            // Say so, don't just stop. Stopping flips `state` to "stopped",
+            // which is also what a manual stop looks like mid-submit — and the
+            // room's only submit button is rendered on `state === "recording"`,
+            // so it vanishes at the same instant. Without a signal that names the
+            // cap as the cause, a capped answer finishes and is never sent.
+            setCapped(true);
+            rec.stop();
+          }
           return next;
         });
       }, 1000);
@@ -143,23 +165,23 @@ export function useRecorder(maxSeconds: number) {
 
   /** Stop and resolve with the recorded audio (null if nothing was captured). */
   const stop = useCallback(() => {
-    return new Promise<Blob | null>((resolve) => {
-      const rec = recorderRef.current;
-      if (!rec || rec.state !== "recording") {
-        resolve(null);
-        return;
-      }
-      resolveRef.current = resolve;
-      rec.stop();
-    });
+    const rec = recorderRef.current;
+    const take = takeRef.current;
+    if (!rec || !take) return Promise.resolve(null);
+    // Already inactive means the cap got here first; the take it produced is
+    // waiting on this same promise.
+    if (rec.state !== "inactive") rec.stop();
+    return take;
   }, []);
 
   const reset = useCallback(() => {
     teardown();
+    takeRef.current = null;
     setState("idle");
     setSeconds(0);
+    setCapped(false);
     setError("");
   }, [teardown]);
 
-  return { state, seconds, level, error, start, stop, reset, supported };
+  return { state, seconds, level, error, capped, start, stop, reset, supported };
 }

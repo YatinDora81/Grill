@@ -202,6 +202,27 @@ export function HotSeat(props: Props) {
     }
   }
 
+  /**
+   * Submit the take the cap ended, because nothing else will.
+   *
+   * `useRecorder` stops itself at the ceiling, which flips its state out of
+   * "recording" — and the stop button is rendered on exactly that state, so the
+   * one control that submits an answer disappears at the instant the answer
+   * becomes complete. The candidate is left looking at a mic button that starts
+   * a new take over the finished one. Reaching the limit is a full answer, not a
+   * discarded one, so send it.
+   *
+   * `capped` is what makes this safe to key on: plain "stopped" is also what a
+   * manual submit looks like while `finishRecording` is awaiting the blob, and
+   * this would fire underneath it. Only the cap sets `capped`, and `start`/
+   * `reset` clear it, so it fires once per capped take.
+   */
+  const capSubmit = useRef(finishRecording);
+  capSubmit.current = finishRecording;
+  useEffect(() => {
+    if (rec.capped && phase === "answering") void capSubmit.current();
+  }, [rec.capped, phase]);
+
   async function finishRecording() {
     const blob = await rec.stop();
     if (!blob) {
