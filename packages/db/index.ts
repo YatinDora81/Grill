@@ -32,10 +32,20 @@ function createClient(): PrismaClient {
   return new PrismaClient({ adapter });
 }
 
+/**
+ * The cache is unconditional, and must stay that way.
+ *
+ * The usual Next idiom only stashes the client on globalThis outside production,
+ * because there a module-level `const` already holds it and the global exists
+ * purely to survive HMR. Here the module-level export is the Proxy below, not
+ * the client — so nothing else holds one, and skipping the assignment in
+ * production meant `globalForPrisma.prisma` stayed undefined forever and every
+ * property access built a fresh PrismaClient with its own pg pool. One request
+ * through repo.ts is several such clients; `$transaction` in markAudioPurged
+ * resolved to three different ones, which is not a transaction at all.
+ */
 function getClient(): PrismaClient {
-  const existing = globalForPrisma.prisma ?? createClient();
-  if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = existing;
-  return existing;
+  return (globalForPrisma.prisma ??= createClient());
 }
 
 /** Lazy proxy: the real client is constructed on first property access. */
