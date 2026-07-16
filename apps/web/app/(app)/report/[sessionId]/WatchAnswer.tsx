@@ -68,7 +68,12 @@ export function WatchAnswer({ videoId, offsetMs }: { videoId: string; offsetMs: 
   }, [offsetMs]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      // Closing unmounts the <video>, so a reopen mounts a fresh one back at
+      // 0:00 that has to be seeked all over again.
+      seeked.current = false;
+      return;
+    }
     void load();
   }, [open, load]);
 

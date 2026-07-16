@@ -32,6 +32,12 @@ export function FinishReport({ sessionId }: { sessionId: string }) {
   const router = useRouter();
   const [error, setError] = useState("");
   const [gaveUp, setGaveUp] = useState(false);
+  /**
+   * Bumped by "Try again". The poll loop stops by returning instead of
+   * rescheduling, so clearing the error state alone leaves it dead — only a new
+   * value in the effect's deps builds a fresh loop.
+   */
+  const [attempt, setAttempt] = useState(0);
   const startedAt = useRef(Date.now());
 
   const kick = useCallback(async () => {
@@ -83,7 +89,7 @@ export function FinishReport({ sessionId }: { sessionId: string }) {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [sessionId, router, kick]);
+  }, [sessionId, router, kick, attempt]);
 
   const stopped = Boolean(error) || gaveUp;
 
@@ -120,7 +126,7 @@ export function FinishReport({ sessionId }: { sessionId: string }) {
                 setError("");
                 setGaveUp(false);
                 startedAt.current = Date.now();
-                void kick().then(() => router.refresh());
+                setAttempt((n) => n + 1);
               }}
             >
               Try again

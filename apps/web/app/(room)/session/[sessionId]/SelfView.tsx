@@ -199,10 +199,13 @@ export function SelfView({ stream, onClose }: { stream: MediaStream | null; onCl
         />
       )}
 
+      {/* "Hide", not "turn off": this only unmounts the preview. The stream and
+          the recorder belong to useSessionVideo and keep running — the capture
+          light stays lit and the interview is still being recorded. */}
       <button
         onClick={onClose}
         onPointerDown={(e) => e.stopPropagation()}
-        aria-label="Turn the camera off"
+        aria-label="Hide the self view"
         className="absolute top-1.5 right-1.5 flex size-6 items-center justify-center rounded-full bg-room/70 text-room-ink opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
       >
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
