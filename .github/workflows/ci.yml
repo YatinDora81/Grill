@@ -45,8 +45,11 @@ jobs:
       - name: Types
         run: bun run check-types
 
+      # Audio has its own job (Python venv / pytest). Including it here makes
+      # turbo shell out to apps/audio/.venv/bin/pytest, which does not exist on
+      # this runner and fails the whole web suite with exit 127.
       - name: Test
-        run: bun run test
+        run: bunx turbo run test --filter=!@repo/audio
 
       - name: Build
         run: bun run build
