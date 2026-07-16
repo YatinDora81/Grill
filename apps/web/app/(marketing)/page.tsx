@@ -51,8 +51,12 @@ export default async function LandingPage() {
             <ButtonLink href={signedIn ? "/new" : "/signup"} size="lg">
               {signedIn ? "Start an interview" : "Take the hot seat"}
             </ButtonLink>
-            <ButtonLink href="/login" variant="secondary" size="lg">
-              I have an account
+            <ButtonLink
+              href={signedIn ? "/dashboard" : "/login"}
+              variant="secondary"
+              size="lg"
+            >
+              {signedIn ? "Go to dashboard" : "I have an account"}
             </ButtonLink>
           </div>
           <p className="mt-4 text-sm text-ink-muted">
