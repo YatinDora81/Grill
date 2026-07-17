@@ -14,7 +14,6 @@ fillers, pitch, energy). Tone is never inferred from the transcript.
 | `apps/audio` | FastAPI + Parselmouth acoustics service (pitch/energy). Python only. |
 | `packages/db` | Prisma 7 schema + client (`@repo/db`). |
 | `packages/types` | Shared API contract types (`@repo/types`). |
-| `packages/ui` | Shared React primitives (`@repo/ui`). |
 
 There is no separate backend app — `apps/web` is the whole stack.
 

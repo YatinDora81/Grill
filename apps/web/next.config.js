@@ -8,7 +8,7 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const nextConfig = {
   turbopack: { root: repoRoot },
   // Workspace packages shipped as TS source — Next must transpile them.
-  transpilePackages: ["@repo/db", "@repo/types", "@repo/ui"],
+  transpilePackages: ["@repo/db", "@repo/types"],
   // Native / Node-only deps: keep them external so Next doesn't try to bundle
   // the Prisma engine, pg, or the argon2 native binary.
   serverExternalPackages: [
