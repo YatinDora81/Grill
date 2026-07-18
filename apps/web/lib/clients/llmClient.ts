@@ -15,6 +15,12 @@ export interface GenerateOpts {
   prompt: string;
   temperature?: number;
   json?: boolean;
+  /**
+   * Per-call timeout override (ms). Defaults to config.rotation.providerTimeoutMs.
+   * A large one-shot call (e.g. a repo digest) needs longer than a normal
+   * question, or a slow completion aborts and reads as a network failure.
+   */
+  timeoutMs?: number;
 }
 
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
@@ -32,11 +38,15 @@ async function geminiGenerate(key: string, opts: GenerateOpts): Promise<string> 
   if (opts.system) body.systemInstruction = { parts: [{ text: opts.system }] };
 
   const res = await ensureOk(
-    await fetchWithTimeout(url, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    }),
+    await fetchWithTimeout(
+      url,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      },
+      opts.timeoutMs,
+    ),
     "gemini",
   );
   const data = (await res.json()) as {
@@ -52,16 +62,20 @@ async function groqChat(key: string, opts: GenerateOpts): Promise<string> {
   if (opts.system) messages.push({ role: "system", content: opts.system });
   messages.push({ role: "user", content: opts.prompt });
   const res = await ensureOk(
-    await fetchWithTimeout(GROQ_CHAT, {
-      method: "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
-      body: JSON.stringify({
-        model: config.groq.llmFallbackModel,
-        messages,
-        temperature: opts.temperature ?? 0.7,
-        ...(opts.json ? { response_format: { type: "json_object" } } : {}),
-      }),
-    }),
+    await fetchWithTimeout(
+      GROQ_CHAT,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
+        body: JSON.stringify({
+          model: config.groq.llmFallbackModel,
+          messages,
+          temperature: opts.temperature ?? 0.7,
+          ...(opts.json ? { response_format: { type: "json_object" } } : {}),
+        }),
+      },
+      opts.timeoutMs,
+    ),
     "groq",
   );
   const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };

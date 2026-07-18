@@ -57,12 +57,12 @@ if (!process.env.JWT_SECRET) {
   throw new Error("JWT_SECRET is required for auth.");
 }
 if (!process.env.GITHUB_TOKEN) {
-  // Soft-optional at boot, like Groq — but the project-import endpoint refuses to
-  // run without it, because reading a whole repo fans out to hundreds of GitHub
-  // calls and anonymous access is 60 req/hour per IP. A classic PAT (no scopes
-  // needed for public repos) raises it to 5,000.
+  // Soft-optional, like Groq: one import costs ~3 GitHub requests (metadata +
+  // languages + tarball), so anonymous access (60 req/hour per IP) survives light
+  // use — but serverless egress IPs are shared. A classic PAT (no scopes needed
+  // for public repos) raises it to 5,000/hour.
   console.warn(
-    "[env] GITHUB_TOKEN is empty — GitHub repo imports are disabled until it is set.",
+    "[env] GITHUB_TOKEN is empty — GitHub repo imports will use the anonymous 60 req/hour limit.",
   );
 }
 

@@ -13,7 +13,6 @@ COPY apps/web/package.json ./apps/web/
 COPY apps/audio/package.json ./apps/audio/
 COPY packages/db/package.json ./packages/db/
 COPY packages/types/package.json ./packages/types/
-COPY packages/ui/package.json ./packages/ui/
 COPY packages/eslint-config/package.json ./packages/eslint-config/
 COPY packages/typescript-config/package.json ./packages/typescript-config/
 # canvas (optional peer of unpdf) has no Linux prebuild and exits 1 even though

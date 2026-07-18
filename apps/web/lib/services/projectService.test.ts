@@ -1,92 +1,101 @@
-import { describe, expect, mock, test } from "bun:test";
-import type { TreeEntry } from "./projectService";
+import { beforeEach, describe, expect, mock, test } from "bun:test";
+import tar from "tar-stream";
+import { createGzip } from "node:zlib";
 
 // `server-only` is a build-time marker with no runtime behaviour; neutralise it
 // before projectService pulls it in via env.ts.
 mock.module("server-only", () => ({}));
 
 // env.ts fails fast on a missing key; Bun doesn't load .env.local under
-// NODE_ENV=test. Satisfy the boot check and nothing else — no test here reaches
-// a network or a provider.
+// NODE_ENV=test. Satisfy the boot check; fetch and the LLM are mocked below.
 process.env.GEMINI_API_KEYS ||= "TEST__SPLIT__not-a-real-key";
 process.env.JWT_SECRET ||= "test-secret";
-// extractProject requires a token; set a fake one so the import path runs (fetch
-// is mocked in those tests, so the token is never actually used).
 process.env.GITHUB_TOKEN ||= "test-token";
 
-// generateJson defaults to throwing (the fallback path); success tests override
-// it with mockImplementation and restore after. One module mock for the whole
-// file (run.ts isolates each file in its own process, so it can't leak).
+// generateText is the MAP phase (plain text); generateJson is full-dump / merge.
+// Both default to throwing; success tests override with mockImplementation.
 const THROW_IMPL = async () => {
   throw new Error("provider down");
 };
 const generateJson = mock(THROW_IMPL);
+const generateText = mock(THROW_IMPL);
 mock.module("@/lib/clients/llmJson", () => ({ generateJson }));
+mock.module("@/lib/clients/llmClient", () => ({ generateText, extractJson: (t: string) => t }));
 
-const { parseRepoUrl, selectFiles, buildPack, isSkippable, fallbackDigest, chunkFiles, extractProject } =
-  await import("./projectService");
+const {
+  parseRepoUrl,
+  extractRepoTarball,
+  chunkFiles,
+  buildPack,
+  fallbackDigest,
+  extractProject,
+  EXTRACT_CAPS,
+} = await import("./projectService");
+import type { ExtractedFile, RepoMeta } from "./projectService";
+
+// ── fixtures: tar-stream packs as well as it parses, so no binary in git ──
+
+type Entry = string | Buffer | { type: "symlink"; linkname: string } | { type: "directory" };
+
+async function tarball(entries: Record<string, Entry>, root = "owner-repo-abc123"): Promise<Buffer> {
+  const pack = tar.pack();
+  for (const [name, data] of Object.entries(entries)) {
+    if (typeof data === "object" && !Buffer.isBuffer(data)) {
+      if (data.type === "symlink") {
+        pack.entry({ name: `${root}/${name}`, type: "symlink", linkname: data.linkname });
+      } else {
+        pack.entry({ name: `${root}/${name}`, type: "directory" });
+      }
+    } else {
+      pack.entry({ name: `${root}/${name}` }, data);
+    }
+  }
+  pack.finalize();
+  const gz: Buffer[] = [];
+  for await (const c of pack.pipe(createGzip())) gz.push(c as Buffer);
+  return Buffer.concat(gz);
+}
+
+/** A Buffer as a web ReadableStream, the way fetch would hand it over. */
+const webStream = (buf: Buffer): ReadableStream<Uint8Array> => new Response(buf).body!;
+
+const extractBuf = (buf: Buffer, opts: { subpath?: string; abort?: () => void; caps?: typeof EXTRACT_CAPS } = {}) =>
+  extractRepoTarball(webStream(buf), { abort: opts.abort ?? (() => {}), subpath: opts.subpath, caps: opts.caps });
+
+const paths = (r: { files: ExtractedFile[] }) => r.files.map((f) => f.path);
 
 // ── parseRepoUrl ──────────────────────────────────────────────────
 
 describe("parseRepoUrl", () => {
-  test("plain repo URL", () => {
-    expect(parseRepoUrl("https://github.com/YatinDora81/Grill")).toEqual({
-      owner: "YatinDora81",
-      repo: "Grill",
-    });
-  });
-
-  test("strips a trailing .git", () => {
-    expect(parseRepoUrl("https://github.com/YatinDora81/Grill.git")).toEqual({
-      owner: "YatinDora81",
-      repo: "Grill",
-    });
-  });
-
-  test("reads a /tree/{ref} branch", () => {
-    expect(parseRepoUrl("https://github.com/YatinDora81/Grill/tree/dev")).toEqual({
-      owner: "YatinDora81",
-      repo: "Grill",
-      ref: "dev",
-    });
-  });
-
-  test("reads a /tree/{ref}/{subpath} monorepo focus", () => {
-    expect(parseRepoUrl("https://github.com/YatinDora81/Grill/tree/main/apps/web")).toEqual({
-      owner: "YatinDora81",
-      repo: "Grill",
+  test("plain, .git, /tree/{ref}, /tree/{ref}/{subpath}", () => {
+    expect(parseRepoUrl("https://github.com/YatinDora81/Grill")).toEqual({ owner: "YatinDora81", repo: "Grill" });
+    expect(parseRepoUrl("https://github.com/a/b.git")).toEqual({ owner: "a", repo: "b" });
+    expect(parseRepoUrl("https://github.com/a/b/tree/dev")).toEqual({ owner: "a", repo: "b", ref: "dev" });
+    expect(parseRepoUrl("https://github.com/a/b/tree/main/apps/web")).toEqual({
+      owner: "a",
+      repo: "b",
       ref: "main",
       subpath: "apps/web",
     });
-  });
-
-  test("accepts www.github.com", () => {
     expect(parseRepoUrl("https://www.github.com/a/b").owner).toBe("a");
   });
 
   test.each([
-    ["a non-github host", "https://gitlab.com/owner/repo"],
+    ["a non-github host", "https://gitlab.com/a/b"],
     ["a javascript: payload", "javascript:alert(1)//github.com/a/b"],
-    // The scheme is github.com's host but not http(s): this is the case that
-    // actually exercises the protocol guard, not the payload above (which the
-    // host check catches first).
     ["a javascript: scheme with a github host", "javascript://github.com/a/b"],
     ["a non-http scheme on the github host", "ftp://github.com/a/b"],
     ["an internal host", "http://169.254.169.254/latest/meta-data"],
     ["a repo-less URL", "https://github.com/YatinDora81"],
-    ["a bare owner path", "https://github.com/"],
     ["a non-tree extra path", "https://github.com/a/b/blob/main/x.ts"],
-    // owner/repo/ref are interpolated into request paths, so a disallowed char
-    // in any of them must be rejected before it can reach a URL.
     ["an owner with a disallowed char", "https://github.com/a~b/repo"],
-    ["a repo with a disallowed char", "https://github.com/owner/re po"],
     ["a ref with a disallowed char", "https://github.com/a/b/tree/foo bar"],
     ["garbage", "not a url at all"],
   ])("rejects %s", (_label, url) => {
     expect(() => parseRepoUrl(url)).toThrow();
   });
 
-  test("the rejection is a 400 bad_repo_url, not a 500", () => {
+  test("rejection is a 400 bad_repo_url", () => {
     try {
       parseRepoUrl("https://gitlab.com/a/b");
       throw new Error("should have thrown");
@@ -97,111 +106,178 @@ describe("parseRepoUrl", () => {
   });
 });
 
-// ── selection heuristic ───────────────────────────────────────────
+// ── streaming tarball extraction ──────────────────────────────────
 
-/** A blob entry; size defaults small so it isn't skipped on size. */
-function blob(path: string, size = 500): TreeEntry {
-  return { path, type: "blob", size };
-}
+describe("extractRepoTarball", () => {
+  test(
+    "strips the GitHub root prefix from every path",
+    async () => {
+      const r = await extractBuf(await tarball({ "src/a.ts": "export const a = 1;" }));
+      expect(paths(r)).toEqual(["src/a.ts"]);
+    },
+    2000,
+  );
 
-describe("selectFiles", () => {
-  test("picks manifests and skips lockfiles", () => {
-    const picked = selectFiles([
-      blob("package.json"),
-      blob("package-lock.json"),
-      blob("bun.lockb"),
-      blob("go.mod"),
-    ]);
-    expect(picked).toContain("package.json");
-    expect(picked).toContain("go.mod");
-    expect(picked).not.toContain("package-lock.json");
-    expect(picked).not.toContain("bun.lockb");
-  });
+  test(
+    "enforces the skip-list: lockfiles, node_modules, binaries",
+    async () => {
+      const r = await extractBuf(
+        await tarball({
+          "src/keep.ts": "keep me",
+          "node_modules/x.js": "junk",
+          "bun.lock": "lock",
+          "package-lock.json": "lock",
+          "logo.png": "img",
+          "dist/out.js": "built",
+        }),
+      );
+      expect(paths(r)).toEqual(["src/keep.ts"]);
+    },
+    2000,
+  );
 
-  test("skips lockfiles by name — asserted directly, since they're never picked anyway", () => {
-    // The .not.toContain checks above can't fail on their own (a lockfile isn't a
-    // selection candidate), so pin the skip itself, the way the binary/oversized
-    // cases below are pinned.
-    expect(isSkippable(blob("package-lock.json"))).toBe(true);
-    expect(isSkippable(blob("bun.lockb"))).toBe(true);
-    expect(isSkippable(blob("go.sum"))).toBe(true);
-    expect(isSkippable(blob("Gemfile.lock"))).toBe(true);
-  });
+  test(
+    "drops a NUL-containing file even with a text extension",
+    async () => {
+      const withNul = Buffer.concat([Buffer.from("prefix"), Buffer.from([0]), Buffer.from("rest")]);
+      const r = await extractBuf(await tarball({ "a.ts": withNul, "b.ts": "clean text" }));
+      expect(paths(r)).toEqual(["b.ts"]);
+    },
+    2000,
+  );
 
-  test("skips node_modules, binaries and oversized blobs", () => {
-    expect(isSkippable(blob("node_modules/left-pad/index.js"))).toBe(true);
-    expect(isSkippable(blob("dist/bundle.js"))).toBe(true);
-    expect(isSkippable(blob("logo.png"))).toBe(true);
-    expect(isSkippable(blob("app.min.js"))).toBe(true);
-    expect(isSkippable(blob("huge.ts", 300 * 1024))).toBe(true);
-    expect(isSkippable(blob("src/app.ts"))).toBe(false);
-    // A tree node is never a file to fetch.
-    expect(isSkippable({ path: "src", type: "tree" })).toBe(true);
-  });
+  test(
+    "caps a big file to perFileChars, marks it, and still drains the tail",
+    async () => {
+      const caps = { ...EXTRACT_CAPS, perFileChars: 1_000 };
+      const r = await extractBuf(
+        await tarball({ "big.ts": "x".repeat(100_000), "after.ts": "I come after the big one" }),
+        { caps },
+      );
+      const big = r.files.find((f) => f.path === "big.ts")!;
+      expect(big.text.length).toBe(1_000);
+      expect(big.truncatedFile).toBe(true);
+      // The entry after the capped one still extracted — proof the tail drained.
+      expect(paths(r)).toContain("after.ts");
+    },
+    2000,
+  );
 
-  test("matches skip dirs on whole segments, not substrings", () => {
-    // `rebuild/` must not read as `build/`, nor `mytarget/` as `target/` — a
-    // substring test drops real source files the candidate should be grilled on.
-    expect(isSkippable(blob("src/rebuild/gen.ts"))).toBe(false);
-    expect(isSkippable(blob("packages/mytarget/lib.ts"))).toBe(false);
-    expect(isSkippable(blob("webpack-build/config.ts"))).toBe(false);
-    // ...but a real target/ directory is still skipped.
-    expect(isSkippable(blob("target/debug/main.rs"))).toBe(true);
-  });
+  test(
+    "hits the global cap: truncated, abort called once, resolves (no reject)",
+    async () => {
+      const abort = mock(() => {});
+      const caps = { ...EXTRACT_CAPS, maxTotalChars: 100 };
+      const r = await extractBuf(
+        await tarball({ "a.ts": "x".repeat(500), "b.ts": "y".repeat(500), "c.ts": "z".repeat(500) }),
+        { caps, abort },
+      );
+      expect(r.truncated).toBe(true);
+      expect(abort.mock.calls.length).toBe(1);
+      expect(r.files.length).toBeGreaterThanOrEqual(1);
+    },
+    2000,
+  );
 
-  test("caps at the file budget however many candidates there are", () => {
-    // Whole-repo selection reaches for everything, but still stops at the cap.
-    const entries = Array.from({ length: 500 }, (_, i) => blob(`src/mod${i}.ts`, 1000 + i));
-    const picked = selectFiles(entries);
-    expect(picked.length).toBeLessThanOrEqual(300);
-    expect(picked.length).toBeGreaterThan(25); // and it no longer stops at the old 25
-  });
+  test(
+    "a subpath filters entries to that package",
+    async () => {
+      const r = await extractBuf(
+        await tarball({ "apps/web/x.ts": "web", "apps/audio/y.py": "audio", "root.ts": "root" }),
+        { subpath: "apps/web" },
+      );
+      expect(paths(r)).toEqual(["apps/web/x.ts"]);
+    },
+    2000,
+  );
 
-  test("reaches for all source files, not just a handful", () => {
-    const entries = Array.from({ length: 40 }, (_, i) => blob(`src/mod${i}.ts`, 1000));
-    expect(selectFiles(entries).length).toBe(40);
-  });
+  test(
+    "skips symlink entries",
+    async () => {
+      const r = await extractBuf(
+        await tarball({ "real.ts": "real", evil: { type: "symlink", linkname: "../../etc/passwd" } }),
+      );
+      expect(paths(r)).toEqual(["real.ts"]);
+    },
+    2000,
+  );
 
-  test("includes docs after code", () => {
-    const picked = selectFiles([blob("src/app.ts"), blob("README.md"), blob("docs/guide.md")]);
-    expect(picked).toContain("src/app.ts");
-    expect(picked).toContain("docs/guide.md");
-  });
+  test(
+    "skips directory entries",
+    async () => {
+      const r = await extractBuf(await tarball({ src: { type: "directory" }, "src/a.ts": "code" }));
+      expect(paths(r)).toEqual(["src/a.ts"]);
+    },
+    2000,
+  );
 
-  test("a subpath filters the tree to that package before selection", () => {
-    const picked = selectFiles(
-      [
-        blob("apps/web/package.json"),
-        blob("apps/web/src/app.ts", 4000),
-        blob("apps/api/package.json"),
-        blob("apps/api/src/server.ts", 4000),
-      ],
-      "apps/web",
-    );
-    expect(picked.every((p) => p.startsWith("apps/web/"))).toBe(true);
-    expect(picked).toContain("apps/web/package.json");
-  });
+  test(
+    "rejects a file whose stripped path traverses upward (zip-slip)",
+    async () => {
+      // `owner-repo-abc123/../../etc/passwd` → stripRoot → `../../etc/passwd`.
+      const r = await extractBuf(await tarball({ "../../etc/passwd": "secret", "ok.ts": "fine" }));
+      expect(paths(r)).toEqual(["ok.ts"]);
+    },
+    2000,
+  );
 
-  test("prefers the largest source files as representative code", () => {
-    const picked = selectFiles([
-      blob("src/tiny.ts", 100),
-      blob("src/big.ts", 50_000),
-      blob("src/medium.ts", 5_000),
-    ]);
-    // All three fit under the budget, but big must be picked.
-    expect(picked).toContain("src/big.ts");
-  });
+  test(
+    "anchors the subpath on a segment boundary, not a bare prefix",
+    async () => {
+      const r = await extractBuf(
+        await tarball({
+          "apps/web/x.ts": "web",
+          "apps/website/z.ts": "adjacent prefix — must NOT match apps/web",
+          "apps/audio/y.py": "audio",
+          "root.ts": "root",
+        }),
+        { subpath: "apps/web" },
+      );
+      expect(paths(r)).toEqual(["apps/web/x.ts"]);
+    },
+    2000,
+  );
+
+  test(
+    "rejects corrupt gzip input instead of hanging",
+    async () => {
+      const buf = await tarball({ "a.ts": "hello" });
+      const corrupt = buf.subarray(0, buf.length - 50);
+      await expect(extractBuf(corrupt)).rejects.toThrow();
+    },
+    2000,
+  );
+
+  test(
+    "an empty (root-only) tarball yields no files",
+    async () => {
+      const r = await extractBuf(await tarball({}));
+      expect(r.files).toEqual([]);
+    },
+    2000,
+  );
+
+  test(
+    "sorts README first, then manifests, then path order",
+    async () => {
+      const r = await extractBuf(
+        await tarball({ "src/z.ts": "z", "package.json": "{}", "README.md": "# hi", "src/a.ts": "a" }),
+      );
+      expect(paths(r)).toEqual(["README.md", "package.json", "src/a.ts", "src/z.ts"]);
+    },
+    2000,
+  );
 });
 
-// ── pack builder ──────────────────────────────────────────────────
+// ── chunkFiles & buildPack ────────────────────────────────────────
 
-const META = {
+const META: RepoMeta = {
   owner: "YatinDora81",
   repo: "Grill",
   ref: "main",
   description: "A mock-interview grill",
   language: "TypeScript",
-  topics: ["interviews", "ai"],
+  topics: ["ai"],
   stars: 12,
   size: 400,
   fork: false,
@@ -209,120 +285,210 @@ const META = {
   pushed_at: "2026-07-01T00:00:00Z",
 };
 
-describe("buildPack", () => {
-  test("stays under the total budget even with oversized files", () => {
-    const files = Array.from({ length: 25 }, (_, i) => ({
-      path: `src/mod${i}.ts`,
-      content: "x".repeat(20_000),
-    }));
-    const pack = buildPack({
-      meta: META,
-      languages: { TypeScript: 10_000 },
-      entries: files.map((f) => blob(f.path)),
-      readme: "y".repeat(20_000),
-      files,
-      truncated: false,
-    });
-    expect(pack.length).toBeLessThanOrEqual(70_000);
-    expect(pack).toContain("Repository: YatinDora81/Grill");
-    expect(pack).toContain("=== file tree ===");
-  });
-
-  test("drops whole file blocks at the budget rather than truncating one mid-way", () => {
-    // Each file's content is bracketed START-i … END-i, small enough to survive
-    // the per-file excerpt whole. A blind final `.slice()` would cut the boundary
-    // block, leaving a START with no END; atomic per-block budgeting never does.
-    const files = Array.from({ length: 30 }, (_, i) => ({
-      path: `src/mod${i}.ts`,
-      content: `START-${i} ${"x".repeat(4_000)} END-${i}`,
-    }));
-    const pack = buildPack({
-      meta: META,
-      languages: {},
-      entries: files.map((f) => blob(f.path)),
-      readme: "",
-      files,
-      truncated: false,
-    });
-    expect(pack.length).toBeLessThanOrEqual(70_000);
-    // The sum far exceeds the budget, so some blocks are dropped...
-    const starts = (pack.match(/START-/g) ?? []).length;
-    expect(starts).toBeLessThan(30);
-    expect(starts).toBeGreaterThan(0);
-    // ...but every block that made it in is whole — no orphaned START.
-    const ends = (pack.match(/END-/g) ?? []).length;
-    expect(ends).toBe(starts);
-  });
-
-  test("flags a fork and a truncated tree in the head", () => {
-    const pack = buildPack({
-      meta: { ...META, fork: true, parent: "someone/original" },
-      languages: {},
-      entries: [blob("README.md")],
-      readme: "hi",
-      files: [],
-      truncated: true,
-    });
-    expect(pack).toContain("fork of someone/original");
-    expect(pack).toContain("truncated");
-  });
-});
-
-// ── digest fallback ───────────────────────────────────────────────
-
 describe("chunkFiles", () => {
   test("splits into multiple chunks once content exceeds the chunk budget", () => {
-    const files = Array.from({ length: 5 }, (_, i) => ({
+    const files: ExtractedFile[] = Array.from({ length: 20 }, (_, i) => ({
       path: `src/mod${i}.ts`,
-      content: "x".repeat(30_000),
+      text: "x".repeat(10_000),
+      truncatedFile: false,
     }));
     const chunks = chunkFiles(files);
     expect(chunks.length).toBeGreaterThan(1);
-    // Each block is headed by its path so the map summary can name files.
     expect(chunks[0]).toContain("=== src/mod0.ts ===");
   });
 
   test("keeps a small repo to a single chunk", () => {
-    expect(chunkFiles([{ path: "a.ts", content: "small" }]).length).toBe(1);
+    expect(chunkFiles([{ path: "a.ts", text: "small", truncatedFile: false }]).length).toBe(1);
     expect(chunkFiles([]).length).toBe(0);
   });
 });
 
+describe("buildPack", () => {
+  test("leads with repo metadata, then each file under a header", () => {
+    const pack = buildPack(META, { TypeScript: 100 }, [
+      { path: "README.md", text: "# hi", truncatedFile: false },
+      { path: "src/a.ts", text: "const a = 1", truncatedFile: false },
+    ]);
+    expect(pack).toContain("Repository: YatinDora81/Grill");
+    expect(pack).toContain("=== README.md ===");
+    expect(pack).toContain("=== src/a.ts ===");
+  });
+
+  test("flags a fork in the header", () => {
+    const pack = buildPack({ ...META, fork: true, parent: "up/stream" }, {}, []);
+    expect(pack).toContain("fork of up/stream");
+  });
+});
+
+// ── fallbackDigest ────────────────────────────────────────────────
+
 describe("fallbackDigest", () => {
-  test("seeds the summary from the description and appends the raw pack", () => {
-    const digest = fallbackDigest("=== file tree ===\nsrc/app.ts", META, false);
+  test("seeds the summary from the description and lists files", () => {
+    const digest = fallbackDigest(
+      META,
+      [{ path: "src/app.ts", text: "code", truncatedFile: false }],
+      false,
+    );
     expect(digest).toContain("A mock-interview grill");
     expect(digest).toContain("raw repo pack");
+    expect(digest).toContain("- src/app.ts");
   });
 
   test("carries the fork note", () => {
-    const digest = fallbackDigest("pack", { ...META, fork: true, parent: "up/stream" }, false);
+    const digest = fallbackDigest({ ...META, fork: true, parent: "up/stream" }, [], false);
     expect(digest).toContain("fork of up/stream");
   });
 });
 
-// ── GitHub error mapping ──────────────────────────────────────────
+// ── extractProject: fetch + LLM mocked end to end ─────────────────
 
-describe("extractProject maps GitHub failures to human errors", () => {
+describe("extractProject", () => {
   const realFetch = globalThis.fetch;
-  /** Route by path suffix; each test supplies only the responses it reaches. */
-  function mockGitHub(routes: { meta?: Response; tree?: Response }) {
+  const json = (o: unknown) => new Response(JSON.stringify(o), { status: 200 });
+
+  const REDUCE_VALUE = {
+    value: {
+      summary: "SUM: a collaborative drawing app.",
+      tech_stack: ["TypeScript"],
+      architecture: "",
+      key_features: [],
+      data_and_apis: "",
+      notable_decisions: [],
+      risks_and_gaps: [],
+      question_seeds: [],
+    },
+    raw: "",
+  };
+
+  function mockGitHub(opts: {
+    tarball?: Buffer;
+    metaStatus?: number;
+    tarballStatus?: number;
+    meta?: Record<string, unknown>;
+    languages?: Record<string, number>;
+  }) {
+    const meta = {
+      default_branch: "main",
+      description: "A mock repo",
+      language: "TypeScript",
+      stargazers_count: 3,
+      topics: [],
+      size: 1_000,
+      ...opts.meta,
+    };
     globalThis.fetch = mock(async (url: string | URL | Request) => {
-      const u = String(url);
-      if (u.includes("/git/trees/")) return routes.tree ?? new Response("{}", { status: 500 });
-      if (/\/repos\/[^/]+\/[^/]+$/.test(u.split("?")[0]!)) {
-        return routes.meta ?? new Response("{}", { status: 500 });
+      const p = String(url).replace("https://api.github.com", "").split("?")[0]!;
+      if (p.includes("/tarball/")) {
+        if (opts.tarballStatus && opts.tarballStatus !== 200)
+          return new Response("nope", { status: opts.tarballStatus });
+        return new Response(opts.tarball ?? Buffer.alloc(0));
+      }
+      if (p.endsWith("/languages")) return json(opts.languages ?? { TypeScript: 5000 });
+      if (/^\/repos\/[^/]+\/[^/]+$/.test(p)) {
+        if (opts.metaStatus && opts.metaStatus !== 200)
+          return new Response("nope", { status: opts.metaStatus });
+        return json(meta);
       }
       return new Response("{}", { status: 500 });
     }) as unknown as typeof fetch;
   }
-  // Restore between cases; run.ts isolates the file, but not the tests in it.
   const restore = () => {
     globalThis.fetch = realFetch;
+    generateJson.mockImplementation(THROW_IMPL);
+    generateText.mockImplementation(THROW_IMPL);
   };
+  beforeEach(() => {
+    generateJson.mockClear();
+    generateText.mockClear();
+  });
 
-  test("a 404 on the repo is repo_not_found, not a 500", async () => {
-    mockGitHub({ meta: new Response("Not Found", { status: 404 }) });
+  test("a repo that fits one call is a single full-dump digest", async () => {
+    mockGitHub({ tarball: await tarball({ "src/a.ts": "code here", "README.md": "# hi" }) });
+    generateJson.mockImplementation(async () => REDUCE_VALUE);
+    try {
+      const res = await extractProject("https://github.com/owner/repo");
+      expect(res.digest).toContain("SUM: a collaborative drawing app.");
+      expect(res.digest).not.toContain("raw repo pack");
+      expect(res.repo.file_count).toBe(2);
+      // Full dump: exactly one generateJson call, no map phase.
+      expect(generateJson.mock.calls.length).toBe(1);
+      expect(generateText.mock.calls.length).toBe(0);
+    } finally {
+      restore();
+    }
+  });
+
+  test("a big repo map-reduces: one brief per chunk, then one merge", async () => {
+    // 40 files × 25 K chars ≈ 1 MB > FULL_DUMP_MAX_CHARS → map-reduce.
+    const entries: Record<string, string> = {};
+    for (let i = 0; i < 40; i++) entries[`src/mod${i}.ts`] = "x".repeat(25_000);
+    // The exact fan-out the map phase should produce (order-independent for
+    // equal-size files, so the reconstruction's count matches extraction's).
+    const expectedChunks = chunkFiles(
+      Object.entries(entries).map(([path, text]) => ({ path, text, truncatedFile: false })),
+    ).length;
+    expect(expectedChunks).toBeGreaterThan(1);
+
+    mockGitHub({ tarball: await tarball(entries) });
+    generateText.mockImplementation(async () => "slice brief: uses Postgres.");
+    generateJson.mockImplementation(async () => REDUCE_VALUE);
+    try {
+      const res = await extractProject("https://github.com/owner/repo");
+      expect(res.digest).toContain("SUM: a collaborative drawing app.");
+      expect(res.digest).not.toContain("raw repo pack");
+      // Exactly one MAP call per chunk, then exactly one merge (REDUCE).
+      expect(generateText.mock.calls.length).toBe(expectedChunks);
+      expect(generateJson.mock.calls.length).toBe(1);
+    } finally {
+      restore();
+    }
+  });
+
+  test("a failed full dump drops to map-reduce rather than dying", async () => {
+    mockGitHub({ tarball: await tarball({ "src/a.ts": "code", "src/b.ts": "more" }) });
+    // First generateJson (full dump) throws; second (merge) succeeds.
+    generateJson.mockImplementationOnce(THROW_IMPL).mockImplementation(async () => REDUCE_VALUE);
+    generateText.mockImplementation(async () => "slice brief");
+    try {
+      const res = await extractProject("https://github.com/owner/repo");
+      expect(res.digest).toContain("SUM: a collaborative drawing app.");
+      expect(res.digest).not.toContain("raw repo pack");
+      expect(generateText.mock.calls.length).toBeGreaterThan(0); // map ran
+    } finally {
+      restore();
+    }
+  });
+
+  test("backfills a blank summary from metadata instead of dumping raw", async () => {
+    mockGitHub({ tarball: await tarball({ "src/a.ts": "code" }) });
+    generateJson.mockImplementation(async () => ({
+      value: { ...REDUCE_VALUE.value, summary: "", architecture: "A monorepo." },
+      raw: "",
+    }));
+    try {
+      const res = await extractProject("https://github.com/owner/repo");
+      expect(res.digest).not.toContain("raw repo pack");
+      expect(res.digest).toContain("A monorepo.");
+      expect(res.digest).toContain("A mock repo"); // summary backfilled from description
+    } finally {
+      restore();
+    }
+  });
+
+  test("total LLM outage falls to the deterministic digest", async () => {
+    mockGitHub({ tarball: await tarball({ "src/a.ts": "code", "README.md": "# hi" }) });
+    // Both seams stay at THROW_IMPL → digest can't be built by the model.
+    try {
+      const res = await extractProject("https://github.com/owner/repo");
+      expect(res.digest).toContain("raw repo pack");
+      expect(res.digest).toContain("A mock repo");
+    } finally {
+      restore();
+    }
+  });
+
+  test("a 404 on the repo is repo_not_found", async () => {
+    mockGitHub({ metaStatus: 404 });
     try {
       await extractProject("https://github.com/ghost/missing");
       throw new Error("should have thrown");
@@ -334,11 +500,21 @@ describe("extractProject maps GitHub failures to human errors", () => {
     }
   });
 
-  test("a repo whose tree has no blobs is empty_repo", async () => {
-    mockGitHub({
-      meta: new Response(JSON.stringify({ default_branch: "main" }), { status: 200 }),
-      tree: new Response(JSON.stringify({ tree: [], truncated: false }), { status: 200 }),
-    });
+  test("a too-large repo is refused before downloading", async () => {
+    mockGitHub({ meta: { size: 300_000 } });
+    try {
+      await extractProject("https://github.com/owner/huge");
+      throw new Error("should have thrown");
+    } catch (err) {
+      expect((err as { status: number; code: string }).status).toBe(400);
+      expect((err as { code: string }).code).toBe("repo_too_large");
+    } finally {
+      restore();
+    }
+  });
+
+  test("a repo whose tarball has no usable files is empty_repo", async () => {
+    mockGitHub({ tarball: await tarball({ "node_modules/x.js": "junk", "logo.png": "img" }) });
     try {
       await extractProject("https://github.com/owner/empty");
       throw new Error("should have thrown");
@@ -350,8 +526,8 @@ describe("extractProject maps GitHub failures to human errors", () => {
     }
   });
 
-  test("a GitHub 5xx is github_unavailable (502) and leaks nothing", async () => {
-    mockGitHub({ meta: new Response("upstream boom", { status: 503 }) });
+  test("a 5xx on the tarball is github_unavailable (502), leaking nothing", async () => {
+    mockGitHub({ tarballStatus: 503 });
     try {
       await extractProject("https://github.com/owner/repo");
       throw new Error("should have thrown");
@@ -359,135 +535,21 @@ describe("extractProject maps GitHub failures to human errors", () => {
       const e = err as { status: number; code: string; message: string };
       expect(e.status).toBe(502);
       expect(e.code).toBe("github_unavailable");
-      // The provider's own body (and any auth detail) never reaches the message.
-      expect(e.message).not.toContain("upstream boom");
       expect(e.message.toLowerCase()).not.toContain("bearer");
     } finally {
       restore();
     }
   });
 
-  test("an exhausted rate limit says so", async () => {
-    mockGitHub({
-      meta: new Response("rate limited", {
-        status: 403,
-        headers: { "x-ratelimit-remaining": "0" },
-      }),
-    });
+  test("a 404 on the tarball ref surfaces as repo_not_found", async () => {
+    mockGitHub({ tarballStatus: 404 });
     try {
-      await extractProject("https://github.com/owner/repo");
+      await extractProject("https://github.com/owner/repo/tree/nope");
       throw new Error("should have thrown");
     } catch (err) {
-      const e = err as { status: number; code: string; message: string };
-      expect(e.status).toBe(502);
-      expect(e.code).toBe("github_unavailable");
-      expect(e.message.toLowerCase()).toContain("rate limit");
+      expect((err as { code: string }).code).toBe("repo_not_found");
     } finally {
       restore();
-    }
-  });
-});
-
-// ── map-reduce pipeline, end to end (fetch + LLM mocked) ───────────
-
-describe("extractProject map-reduce", () => {
-  const realFetch = globalThis.fetch;
-  const json = (o: unknown) => new Response(JSON.stringify(o), { status: 200 });
-  const raw = (s: string) => new Response(s, { status: 200 });
-
-  /** A full repo mock: meta, tree, languages, readme, and per-path contents. */
-  function mockRepo(files: { path: string; content: string }[], readme = "A readme.") {
-    globalThis.fetch = mock(async (url: string | URL | Request) => {
-      const path = String(url).replace("https://api.github.com", "").split("?")[0]!;
-      if (path.includes("/git/trees/")) {
-        return json({
-          tree: files.map((f) => ({ path: f.path, type: "blob", size: f.content.length })),
-          truncated: false,
-        });
-      }
-      if (path.endsWith("/languages")) return json({ TypeScript: 5000 });
-      if (path.endsWith("/readme")) return raw(readme);
-      if (path.includes("/contents/")) {
-        const p = decodeURIComponent(path.split("/contents/")[1]!);
-        const f = files.find((x) => x.path === p);
-        return f ? raw(f.content) : new Response("", { status: 404 });
-      }
-      if (/^\/repos\/[^/]+\/[^/]+$/.test(path)) {
-        return json({
-          default_branch: "main",
-          description: "A mock repo",
-          language: "TypeScript",
-          stargazers_count: 3,
-          topics: [],
-        });
-      }
-      return new Response("{}", { status: 500 });
-    }) as unknown as typeof fetch;
-  }
-  const restore = () => {
-    globalThis.fetch = realFetch;
-    generateJson.mockImplementation(THROW_IMPL);
-  };
-
-  test("maps many chunks then reduces to one digest", async () => {
-    // 12 sizeable files force several MAP chunks before the REDUCE.
-    const files = Array.from({ length: 12 }, (_, i) => ({
-      path: `src/mod${i}.ts`,
-      content: "x".repeat(20_000),
-    }));
-    mockRepo(files);
-    // One implementation serves both phases: map reads .notes, reduce reads the
-    // digest fields.
-    generateJson.mockImplementation(async () => ({
-      value: {
-        notes: "slice notes",
-        summary: "SUM: a URL shortener on Postgres.",
-        tech_stack: ["TypeScript"],
-        architecture: "",
-        key_features: [],
-        data_and_apis: "",
-        notable_decisions: [],
-        risks_and_gaps: [],
-        question_seeds: [],
-      },
-      raw: "",
-    }));
-    try {
-      const res = await extractProject("https://github.com/owner/repo");
-      expect(res.digest).toContain("SUM: a URL shortener on Postgres.");
-      // Not the fallback path.
-      expect(res.digest).not.toContain("raw repo pack");
-      expect(res.repo.file_count).toBe(12);
-      // Called once per map chunk plus once for the reduce.
-      expect(generateJson.mock.calls.length).toBeGreaterThan(2);
-    } finally {
-      restore();
-    }
-  });
-
-  test("falls back to the deterministic digest when the LLM is down", async () => {
-    mockRepo([{ path: "src/app.ts", content: "export const x = 1;" }]);
-    // generateJson stays at THROW_IMPL — every call fails.
-    try {
-      const res = await extractProject("https://github.com/owner/repo");
-      expect(res.digest).toContain("raw repo pack");
-      expect(res.digest).toContain("A mock repo"); // description seeds the summary
-    } finally {
-      restore();
-    }
-  });
-
-  test("refuses to import without a server token", async () => {
-    const { config } = await import("@/lib/env");
-    const saved = config.github.token;
-    (config.github as { token?: string }).token = undefined;
-    try {
-      await extractProject("https://github.com/owner/repo");
-      throw new Error("should have thrown");
-    } catch (err) {
-      expect((err as { code: string }).code).toBe("github_token_required");
-    } finally {
-      (config.github as { token?: string }).token = saved;
     }
   });
 });

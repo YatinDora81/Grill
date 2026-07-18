@@ -1,6 +1,6 @@
 # Grill — local stack
 #
-#   cp apps/web/.env.example .env   # fill GEMINI / GROQ / R2 / JWT_SECRET
+#   cp apps/web/.env.example .env   # fill GEMINI / GROQ / R2 / JWT_SECRET / GITHUB_TOKEN
 #   docker compose up --build
 #
 # Web  → http://localhost:4000
@@ -70,8 +70,11 @@ services:
       DATABASE_URL: postgresql://grill:grill@db:5432/grill?schema=ai_interview
       AUDIO_SERVICE_URL: http://audio:8000
       PORT: "4000"
-      # Required secrets still come from .env / apps/web/.env.local:
-      # JWT_SECRET, GEMINI_API_KEYS, GROQ_API_KEYS, S3_*
+      # Required/optional secrets still come from .env / apps/web/.env.local
+      # (loaded via env_file above — do NOT re-list them here as ${VAR}, since
+      # `environment` wins over env_file and Compose ${...} reads the shell/root
+      # .env, not apps/web/.env.local, so it would blank them):
+      # JWT_SECRET, GEMINI_API_KEYS, GROQ_API_KEYS, S3_*, GITHUB_TOKEN
     depends_on:
       db:
         condition: service_healthy
