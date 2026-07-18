@@ -32,11 +32,36 @@ export const projectDigestSchema = z.object({
 export type ProjectDigest = z.infer<typeof projectDigestSchema>;
 
 /**
- * System prompt for the digest call. House style: name the failure modes, demand
- * specifics, JSON only. The pack goes in the user prompt (see projectService).
+ * One chunk's worth of interviewer-relevant notes, from the MAP phase.
+ *
+ * A whole repo is too large for a single digest call, so it is split into
+ * chunks; each chunk is summarised on its own, then the REDUCE phase combines
+ * the notes into the final digest above. Free-form text, because the reduce step
+ * is what imposes structure.
+ */
+export const chunkNotesSchema = z.object({ notes: z.string().default("") });
+
+export type ChunkNotes = z.infer<typeof chunkNotesSchema>;
+
+/**
+ * MAP system prompt: summarise one slice of a larger codebase. Deliberately
+ * asks for the same things the final digest wants, so the reduce step has real
+ * material to combine rather than vague prose.
+ */
+export const PROJECT_MAP_SYSTEM =
+  "You are analysing ONE slice of a larger codebase to help prepare an interviewer's brief. " +
+  "Summarise what THIS slice reveals: components, key files, data models, endpoints, notable or " +
+  "risky code, and anything worth grilling the author on. Be specific — name files, functions, and " +
+  "decisions. It is fine if the slice is partial; only describe what is here. " +
+  'Respond with JSON only — no prose, no code fences: { "notes": string }.';
+
+/**
+ * REDUCE / single-pass system prompt. House style: name the failure modes,
+ * demand specifics, JSON only. The material (a repo pack for a small repo, or
+ * the combined chunk notes for a large one) goes in the user prompt.
  */
 export const PROJECT_DIGEST_SYSTEM =
-  "You are preparing an interviewer's brief on a codebase. From the repo pack below, extract what " +
+  "You are preparing an interviewer's brief on a codebase. From the material below, extract what " +
   "an interviewer needs to grill the person who built it. Be specific — name files, models, " +
   "endpoints, and decisions, not generalities. Flag anything that looks unfinished, risky, or " +
   "copy-pasted; those are the best questions. Respond with JSON only — no prose, no code fences.";

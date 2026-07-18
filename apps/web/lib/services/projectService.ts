@@ -16,27 +16,46 @@ import "server-only";
  * anything is fetched.
  */
 import { config } from "@/lib/env";
-import { AppError, badRequest, notFound } from "@/lib/errors";
+import { AppError, badRequest, notFound, serviceUnavailable } from "@/lib/errors";
 import { generateJson } from "@/lib/clients/llmJson";
 import {
+  chunkNotesSchema,
   PROJECT_DIGEST_SYSTEM,
+  PROJECT_MAP_SYSTEM,
   projectDigestSchema,
   renderDigest,
   type ProjectDigest,
 } from "@/lib/prompts/projectDigest";
 
 // ── Budgets (tune later) ──────────────────────────────────────────
-const MAX_FILES_FETCHED = 25;
-const PER_FILE_CHARS = 6_000;
-const TOTAL_PACK_CHARS = 70_000;
-/** A blob bigger than this is skipped before it is ever fetched. */
+/**
+ * We now ingest the WHOLE repo via map-reduce, not a curated 25-file pack, so
+ * these are generous. The cost that mattered — re-sending material every turn —
+ * is unchanged: only the ONE-TIME digest input grows, and the rendered digest
+ * stays small (MAX_DIGEST_CHARS).
+ */
+const MAX_FILES_FETCHED = 300;
+const PER_FILE_CHARS = 12_000;
+/** A blob bigger than this is skipped before it is ever fetched (DoS defence). */
 const MAX_BLOB_BYTES = 200 * 1024;
-/** Representative code excerpts are the first ~200 lines only. */
-const CODE_EXCERPT_LINES = 200;
+/** Per-file excerpt line cap. */
+const CODE_EXCERPT_LINES = 400;
 /** The rendered digest the textarea shows is capped to the schema's field max. */
 const MAX_DIGEST_CHARS = 24_000;
 /** GitHub is fast; a hung call must not hold the request open for 30s. */
 const GITHUB_TIMEOUT_MS = 15_000;
+/** Parallel file fetches — bounded so 300 files don't open 300 sockets at once. */
+const FETCH_CONCURRENCY = 8;
+
+// ── Map-reduce budgets ────────────────────────────────────────────
+/** Input size of one MAP call. Large repos are split into chunks this big. */
+const CHUNK_CHARS = 60_000;
+/** Total repo content held across all chunks — the reduce-input ceiling. */
+const TOTAL_CONTENT_CHARS = 1_200_000;
+/** How many MAP summaries run at once — the key pool rotates under this. */
+const MAP_CONCURRENCY = 5;
+/** Fallback pack size, when the whole map-reduce fails and we dump raw. */
+const TOTAL_PACK_CHARS = 70_000;
 
 const GITHUB_API = "https://api.github.com";
 
@@ -313,13 +332,16 @@ const MANIFEST_NAMES = new Set([
 
 const INFRA_NAMES = new Set(["docker-compose.yml", "docker-compose.yaml", "vercel.json", "fly.toml"]);
 
-/** Extensions worth reading as representative code. */
+/** Extensions worth reading as source code. */
 const CODE_EXT = new Set([
   "ts", "tsx", "js", "jsx", "mjs", "cjs",
   "py", "go", "rs", "java", "kt", "rb", "php", "cs",
   "c", "cc", "cpp", "h", "hpp", "swift", "scala", "ex", "exs", "clj",
   "vue", "svelte",
 ]);
+
+/** Docs and config worth reading for context — lower priority than code. */
+const DOC_EXT = new Set(["md", "mdx", "yml", "yaml", "toml", "txt", "rst"]);
 
 function basename(path: string): string {
   return path.slice(path.lastIndexOf("/") + 1);
@@ -383,10 +405,14 @@ function isEntrypoint(path: string): boolean {
 }
 
 /**
- * Walk the tree once and pick files to fetch in priority order until the file
- * budget is hit: manifests, infra, schema/API, entrypoints, then the largest
- * remaining source files. A subpath filters the tree to a monorepo package
- * first, so `…/tree/main/apps/web` interviews on the web app specifically.
+ * Walk the tree once and pick files to fetch, in priority order, up to the file
+ * budget: manifests, infra, schema/API, SQL, entrypoints, then ALL source code
+ * (largest first, so the meatier files win if the cap bites), then docs/config.
+ * A subpath filters the tree to a monorepo package first, so
+ * `…/tree/main/apps/web` interviews on the web app specifically.
+ *
+ * Unlike the old curated pack, this reaches for the whole repo — the map-reduce
+ * digest compresses it afterwards, so breadth here is cheap.
  */
 export function selectFiles(entries: TreeEntry[], subpath?: string): string[] {
   const prefix = subpath ? (subpath.endsWith("/") ? subpath : `${subpath}/`) : "";
@@ -405,24 +431,69 @@ export function selectFiles(entries: TreeEntry[], subpath?: string): string[] {
   for (const e of usable) if (isManifest(e.path)) add(e.path);
   for (const e of usable) if (isInfra(e.path)) add(e.path);
   for (const e of usable) if (isSchemaOrApi(e.path)) add(e.path);
-  // First couple of raw SQL files — migrations themselves stay names-only.
-  let sql = 0;
+  // Raw SQL — migrations themselves stay names-only (they are noise at volume).
   for (const e of usable) {
-    if (extname(e.path) === "sql" && !e.path.toLowerCase().includes("migration") && sql < 2) {
-      add(e.path);
-      sql++;
-    }
+    if (extname(e.path) === "sql" && !e.path.toLowerCase().includes("migration")) add(e.path);
   }
   for (const e of usable) if (isEntrypoint(e.path)) add(e.path);
 
-  // Representative code: the largest remaining source files.
+  // All source code, largest first so the cap keeps the substantial files.
   const code = usable
     .filter((e) => CODE_EXT.has(extname(e.path)) && !seen.has(e.path))
-    .sort((a, b) => (b.size ?? 0) - (a.size ?? 0))
-    .slice(0, 5);
+    .sort((a, b) => (b.size ?? 0) - (a.size ?? 0));
   for (const e of code) add(e.path);
 
+  // Docs and config last — useful context, but never at the expense of code.
+  const docs = usable
+    .filter((e) => DOC_EXT.has(extname(e.path)) && !seen.has(e.path))
+    .sort((a, b) => (b.size ?? 0) - (a.size ?? 0));
+  for (const e of docs) add(e.path);
+
   return picked;
+}
+
+/** Bounded-concurrency map over items — keeps fan-out from opening N sockets. */
+async function pool<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+  async function worker() {
+    while (cursor < items.length) {
+      const i = cursor++;
+      results[i] = await fn(items[i]!, i);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
+/**
+ * Pack fetched files into `=== path ===` blocks of at most CHUNK_CHARS each, so
+ * every MAP call gets a digestible slice. Stops at TOTAL_CONTENT_CHARS so a
+ * giant repo can't spawn unbounded map calls.
+ */
+export function chunkFiles(files: { path: string; content: string }[]): string[] {
+  const chunks: string[] = [];
+  let current: string[] = [];
+  let currentLen = 0;
+  let total = 0;
+  for (const f of files) {
+    if (total >= TOTAL_CONTENT_CHARS) break;
+    const block = `=== ${f.path} ===\n${excerpt(f.content)}`;
+    if (currentLen + block.length > CHUNK_CHARS && current.length) {
+      chunks.push(current.join("\n\n"));
+      current = [];
+      currentLen = 0;
+    }
+    current.push(block);
+    currentLen += block.length + 2;
+    total += block.length;
+  }
+  if (current.length) chunks.push(current.join("\n\n"));
+  return chunks;
 }
 
 // ── Pack builder (§3A) — pure ─────────────────────────────────────
@@ -522,11 +593,12 @@ function digestNote(meta: RepoMeta, truncated: boolean): string {
 }
 
 /**
- * When the LLM call fails after its retries, a metadata-only digest is still
- * better than a dead request — the user can edit it anyway. Deterministic, no
- * model.
+ * When the whole map-reduce fails, a metadata-only digest with the raw pack
+ * appended is still better than a dead request — the user can edit it anyway.
+ * Deterministic, no model.
  */
-function fallbackDigest(pack: string, meta: RepoMeta, note: string): string {
+export function fallbackDigest(pack: string, meta: RepoMeta, truncated: boolean): string {
+  const note = digestNote(meta, truncated);
   const digest: ProjectDigest = {
     summary:
       meta.description ||
@@ -539,24 +611,81 @@ function fallbackDigest(pack: string, meta: RepoMeta, note: string): string {
     risks_and_gaps: [],
     question_seeds: [],
   };
-  // Append the raw pack head (README + metadata already in it) so the user has
-  // real material to edit even without the model.
+  // Append the raw pack (README + metadata + file excerpts) so the user has real
+  // material to edit even without the model.
   const rendered = renderDigest(digest, note);
   return `${rendered}\n\n=== raw repo pack (unsummarised) ===\n${pack}`.slice(0, MAX_DIGEST_CHARS);
 }
 
-export async function digestRepo(pack: string, meta: RepoMeta, truncated: boolean): Promise<string> {
+/** Repo metadata + README as a header block, prepended to the reduce input. */
+function reduceHeader(meta: RepoMeta, readme: string, languages: Record<string, number>): string {
+  const langs = Object.keys(languages).join(", ") || meta.language || "(unknown)";
+  const head =
+    `Repository: ${meta.owner}/${meta.repo}\n` +
+    `Description: ${meta.description || "(none)"}\n` +
+    `Primary language: ${meta.language || "(unknown)"} · Languages: ${langs}`;
+  const readmeBlock = readme ? `\n\nREADME:\n${readme.slice(0, PER_FILE_CHARS)}` : "";
+  return head + readmeBlock;
+}
+
+export interface DigestInput {
+  files: { path: string; content: string }[];
+  meta: RepoMeta;
+  readme: string;
+  languages: Record<string, number>;
+  entries: TreeEntry[];
+  truncated: boolean;
+}
+
+/**
+ * The map-reduce digest. Small repos take one pass; large ones are chunked, each
+ * chunk summarised in parallel (MAP), then all notes combined into the final
+ * digest (REDUCE). Any failure — a dead reduce, or every map chunk failing —
+ * falls back to the deterministic digest rather than failing the request.
+ */
+export async function digestRepo(input: DigestInput): Promise<string> {
+  const { files, meta, readme, languages, entries, truncated } = input;
   const note = digestNote(meta, truncated);
+  const header = reduceHeader(meta, readme, languages);
+  // Built up front so it's available to the fallback even if map-reduce throws.
+  const pack = buildPack({ meta, languages, entries, readme, files, truncated });
+
   try {
+    const chunks = chunkFiles(files);
+
+    // Small repo (or README-only): the single chunk is the material, no map step.
+    let material: string;
+    if (chunks.length <= 1) {
+      material = chunks[0] ?? "(no source files — see README above)";
+    } else {
+      const summaries = await pool(chunks, MAP_CONCURRENCY, async (chunk, i) => {
+        try {
+          const { value } = await generateJson(chunkNotesSchema, {
+            system: PROJECT_MAP_SYSTEM,
+            prompt: `Slice ${i + 1} of ${chunks.length} of ${meta.owner}/${meta.repo}:\n\n${chunk}`,
+            temperature: 0.3,
+          });
+          return value.notes.trim();
+        } catch (err) {
+          // One dead chunk must not sink the whole import.
+          console.warn(`[projectService] map chunk ${i + 1}/${chunks.length} failed:`, err);
+          return "";
+        }
+      });
+      const kept = summaries.filter(Boolean);
+      if (kept.length === 0) throw new Error("every map chunk failed");
+      material = kept.map((s, i) => `--- notes from slice ${i + 1} ---\n${s}`).join("\n\n");
+    }
+
     const { value } = await generateJson(projectDigestSchema, {
       system: PROJECT_DIGEST_SYSTEM,
-      prompt: `Repo pack:\n\n${pack}`,
+      prompt: `${header}\n\nMaterial to compress into the interviewer's brief:\n\n${material}`,
       temperature: 0.4,
     });
     return renderDigest(value, note).slice(0, MAX_DIGEST_CHARS);
   } catch (err) {
-    console.warn("[projectService] digest LLM failed — using deterministic fallback:", err);
-    return fallbackDigest(pack, meta, note);
+    console.warn("[projectService] digest failed — using deterministic fallback:", err);
+    return fallbackDigest(pack, meta, truncated);
   }
 }
 
@@ -581,12 +710,24 @@ export interface ExtractResult {
 }
 
 /**
- * The whole pipeline: parse → repo meta → tree → select → fetch excerpts →
- * pack → digest. Every GitHub URL is built from validated parts inside the
- * helpers above; the raw string only ever reaches parseRepoUrl.
+ * The whole pipeline: parse → repo meta → tree → select ALL files → fetch
+ * (bounded concurrency) → map-reduce digest. Every GitHub URL is built from
+ * validated parts inside the helpers above; the raw string only ever reaches
+ * parseRepoUrl.
+ *
+ * Reading a whole repo fans out to hundreds of GitHub calls, so a server-side
+ * GITHUB_TOKEN is required — anonymous access (60 req/hour per IP) can't sustain
+ * even one import.
  */
 export async function extractProject(repoUrl: string): Promise<ExtractResult> {
   const { owner, repo, ref, subpath } = parseRepoUrl(repoUrl);
+
+  if (!config.github.token) {
+    throw serviceUnavailable(
+      "Repo import isn't configured on this server (no GITHUB_TOKEN). Paste a description instead.",
+      "github_token_required",
+    );
+  }
 
   const meta = await fetchRepoMeta(owner, repo, ref);
   const { entries, truncated } = await fetchTree(owner, repo, meta.ref);
@@ -595,11 +736,14 @@ export async function extractProject(repoUrl: string): Promise<ExtractResult> {
   }
 
   const selected = selectFiles(entries, subpath);
-  const [languages, readme, ...contents] = await Promise.all([
+  const [languages, readme] = await Promise.all([
     fetchLanguages(owner, repo),
     fetchReadme(owner, repo, meta.ref),
-    ...selected.map((path) => fetchRawFile(owner, repo, path, meta.ref)),
   ]);
+  // Bounded fan-out: 300 files must not open 300 sockets at once.
+  const contents = await pool(selected, FETCH_CONCURRENCY, (path) =>
+    fetchRawFile(owner, repo, path, meta.ref),
+  );
 
   const files = selected
     .map((path, i) => ({ path, content: contents[i] ?? null }))
@@ -612,8 +756,7 @@ export async function extractProject(repoUrl: string): Promise<ExtractResult> {
     );
   }
 
-  const pack = buildPack({ meta, languages, entries, readme, files, truncated });
-  const digest = await digestRepo(pack, meta, truncated);
+  const digest = await digestRepo({ files, meta, readme, languages, entries, truncated });
 
   return {
     digest,

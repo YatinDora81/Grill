@@ -10,16 +10,20 @@ mock.module("server-only", () => ({}));
 // a network or a provider.
 process.env.GEMINI_API_KEYS ||= "TEST__SPLIT__not-a-real-key";
 process.env.JWT_SECRET ||= "test-secret";
+// extractProject requires a token; set a fake one so the import path runs (fetch
+// is mocked in those tests, so the token is never actually used).
+process.env.GITHUB_TOKEN ||= "test-token";
 
-// The digest-fallback test needs generateJson to throw; every other test here is
-// pure and never calls it. One module mock for the whole file (run.ts isolates
-// each file in its own process, so this can't leak into another suite).
-const generateJson = mock(async () => {
+// generateJson defaults to throwing (the fallback path); success tests override
+// it with mockImplementation and restore after. One module mock for the whole
+// file (run.ts isolates each file in its own process, so it can't leak).
+const THROW_IMPL = async () => {
   throw new Error("provider down");
-});
+};
+const generateJson = mock(THROW_IMPL);
 mock.module("@/lib/clients/llmJson", () => ({ generateJson }));
 
-const { parseRepoUrl, selectFiles, buildPack, isSkippable, digestRepo, extractProject } =
+const { parseRepoUrl, selectFiles, buildPack, isSkippable, fallbackDigest, chunkFiles, extractProject } =
   await import("./projectService");
 
 // ── parseRepoUrl ──────────────────────────────────────────────────
@@ -146,9 +150,22 @@ describe("selectFiles", () => {
   });
 
   test("caps at the file budget however many candidates there are", () => {
-    const entries = Array.from({ length: 200 }, (_, i) => blob(`src/mod${i}.ts`, 1000 + i));
+    // Whole-repo selection reaches for everything, but still stops at the cap.
+    const entries = Array.from({ length: 500 }, (_, i) => blob(`src/mod${i}.ts`, 1000 + i));
     const picked = selectFiles(entries);
-    expect(picked.length).toBeLessThanOrEqual(25);
+    expect(picked.length).toBeLessThanOrEqual(300);
+    expect(picked.length).toBeGreaterThan(25); // and it no longer stops at the old 25
+  });
+
+  test("reaches for all source files, not just a handful", () => {
+    const entries = Array.from({ length: 40 }, (_, i) => blob(`src/mod${i}.ts`, 1000));
+    expect(selectFiles(entries).length).toBe(40);
+  });
+
+  test("includes docs after code", () => {
+    const picked = selectFiles([blob("src/app.ts"), blob("README.md"), blob("docs/guide.md")]);
+    expect(picked).toContain("src/app.ts");
+    expect(picked).toContain("docs/guide.md");
   });
 
   test("a subpath filters the tree to that package before selection", () => {
@@ -253,18 +270,33 @@ describe("buildPack", () => {
 
 // ── digest fallback ───────────────────────────────────────────────
 
-describe("digestRepo fallback", () => {
-  test("returns a deterministic digest when the LLM throws, never dies", async () => {
-    const digest = await digestRepo("=== file tree ===\nsrc/app.ts", META, false);
-    // The description seeds the fallback summary, and the raw pack is appended so
-    // the user still has real material to edit.
-    expect(digest).toContain("A mock-interview grill");
-    expect(digest).toContain("raw repo pack");
-    expect(generateJson).toHaveBeenCalled();
+describe("chunkFiles", () => {
+  test("splits into multiple chunks once content exceeds the chunk budget", () => {
+    const files = Array.from({ length: 5 }, (_, i) => ({
+      path: `src/mod${i}.ts`,
+      content: "x".repeat(30_000),
+    }));
+    const chunks = chunkFiles(files);
+    expect(chunks.length).toBeGreaterThan(1);
+    // Each block is headed by its path so the map summary can name files.
+    expect(chunks[0]).toContain("=== src/mod0.ts ===");
   });
 
-  test("carries the fork note into the fallback digest", async () => {
-    const digest = await digestRepo("pack", { ...META, fork: true, parent: "up/stream" }, false);
+  test("keeps a small repo to a single chunk", () => {
+    expect(chunkFiles([{ path: "a.ts", content: "small" }]).length).toBe(1);
+    expect(chunkFiles([]).length).toBe(0);
+  });
+});
+
+describe("fallbackDigest", () => {
+  test("seeds the summary from the description and appends the raw pack", () => {
+    const digest = fallbackDigest("=== file tree ===\nsrc/app.ts", META, false);
+    expect(digest).toContain("A mock-interview grill");
+    expect(digest).toContain("raw repo pack");
+  });
+
+  test("carries the fork note", () => {
+    const digest = fallbackDigest("pack", { ...META, fork: true, parent: "up/stream" }, false);
     expect(digest).toContain("fork of up/stream");
   });
 });
@@ -352,6 +384,110 @@ describe("extractProject maps GitHub failures to human errors", () => {
       expect(e.message.toLowerCase()).toContain("rate limit");
     } finally {
       restore();
+    }
+  });
+});
+
+// ── map-reduce pipeline, end to end (fetch + LLM mocked) ───────────
+
+describe("extractProject map-reduce", () => {
+  const realFetch = globalThis.fetch;
+  const json = (o: unknown) => new Response(JSON.stringify(o), { status: 200 });
+  const raw = (s: string) => new Response(s, { status: 200 });
+
+  /** A full repo mock: meta, tree, languages, readme, and per-path contents. */
+  function mockRepo(files: { path: string; content: string }[], readme = "A readme.") {
+    globalThis.fetch = mock(async (url: string | URL | Request) => {
+      const path = String(url).replace("https://api.github.com", "").split("?")[0]!;
+      if (path.includes("/git/trees/")) {
+        return json({
+          tree: files.map((f) => ({ path: f.path, type: "blob", size: f.content.length })),
+          truncated: false,
+        });
+      }
+      if (path.endsWith("/languages")) return json({ TypeScript: 5000 });
+      if (path.endsWith("/readme")) return raw(readme);
+      if (path.includes("/contents/")) {
+        const p = decodeURIComponent(path.split("/contents/")[1]!);
+        const f = files.find((x) => x.path === p);
+        return f ? raw(f.content) : new Response("", { status: 404 });
+      }
+      if (/^\/repos\/[^/]+\/[^/]+$/.test(path)) {
+        return json({
+          default_branch: "main",
+          description: "A mock repo",
+          language: "TypeScript",
+          stargazers_count: 3,
+          topics: [],
+        });
+      }
+      return new Response("{}", { status: 500 });
+    }) as unknown as typeof fetch;
+  }
+  const restore = () => {
+    globalThis.fetch = realFetch;
+    generateJson.mockImplementation(THROW_IMPL);
+  };
+
+  test("maps many chunks then reduces to one digest", async () => {
+    // 12 sizeable files force several MAP chunks before the REDUCE.
+    const files = Array.from({ length: 12 }, (_, i) => ({
+      path: `src/mod${i}.ts`,
+      content: "x".repeat(20_000),
+    }));
+    mockRepo(files);
+    // One implementation serves both phases: map reads .notes, reduce reads the
+    // digest fields.
+    generateJson.mockImplementation(async () => ({
+      value: {
+        notes: "slice notes",
+        summary: "SUM: a URL shortener on Postgres.",
+        tech_stack: ["TypeScript"],
+        architecture: "",
+        key_features: [],
+        data_and_apis: "",
+        notable_decisions: [],
+        risks_and_gaps: [],
+        question_seeds: [],
+      },
+      raw: "",
+    }));
+    try {
+      const res = await extractProject("https://github.com/owner/repo");
+      expect(res.digest).toContain("SUM: a URL shortener on Postgres.");
+      // Not the fallback path.
+      expect(res.digest).not.toContain("raw repo pack");
+      expect(res.repo.file_count).toBe(12);
+      // Called once per map chunk plus once for the reduce.
+      expect(generateJson.mock.calls.length).toBeGreaterThan(2);
+    } finally {
+      restore();
+    }
+  });
+
+  test("falls back to the deterministic digest when the LLM is down", async () => {
+    mockRepo([{ path: "src/app.ts", content: "export const x = 1;" }]);
+    // generateJson stays at THROW_IMPL — every call fails.
+    try {
+      const res = await extractProject("https://github.com/owner/repo");
+      expect(res.digest).toContain("raw repo pack");
+      expect(res.digest).toContain("A mock repo"); // description seeds the summary
+    } finally {
+      restore();
+    }
+  });
+
+  test("refuses to import without a server token", async () => {
+    const { config } = await import("@/lib/env");
+    const saved = config.github.token;
+    (config.github as { token?: string }).token = undefined;
+    try {
+      await extractProject("https://github.com/owner/repo");
+      throw new Error("should have thrown");
+    } catch (err) {
+      expect((err as { code: string }).code).toBe("github_token_required");
+    } finally {
+      (config.github as { token?: string }).token = saved;
     }
   });
 });
