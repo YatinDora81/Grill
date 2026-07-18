@@ -22,7 +22,14 @@ import {
 // The unions are restated as literals rather than read back off MODE_META /
 // SOURCE_META. Deriving the expectation from the thing under test would make the
 // coverage assertions below unable to fail.
-const ALL_MODES: ExclusiveMode[] = ["topic_only", "cultural_only", "jd", "real", "weak_spots"];
+const ALL_MODES: ExclusiveMode[] = [
+  "topic_only",
+  "cultural_only",
+  "jd",
+  "real",
+  "weak_spots",
+  "project",
+];
 const ALL_SOURCES: InterviewSource[] = ["resume", "topic", "cultural"];
 const ALL_DIFFICULTIES: Difficulty[] = ["easy", "medium", "hard", "extreme"];
 

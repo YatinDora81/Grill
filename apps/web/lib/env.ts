@@ -56,6 +56,14 @@ if (groqKeys.length === 0) {
 if (!process.env.JWT_SECRET) {
   throw new Error("JWT_SECRET is required for auth.");
 }
+if (!process.env.GITHUB_TOKEN) {
+  // Soft-optional, like Groq: unauthenticated GitHub allows 60 req/hour PER IP,
+  // and one project import costs ~30 — effectively broken on shared serverless
+  // egress. A classic PAT (no scopes needed for public repos) raises it to 5,000.
+  console.warn(
+    "[env] GITHUB_TOKEN is empty — GitHub repo imports will hit the 60 req/hour anonymous limit.",
+  );
+}
 
 export const config = {
   gemini: {
@@ -66,6 +74,10 @@ export const config = {
     keys: groqKeys,
     whisperModel: process.env.GROQ_WHISPER_MODEL || "whisper-large-v3",
     llmFallbackModel: process.env.GROQ_LLM_FALLBACK_MODEL || "openai/gpt-oss-120b",
+  },
+  github: {
+    /** Optional PAT for repo imports — undefined when unset (never the empty string). */
+    token: process.env.GITHUB_TOKEN || undefined,
   },
   rotation: {
     baseBackoffMs: num("ROTATION_BASE_BACKOFF_MS", 300),

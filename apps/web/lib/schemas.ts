@@ -35,6 +35,7 @@ export const exclusiveModeSchema = z.enum([
   "jd",
   "real",
   "weak_spots",
+  "project",
 ]);
 export const difficultySchema = z.enum(["easy", "medium", "hard", "extreme"]);
 
@@ -143,6 +144,13 @@ const interviewConfigShape = z.object({
   mode: exclusiveModeSchema.nullable().default(null),
   topic: z.string().trim().max(2_000).optional(),
   job_description: z.string().trim().max(20_000).optional(),
+  // `project`: the material the interviewer reads (pasted text or edited digest)
+  // and, when a repo was imported, the URL it came from. Both optional so every
+  // historic config still parses; the superRefine below requires the context
+  // when the mode is `project`. The digest is denser than a résumé, hence the
+  // higher ceiling than job_description.
+  project_context: z.string().trim().max(24_000).optional(),
+  project_repo_url: z.string().trim().url().max(500).optional(),
   allow_repeats: z.coerce.boolean().default(false),
   // Optional, and must stay that way: sessions written before the cap existed
   // have no value here, and requiring one would make their room page and their
@@ -187,6 +195,13 @@ export const interviewConfigSchema = interviewConfigShape.superRefine((v, ctx) =
       message: "Paste the job description you're going for.",
     });
   }
+  if (v.mode === "project" && !v.project_context?.trim()) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["project_context"],
+      message: "Describe the project, or import a GitHub repo.",
+    });
+  }
 });
 
 /** Reads a config off a session row, whatever shape it was written in. */
@@ -194,8 +209,10 @@ export const storedConfigSchema = z.preprocess(migrateConfig, interviewConfigSch
 
 export const startRequestSchema = z
   .object({
-    // The résumé, always. Sources choose what to ask on top of it.
-    source_text: z.string().min(1).max(20_000),
+    // The résumé. Required for every mode except `project`, which brings its own
+    // material — so the floor is enforced conditionally in the superRefine below,
+    // not here. Empty stores fine: Session.sourceText is a non-null String.
+    source_text: z.string().max(20_000).default(""),
     source_type: z.enum(["resume", "jd", "topic"]).default("resume"),
     // No default: an interview without a name is one the user can't find again,
     // and nothing we could invent here would be their words.
@@ -212,6 +229,15 @@ export const startRequestSchema = z
         code: z.ZodIssueCode.custom,
         path: ["config", "num_questions"],
         message: `An interview needs at least ${QUESTION_BOUNDS.min} questions.`,
+      });
+    }
+    // Every mode but `project` is built around the résumé, so it stays required
+    // there — a project interview supplies its own material and needs none.
+    if (v.config.mode !== "project" && !v.source_text.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["source_text"],
+        message: "A résumé is required for this interview.",
       });
     }
   });

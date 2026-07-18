@@ -224,6 +224,31 @@ const TOPIC_NEXT_AREAS = [
   "an area that is conspicuously vague",
 ] as const;
 
+/**
+ * `project` carries its own material and its own shape — defend what you built —
+ * so it draws from angles about the project, not the résumé or how they work
+ * with people. Every angle names the project itself.
+ */
+const PROJECT_OPENERS = [
+  "the core architectural decision of the project — why this shape and not the obvious alternative",
+  "the data model — what it makes easy, and the query or write it makes painful",
+  "a dependency or framework choice they would have to defend to a sceptical senior engineer",
+  "what happens when the project meets 100x its current load — the first thing that falls over",
+  "the hardest bug or failure the project has had, or plausibly will have",
+  "security and auth in the project — who can do what, and how that is actually enforced",
+  "the part of the project the brief flags as weakest or least finished",
+  "what they would rewrite first if they started the project again, and why they did not do it that way",
+] as const;
+
+const PROJECT_NEXT_AREAS = [
+  "a component or feature of the project that has not come up yet",
+  "testing, deployment or observability — how they actually know the project works",
+  "a trade-off in the project they have not had to defend yet",
+  "an edge case or failure mode implied by the project's own design",
+  "how the project would have to change with a real team and real users",
+  "depth on something in the project they mentioned only in passing",
+] as const;
+
 const SOURCE_NEXT_AREAS: Record<InterviewSource, readonly string[]> = {
   resume: TECHNICAL_NEXT_AREAS,
   topic: TOPIC_NEXT_AREAS,
@@ -243,6 +268,7 @@ const MODE_OPENERS: Record<ExclusiveMode, readonly string[]> = {
   jd: RESUME_OPENERS,
   real: RESUME_OPENERS,
   weak_spots: RESUME_OPENERS,
+  project: PROJECT_OPENERS,
 };
 
 const MODE_NEXT_AREAS: Record<ExclusiveMode, readonly string[]> = {
@@ -251,6 +277,7 @@ const MODE_NEXT_AREAS: Record<ExclusiveMode, readonly string[]> = {
   jd: TECHNICAL_NEXT_AREAS,
   real: TECHNICAL_NEXT_AREAS,
   weak_spots: TECHNICAL_NEXT_AREAS,
+  project: PROJECT_NEXT_AREAS,
 };
 
 /**
@@ -285,6 +312,11 @@ const MODE_BRIEF: Record<ExclusiveMode, (c: InterviewConfig) => string> = {
     "Run this like a real interview: it moves through stages, and you will be told which stage you are in.",
   weak_spots: () =>
     "This is a retry session. The candidate answered the questions below badly in earlier interviews; the point is to make them face that ground again — not to be gentle about it.",
+  project: () =>
+    "Interview them on THE PROJECT in the context below, as its builder. Every question must be " +
+    "grounded in that project: why it is built the way it is, what that cost, where it breaks, what " +
+    "they would redo. If a résumé is also present it is background only — do not drift into general " +
+    "résumé or career questions.",
 };
 
 /** What each source contributes to a blended interview. */
@@ -468,10 +500,27 @@ function contextBlock(s: SessionContext): string {
   const c = s.config;
   const parts = [`Interview target role: ${s.role ?? "(unspecified)"}`];
 
-  // topic_only and cultural-only must not see the résumé — including it
-  // "just as context" is exactly how those interviews drift back into asking
-  // about projects, systems, and tech the brief told them to ignore.
-  if (c.mode !== "topic_only" && !culturalOnly(c)) {
+  // A project interview controls its own context: the project IS the material,
+  // the résumé (if any) is background only. Handled first, before the résumé
+  // branch, so the project — not the SOURCE_LABEL résumé — leads the block. The
+  // digest is denser than prose and it is the whole interview, hence 8 000 chars
+  // vs a résumé's 6 000.
+  if (c.mode === "project") {
+    parts.push(
+      "The candidate's project — they built this; the interview is about it:",
+      (c.project_context ?? "").slice(0, 8_000),
+    );
+    if (c.project_repo_url) parts.push(`Project repository: ${c.project_repo_url}`);
+    if (s.sourceText.trim()) {
+      parts.push(
+        "Their résumé, background only — questions stay on the project:",
+        s.sourceText.slice(0, 2_500),
+      );
+    }
+    // topic_only and cultural-only must not see the résumé — including it
+    // "just as context" is exactly how those interviews drift back into asking
+    // about projects, systems, and tech the brief told them to ignore.
+  } else if (c.mode !== "topic_only" && !culturalOnly(c)) {
     parts.push(`${SOURCE_LABEL[s.sourceType]}:`, s.sourceText.slice(0, 6000));
   } else if (culturalOnly(c)) {
     parts.push(

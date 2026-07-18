@@ -153,6 +153,11 @@ export const MODE_META: Record<ExclusiveMode, { label: string; blurb: string }> 
     label: "Weak spots",
     blurb: "Re-asks the questions you scored worst on in past interviews, plus new ground.",
   },
+  project: {
+    label: "Project",
+    blurb:
+      "Defend something you built — architecture, trade-offs, what breaks first. Paste a write-up or import a GitHub repo.",
+  },
 };
 
 /** One-line description of what an interview actually is, for prompts and UI. */

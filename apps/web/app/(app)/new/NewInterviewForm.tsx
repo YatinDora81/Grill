@@ -26,7 +26,16 @@ import {
 } from "@/components/ui";
 
 const SOURCES: InterviewSource[] = ["resume", "topic", "cultural"];
-const MODES: ExclusiveMode[] = ["jd", "real", "topic_only", "cultural_only", "weak_spots"];
+const MODES: ExclusiveMode[] = ["jd", "project", "real", "topic_only", "cultural_only", "weak_spots"];
+
+/** What /api/interview/project/extract returns for the imported repo. */
+interface RepoInfo {
+  owner: string;
+  repo: string;
+  language: string;
+  stars: number;
+  truncated: boolean;
+}
 
 /** Roughly how long an interview of N questions runs. */
 function estimateMinutes(n: number): number {
@@ -50,6 +59,14 @@ export function NewInterviewForm() {
   const [mode, setMode] = useState<ExclusiveMode | null>(null);
   const [topic, setTopic] = useState("");
   const [jobDescription, setJobDescription] = useState("");
+  // Project mode: the material the interview reads (pasted text or an edited
+  // repo digest), the URL it was imported from, and the repo chip to show.
+  const [projectContext, setProjectContext] = useState("");
+  const [projectRepoUrl, setProjectRepoUrl] = useState("");
+  const [repoUrl, setRepoUrl] = useState("");
+  const [repoInfo, setRepoInfo] = useState<RepoInfo | null>(null);
+  const [projectTab, setProjectTab] = useState<"paste" | "import">("paste");
+  const [importing, setImporting] = useState(false);
   const [role, setRole] = useState("");
   const [numQuestions, setNumQuestions] = useState(8);
   // What the server will derive for this count. Cheap enough to just recompute.
@@ -79,6 +96,8 @@ export function NewInterviewForm() {
   const hasResume = resumeText.trim().length > 0;
   const needsTopic = mode === "topic_only" || sources.includes("topic");
   const needsJd = mode === "jd";
+  const needsProject = mode === "project";
+  const hasProject = projectContext.trim().length > 0;
 
   /** Ticking a source drops the exclusive mode — they can't coexist. */
   function toggleSource(s: InterviewSource) {
@@ -145,20 +164,55 @@ export function NewInterviewForm() {
     setError("");
   }
 
+  /**
+   * Reads a GitHub repo once, server-side, into an editable digest — the same
+   * "extract once, edit anything the parser got wrong" flow as the résumé. The
+   * digest becomes the interview material; /start never touches GitHub.
+   */
+  async function importRepo() {
+    if (!repoUrl.trim()) return setError("Paste a GitHub repo URL to import.");
+    setImporting(true);
+    setError("");
+    try {
+      const res = await apiPost<{ digest: string; repo: RepoInfo; chars: number }>(
+        "/api/interview/project/extract",
+        { repo_url: repoUrl.trim() },
+      );
+      setProjectContext(res.digest);
+      setProjectRepoUrl(repoUrl.trim());
+      setRepoInfo(res.repo);
+      // Autofill the name from the repo if the user hasn't titled it — they can
+      // still overwrite it.
+      if (!name.trim()) setName(res.repo.repo);
+    } catch (err) {
+      setError(
+        err instanceof ApiClientError ? err.message : "Couldn't read that repo. Paste a description instead.",
+      );
+    } finally {
+      setImporting(false);
+    }
+  }
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (submitting.current) return;
     if (!name.trim()) return setError("Give this interview a name — it's how you'll find it later.");
-    if (!hasResume) return setError("Upload your résumé first — every interview is built around it.");
+    // A project interview brings its own material, so the résumé is optional
+    // there and only there — every other shape is built around it.
+    if (!hasResume && !needsProject)
+      return setError("Upload your résumé first — every interview is built around it.");
     if (!mode && sources.length === 0) return setError("Pick what this interview should draw on.");
     if (needsTopic && !topic.trim()) return setError("Name the topic you want drilled on.");
     if (needsJd && !jobDescription.trim()) return setError("Paste the job description you're going for.");
+    if (needsProject && !hasProject)
+      return setError("Describe the project, or import a GitHub repo.");
 
     submitting.current = true;
     setBusy(true);
     setError("");
     try {
       const res = await apiPost<StartResponse>("/api/interview/start", {
+        // Empty is legal for a project interview — it carries its own material.
         source_text: resumeText.trim(),
         name: name.trim(),
         ...(role.trim() ? { role: role.trim() } : {}),
@@ -170,6 +224,12 @@ export function NewInterviewForm() {
           allow_repeats: allowRepeats,
           ...(needsTopic ? { topic: topic.trim() } : {}),
           ...(needsJd ? { job_description: jobDescription.trim() } : {}),
+          ...(needsProject
+            ? {
+                project_context: projectContext.trim(),
+                ...(projectRepoUrl ? { project_repo_url: projectRepoUrl } : {}),
+              }
+            : {}),
         },
       });
       router.push(`/session/${res.session_id}`);
@@ -204,6 +264,10 @@ export function NewInterviewForm() {
           <Eyebrow>Step 1 · Your résumé</Eyebrow>
           {hasResume ? (
             <span className="font-mono text-[11px] text-strong">✓ loaded</span>
+          ) : needsProject ? (
+            // A project interview brings its own material — the résumé is only
+            // ever background here, so it isn't required.
+            <Eyebrow>optional — background only</Eyebrow>
           ) : (
             <Eyebrow tone="ember">required</Eyebrow>
           )}
@@ -379,6 +443,98 @@ export function NewInterviewForm() {
           </div>
         )}
 
+        {needsProject && (
+          <div className="mt-5">
+            {/* Two ways in: describe the project, or import a repo. Both land in
+                the same editable textarea — the digest is just a pre-filled
+                starting point, exactly like the parsed résumé. */}
+            <div className="mb-3 inline-flex rounded-lg border border-line p-0.5">
+              {(["paste", "import"] as const).map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setProjectTab(t)}
+                  className={cx(
+                    "rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
+                    projectTab === t ? "bg-ember-soft text-ink" : "text-ink-muted hover:text-ink",
+                  )}
+                >
+                  {t === "paste" ? "Describe it" : "GitHub repo"}
+                </button>
+              ))}
+            </div>
+
+            {projectTab === "import" && (
+              <div className="mb-4">
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Input
+                    id="repo_url"
+                    value={repoUrl}
+                    onChange={(e) => setRepoUrl(e.target.value)}
+                    maxLength={500}
+                    placeholder="https://github.com/owner/repo"
+                    aria-label="GitHub repository URL"
+                    onKeyDown={(e) => {
+                      // Enter imports rather than submitting the whole form.
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        if (!importing) void importRepo();
+                      }
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => void importRepo()}
+                    disabled={importing || !repoUrl.trim()}
+                    className="shrink-0"
+                  >
+                    {importing ? <Spinner /> : null}
+                    {importing ? "Reading the repo…" : "Import"}
+                  </Button>
+                </div>
+                {repoInfo && (
+                  <div className="mt-2.5 flex flex-wrap items-center gap-2 font-mono text-[11px] text-ink-soft">
+                    <span className="rounded-full bg-paper-sunken px-2 py-0.5">
+                      {repoInfo.owner}/{repoInfo.repo}
+                      {repoInfo.language ? ` · ${repoInfo.language}` : ""} · ★ {repoInfo.stars}
+                    </span>
+                    {repoInfo.truncated && (
+                      <span className="text-ink-muted">
+                        large repo — imported a partial view; edit the summary to add what&apos;s
+                        missing.
+                      </span>
+                    )}
+                  </div>
+                )}
+                <p className="mt-2 text-xs text-ink-muted">
+                  Public repos only. We read it once and build a summary you can edit — the interview
+                  itself never touches GitHub.
+                </p>
+              </div>
+            )}
+
+            {(projectTab === "paste" || hasProject) && (
+              <div>
+                <Textarea
+                  id="project_context"
+                  aria-label="Project description"
+                  rows={10}
+                  maxLength={24_000}
+                  value={projectContext}
+                  onChange={(e) => setProjectContext(e.target.value)}
+                  placeholder="What did you build? Architecture, the hard decisions, what you'd redo, where it breaks…"
+                  className="font-mono leading-relaxed sm:text-xs"
+                />
+                <p className="tabular mt-1.5 text-right text-xs text-ink-muted">
+                  {projectContext.length.toLocaleString()} / 24,000
+                  {projectRepoUrl ? " · edit anything the parser got wrong" : ""}
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Repeats live here, not in "shape": whether old questions can come
             back is part of what kind of interview this is. */}
         <div className="mt-5 border-t border-line pt-5">
@@ -451,7 +607,9 @@ export function NewInterviewForm() {
         <Button
           type="submit"
           size="lg"
-          disabled={busy || extracting || !hasResume || !name.trim()}
+          disabled={
+            busy || extracting || importing || (!hasResume && !needsProject) || !name.trim()
+          }
           className="w-full sm:w-auto"
         >
           {busy ? <Spinner /> : null}

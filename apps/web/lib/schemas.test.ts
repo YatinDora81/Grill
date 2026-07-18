@@ -108,6 +108,28 @@ describe("material a mode or source cannot run without", () => {
     expect(issuePaths(r)).toContain("job_description");
   });
 
+  test("requires project context for a project interview, which has nothing else to ask about", () => {
+    const r = interviewConfigSchema.safeParse(cfg({ mode: "project", sources: [] }));
+    expect(r.success).toBe(false);
+    expect(issuePaths(r)).toContain("project_context");
+  });
+
+  test("does not accept whitespace as project context", () => {
+    const r = interviewConfigSchema.safeParse(
+      cfg({ mode: "project", sources: [], project_context: "   " }),
+    );
+    expect(r.success).toBe(false);
+    expect(issuePaths(r)).toContain("project_context");
+  });
+
+  test("accepts a project interview once it carries its material", () => {
+    const r = interviewConfigSchema.safeParse(
+      cfg({ mode: "project", sources: [], project_context: "A rate limiter built on Redis sorted sets." }),
+    );
+    expect(r.success).toBe(true);
+    expect(r.data!.mode).toBe("project");
+  });
+
   test("asks for no topic when neither the source nor the mode wants one", () => {
     expect(interviewConfigSchema.safeParse(cfg({ sources: ["resume", "cultural"] })).success).toBe(true);
   });
@@ -173,10 +195,56 @@ describe("bounds", () => {
   });
 
   test("rejects an empty résumé and an unnamed interview", () => {
-    // Both are required with no default: an interview with no name is one the
-    // user cannot find again, and nothing invented here would be their words.
+    // The résumé is required for every mode but `project`; a name always is —
+    // an interview with no name is one the user cannot find again, and nothing
+    // invented here would be their words.
     expect(startRequestSchema.safeParse(start({ source_text: "" })).success).toBe(false);
     expect(startRequestSchema.safeParse(start({ name: "   " })).success).toBe(false);
+  });
+});
+
+describe("the résumé is optional only for a project interview", () => {
+  /** A minimal valid project config: mode `project`, its own material, no sources. */
+  function projectCfg(over: Record<string, unknown> = {}) {
+    return cfg({
+      mode: "project",
+      sources: [],
+      project_context: "A URL shortener: Postgres, a base62 encoder, and a Redis read-through cache.",
+      ...over,
+    });
+  }
+
+  test("accepts a project interview with no résumé at all", () => {
+    const r = startRequestSchema.safeParse(start({ source_text: "", config: projectCfg() }));
+    expect(r.success).toBe(true);
+    // The empty string survives to the row — Session.sourceText is non-null.
+    expect(r.data!.source_text).toBe("");
+  });
+
+  test("still requires the résumé for every non-project mode", () => {
+    const r = startRequestSchema.safeParse(start({ source_text: "", config: cfg({ mode: "real", sources: [] }) }));
+    expect(r.success).toBe(false);
+    expect(issuePaths(r)).toContain("source_text");
+  });
+
+  test("takes a résumé alongside the project when one is offered as background", () => {
+    const r = startRequestSchema.safeParse(
+      start({ source_text: "Staff engineer, 8 years.", config: projectCfg() }),
+    );
+    expect(r.success).toBe(true);
+  });
+
+  test("carries the repo URL through, and rejects a non-URL", () => {
+    const ok = startRequestSchema.safeParse(
+      start({ source_text: "", config: projectCfg({ project_repo_url: "https://github.com/YatinDora81/Grill" }) }),
+    );
+    expect(ok.success).toBe(true);
+    expect(ok.data!.config.project_repo_url).toBe("https://github.com/YatinDora81/Grill");
+
+    const bad = startRequestSchema.safeParse(
+      start({ source_text: "", config: projectCfg({ project_repo_url: "not-a-url" }) }),
+    );
+    expect(bad.success).toBe(false);
   });
 });
 

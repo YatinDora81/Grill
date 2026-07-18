@@ -57,7 +57,13 @@ export type ExclusiveMode =
   /** The full arc, opening to close. See `InterviewStage`. */
   | "real"
   /** Re-asks the questions they scored worst on, mixed with new ones. */
-  | "weak_spots";
+  | "weak_spots"
+  /**
+   * Grilled on a project they built — pasted write-up or an imported GitHub
+   * digest. Brings its own material (`project_context`), so the résumé is
+   * optional here and background only.
+   */
+  | "project";
 
 /**
  * Legacy union: the single mode that `sources` + `ExclusiveMode` replaced.
@@ -110,6 +116,17 @@ export interface InterviewConfig {
   /** `jd`: the posting being targeted. */
   job_description?: string;
   /**
+   * `project`: the material the interviewer reads — a pasted write-up or the
+   * edited digest of an imported GitHub repo. This IS the interview; the résumé,
+   * if present at all, is only background. Bounded to 24 000 chars by the schema.
+   */
+  project_context?: string;
+  /**
+   * `project`: the GitHub URL a digest was imported from, when one was used.
+   * Display and prompt garnish only — never re-fetched at interview time.
+   */
+  project_repo_url?: string;
+  /**
    * Off by default. When off, every question this user has already been asked
    * is handed to the model as a do-not-reuse list — this is a repeat-practice
    * tool, so the same résumé must not produce the same interview twice.
@@ -137,7 +154,11 @@ export interface AnswerScores {
 }
 
 export interface StartRequest {
-  /** The résumé text (extracted client-side via /resume/extract). Required. */
+  /**
+   * The résumé text (extracted client-side via /resume/extract). Required for
+   * every mode EXCEPT `project`, which brings its own material and may run with
+   * an empty string here.
+   */
   source_text: string;
   source_type?: SourceType;
   /**

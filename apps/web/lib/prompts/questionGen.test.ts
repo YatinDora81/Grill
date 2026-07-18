@@ -163,6 +163,39 @@ test("a real interview is steered by its stage brief alone, and still reaches it
   expect(firstQuestionPrompt(c)).toContain("Stage: INTRO (question 1 of 8).");
 });
 
+test("a project interview is briefed on the project and carries its material", () => {
+  const project = "A distributed rate limiter on Redis sorted sets, with a lease-based leader election.";
+  const c = ctx({ mode: "project", project_context: project, project_repo_url: "https://github.com/YatinDora81/Grill" });
+
+  const first = firstQuestionPrompt(c);
+  expect(first).toContain("Interview them on THE PROJECT");
+  expect(first).toContain(project);
+  expect(first).toContain("Project repository: https://github.com/YatinDora81/Grill");
+  // Its openers name the project, drawn from the project pool.
+  expect(openers({ mode: "project", project_context: project }).size).toBeGreaterThan(1);
+  expect(nextAreas({ mode: "project", project_context: project }).size).toBeGreaterThan(1);
+});
+
+test("a project interview shows the résumé only when one was actually provided", () => {
+  const project = "A URL shortener: Postgres, base62 IDs, a Redis read-through cache.";
+  const fingerprint = "Staff engineer. Shipped a billing ledger on Postgres.";
+
+  // With a résumé present it's admitted, but explicitly labelled as background.
+  const withResume = firstQuestionPrompt(ctx({ mode: "project", project_context: project }));
+  expect(withResume).toContain(fingerprint);
+  expect(withResume).toContain("Their résumé, background only");
+
+  // With no résumé the whole résumé section drops — its text and its label — so
+  // an empty one is never handed to the interviewer as something to read.
+  const noResume = firstQuestionPrompt({
+    ...ctx({ mode: "project", project_context: project }),
+    sourceText: "",
+  });
+  expect(noResume).toContain(project);
+  expect(noResume).not.toContain(fingerprint);
+  expect(noResume).not.toContain("Their résumé, background only");
+});
+
 test("weak_spots with no scored history does not point at questions that aren't there", () => {
   const c = ctx({ mode: "weak_spots" });
 
