@@ -14,7 +14,7 @@ export default async function ProfilePage() {
   // proxy.ts gates this, but a Server Component reading the DB re-checks rather
   // than trusting the gate.
   const userId = await getUserId();
-  if (!userId) redirect("/login?next=/profile");
+  if (!userId) redirect("/?auth=login&next=/profile");
 
   const user = await repo.getUserById(userId);
   if (!user) redirect("/dashboard");

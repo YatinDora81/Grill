@@ -1,8 +1,11 @@
-import type { QuestionFeedback, QuestionType } from "@repo/types";
-import { Card, Eyebrow, cx } from "@/components/ui";
+"use client";
+
+import { useEffect, useState } from "react";
+import type { AnswerScores, QuestionFeedback, QuestionType } from "@repo/types";
+import { scoreTone } from "@/components/ui";
 import { PlayAnswer } from "./PlayAnswer";
-import { WatchAnswer } from "./WatchAnswer";
 import { StarQuestion } from "./StarQuestion";
+import { VideoPlayer } from "./VideoPlayer";
 
 export interface ReplayTurn {
   turn_id: string;
@@ -14,10 +17,14 @@ export interface ReplayTurn {
   /** The session recording this answer is in, if there was a camera. */
   video_id: string | null;
   video_offset_ms: number | null;
+  /** Days left on that recording, from SessionVideo.expiresAt. */
+  video_expires_in_days: number | null;
   /** Computed server-side so the star paints correctly on first render. */
   question_hash: string;
   starred: boolean;
   feedback: QuestionFeedback | null;
+  /** The per-answer rubric, absent on turns recorded before it existed. */
+  scores: AnswerScores | null;
 }
 
 const TYPE_LABEL: Record<QuestionType, string> = {
@@ -28,116 +35,225 @@ const TYPE_LABEL: Record<QuestionType, string> = {
   behavioral: "Cultural",
 };
 
+const RUBRIC_LABEL: Record<keyof AnswerScores, string> = {
+  relevance: "relevance",
+  correctness: "correctness",
+  structure: "structure",
+  depth: "depth",
+  filler: "filler",
+};
+
+const TONE_CLASS = { strong: "tone-strong", mixed: "tone-mixed", weak: "tone-weak" } as const;
+
 /**
- * The whole interview, in order: what was asked, what you actually said, and
- * the recording. Per-question coaching (possible answers + improvements) sits
- * in accordions under each turn when the report has them.
+ * The whole interview, in order: what was asked, what you actually said, how it
+ * scored, what to do about it, and the tape.
+ *
+ * One accordion per turn, with the best answer open to start — the page is long
+ * enough without eight transcripts unfurled, and the strongest answer is the one
+ * worth landing on first.
  */
-export function Replay({ sessionId, turns }: { sessionId: string; turns: ReplayTurn[] }) {
+export function Replay({
+  sessionId,
+  turns,
+  defaultOpenIndex,
+}: {
+  sessionId: string;
+  turns: ReplayTurn[];
+  /** Usually the report's best answer. Null when there isn't one. */
+  defaultOpenIndex: number | null;
+}) {
+  const [open, setOpen] = useState<Set<number>>(
+    () => new Set(defaultOpenIndex !== null ? [defaultOpenIndex] : []),
+  );
+
+  /**
+   * The "watch" links on the best/worst cards are `#turn-N` anchors. Opening the
+   * turn they point at is what makes them do anything — the browser scrolls, we
+   * unfold.
+   *
+   * Two listeners, because `hashchange` alone is not enough: once the URL
+   * already ends in `#turn-3`, clicking that same link fires no event at all, so
+   * a turn the reader collapsed by hand could never be reopened from the card.
+   * The click listener catches the repeat; `hashchange` (and the initial read)
+   * catches arriving with the anchor already in the URL.
+   */
+  useEffect(() => {
+    const openTurn = (n: number) =>
+      setOpen((prev) => (prev.has(n) ? prev : new Set(prev).add(n)));
+
+    const fromHref = (href: string | null | undefined): number | null => {
+      const m = /#turn-(\d+)$/.exec(href ?? "");
+      return m ? Number(m[1]) : null;
+    };
+
+    const onHash = () => {
+      const n = fromHref(window.location.hash);
+      if (n !== null) openTurn(n);
+    };
+    const onClick = (e: MouseEvent) => {
+      const anchor = (e.target as Element | null)?.closest?.('a[href^="#turn-"]');
+      const n = fromHref(anchor?.getAttribute("href"));
+      if (n !== null) openTurn(n);
+    };
+
+    onHash();
+    window.addEventListener("hashchange", onHash);
+    document.addEventListener("click", onClick);
+    return () => {
+      window.removeEventListener("hashchange", onHash);
+      document.removeEventListener("click", onClick);
+    };
+  }, []);
+
   if (!turns.length) return null;
 
+  const toggle = (n: number) =>
+    setOpen((prev) => {
+      const next = new Set(prev);
+      if (next.has(n)) next.delete(n);
+      else next.add(n);
+      return next;
+    });
+
   return (
-    <section className="mt-10">
-      <Eyebrow>Replay · the whole interview</Eyebrow>
-      <ol className="mt-3 space-y-3">
-        {turns.map((t) => (
-          <Card key={t.turn_index} className="p-5">
-            {/* Flat and wrapping, rather than a nested `shrink-0` cluster:
-                WatchAnswer's open player is a sibling here, so `w-full` on it
-                resolves against the Card and it wraps to its own line. `mr-auto`
-                on the eyebrow is what still holds the controls to the right. */}
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-              <span className="mr-auto font-mono text-[11px] tracking-[0.16em] text-ember uppercase">
-                {String(t.turn_index + 1).padStart(2, "0")} · {TYPE_LABEL[t.question_type]}
-              </span>
-              <StarQuestion turnId={t.turn_id} questionHash={t.question_hash} initial={t.starred} />
-              {t.has_audio ? (
-                <PlayAnswer sessionId={sessionId} turnIndex={t.turn_index} />
-              ) : (
-                <span className="font-mono text-[11px] text-ink-muted">typed</span>
+    <section className="section rv" data-io>
+      <p className="kicker">The replay — all {turns.length} questions</p>
+      <div style={{ marginTop: 8 }}>
+        {turns.map((t) => {
+          const isOpen = open.has(t.turn_index);
+          const n = t.turn_index + 1;
+          return (
+            <div className="turn" key={t.turn_index} id={`turn-${t.turn_index}`} data-open={isOpen}>
+              <button
+                type="button"
+                className="turn-head"
+                onClick={() => toggle(t.turn_index)}
+                aria-expanded={isOpen}
+              >
+                <span className="turn-n" aria-hidden="true">
+                  {String(n).padStart(2, "0")}
+                </span>
+                <span className="turn-q">{t.question}</span>
+                <span
+                  className={
+                    "turn-type" + (t.question_type === "followup" ? " followup" : "")
+                  }
+                >
+                  {TYPE_LABEL[t.question_type]}
+                </span>
+                <span className="chev" aria-hidden="true">
+                  ›
+                </span>
+              </button>
+
+              {isOpen && (
+                <div className="turn-body">
+                  <div>
+                    <p className="tr-label">You said</p>
+                    <p className="transcript">
+                      {t.transcript ? `“${t.transcript}”` : "No answer recorded."}
+                    </p>
+                  </div>
+
+                  {t.scores ? <Rubric scores={t.scores} /> : null}
+
+                  <Improvements items={t.feedback?.improvements ?? []} />
+                  <PossibleAnswers items={t.feedback?.possible_answers ?? []} />
+
+                  {/* Only where a recording actually covers this answer. A denied
+                      camera, or a session from before video existed, simply has
+                      no player rather than a broken one. */}
+                  {t.video_id && t.video_offset_ms !== null ? (
+                    <VideoPlayer
+                      videoId={t.video_id}
+                      offsetMs={t.video_offset_ms}
+                      turnNumber={n}
+                      expiresInDays={t.video_expires_in_days}
+                    />
+                  ) : null}
+
+                  <div className="turn-actions">
+                    {t.has_audio ? (
+                      <PlayAnswer sessionId={sessionId} turnIndex={t.turn_index} />
+                    ) : (
+                      <span className="mono-note">typed answer</span>
+                    )}
+                    <StarQuestion
+                      turnId={t.turn_id}
+                      questionHash={t.question_hash}
+                      initial={t.starred}
+                    />
+                  </div>
+                </div>
               )}
-              {/* Only where a recording actually covers this answer. A denied
-                  camera, or a session from before video existed, simply has no
-                  Watch button rather than a broken one. */}
-              {t.video_id && t.video_offset_ms !== null ? (
-                <WatchAnswer videoId={t.video_id} offsetMs={t.video_offset_ms} />
-              ) : null}
             </div>
-
-            <p className="mt-3 font-display text-lg leading-snug">{t.question}</p>
-
-            <p
-              className={cx(
-                "mt-3 border-l-2 border-line pl-4 text-sm leading-relaxed",
-                t.transcript ? "text-ink-soft" : "text-ink-muted italic",
-              )}
-            >
-              {t.transcript || "No answer recorded."}
-            </p>
-
-            <TurnCoaching feedback={t.feedback} />
-          </Card>
-        ))}
-      </ol>
+          );
+        })}
+      </div>
     </section>
   );
 }
 
-function TurnCoaching({ feedback }: { feedback: QuestionFeedback | null }) {
-  if (!feedback) return null;
-  const answers = feedback.possible_answers.filter(Boolean);
-  const improvements = feedback.improvements.filter(Boolean);
-  if (!answers.length && !improvements.length) return null;
-
+/** Five mini-meters, scored out of ten. Tone is on the same 0–100 scale as
+    everything else, so a 7/10 reads the same green a 70 does. */
+function Rubric({ scores }: { scores: AnswerScores }) {
+  const entries = Object.entries(RUBRIC_LABEL) as [keyof AnswerScores, string][];
   return (
-    <div className="mt-4 space-y-2">
-      {answers.length > 0 ? (
-        <details className="group rounded-xl border border-line bg-paper-sunken/40 open:bg-paper-sunken/60">
-          <summary className="cursor-pointer list-none px-4 py-3 text-sm font-medium text-ink-soft marker:content-none [&::-webkit-details-marker]:hidden">
-            <span className="flex items-center justify-between gap-3">
-              Possible answers
-              <span className="font-mono text-[11px] text-ink-muted group-open:hidden">show</span>
-              <span className="hidden font-mono text-[11px] text-ink-muted group-open:inline">
-                hide
-              </span>
-            </span>
-          </summary>
-          <ul className="space-y-3 border-t border-line px-4 py-3">
-            {answers.map((a, i) => (
-              <li key={i} className="flex gap-3 text-sm leading-relaxed text-ink-soft">
-                <span className="shrink-0 font-mono text-[11px] text-ember">
-                  {String(i + 1).padStart(2, "0")}
-                </span>
-                <span>{a}</span>
-              </li>
-            ))}
-          </ul>
-        </details>
-      ) : null}
+    <div>
+      <p className="tr-label" style={{ marginBottom: 8 }}>
+        Rubric
+      </p>
+      <div className="rubric">
+        {entries.map(([key, label]) => {
+          const v = scores[key];
+          return (
+            <div key={key}>
+              <p className="rub-k">{label}</p>
+              <p className={`rub-v ${TONE_CLASS[scoreTone(v * 10)]}`}>
+                {v}
+                <small>/10</small>
+              </p>
+              <div className="rub-m">
+                <div className="rub-f" style={{ width: `${Math.max(0, Math.min(100, v * 10))}%` }} />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
-      {improvements.length > 0 ? (
-        <details className="group rounded-xl border border-line bg-paper-sunken/40 open:bg-paper-sunken/60">
-          <summary className="cursor-pointer list-none px-4 py-3 text-sm font-medium text-ink-soft marker:content-none [&::-webkit-details-marker]:hidden">
-            <span className="flex items-center justify-between gap-3">
-              How to improve your answer
-              <span className="font-mono text-[11px] text-ink-muted group-open:hidden">show</span>
-              <span className="hidden font-mono text-[11px] text-ink-muted group-open:inline">
-                hide
-              </span>
-            </span>
-          </summary>
-          <ul className="space-y-3 border-t border-line px-4 py-3">
-            {improvements.map((tip, i) => (
-              <li key={i} className="flex gap-3 text-sm leading-relaxed text-ink-soft">
-                <span className="shrink-0 font-mono text-[11px] text-ember">
-                  {String(i + 1).padStart(2, "0")}
-                </span>
-                <span>{tip}</span>
-              </li>
-            ))}
-          </ul>
-        </details>
-      ) : null}
+function Improvements({ items }: { items: string[] }) {
+  const list = items.filter(Boolean);
+  if (!list.length) return null;
+  return (
+    <div className="improve">
+      <p className="tr-label">How to improve this answer</p>
+      <ul>
+        {list.map((tip, i) => (
+          <li key={i}>{tip}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function PossibleAnswers({ items }: { items: string[] }) {
+  const list = items.filter(Boolean);
+  if (!list.length) return null;
+  return (
+    <div>
+      <p className="tr-label">Possible answers</p>
+      <div className="answers">
+        {list.map((a, i) => (
+          <div className="ans" key={i}>
+            <p className="ans-tag">angle {String(i + 1).padStart(2, "0")}</p>
+            <p>“{a}”</p>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

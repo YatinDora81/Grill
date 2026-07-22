@@ -8,7 +8,8 @@ import { jwtVerify } from "jose";
  * Only verifies the cookie JWT for protected route groups — hashing/DB stay in
  * the route handlers, which re-check auth themselves (this is UX, not the
  * security boundary).
- * Unauthenticated: browser → redirect to /login; API → 401 JSON.
+ * Unauthenticated: browser → redirect to the landing page with the auth modal
+ * open (/?auth=login&next=…); API → 401 JSON.
  */
 const COOKIE = process.env.AUTH_COOKIE_NAME || "grill_session";
 const secret = new TextEncoder().encode(process.env.JWT_SECRET);
@@ -34,9 +35,12 @@ export async function proxy(req: NextRequest) {
       { status: 401 },
     );
   }
+  // The sign-in form is a modal on the landing page, not a route of its own —
+  // the page reads ?auth= and ?next= on mount and opens it.
   const url = req.nextUrl.clone();
-  url.pathname = "/login";
+  url.pathname = "/";
   url.search = "";
+  url.searchParams.set("auth", "login");
   url.searchParams.set("next", pathname + search);
   return NextResponse.redirect(url);
 }
@@ -44,7 +48,7 @@ export async function proxy(req: NextRequest) {
 export const config = {
   // Every signed-in surface belongs here. Missing one isn't a hole — each route
   // re-checks auth itself, and this gate is UX — but it's the difference between
-  // a clean redirect to /login and an error page.
+  // a clean redirect to the sign-in modal and an error page.
   //
   // NOT listed on purpose: /api/cron/* (bearer-token auth, no user cookie) and
   // /api/health/* (deliberately unauthenticated, so the sign-in page can keep

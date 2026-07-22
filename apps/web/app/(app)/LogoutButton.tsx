@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiPost } from "@/lib/apiClient";
-import { Button } from "@/components/ui";
 
 export function LogoutButton() {
   const router = useRouter();
@@ -16,14 +15,16 @@ export function LogoutButton() {
     } finally {
       // Even if the call failed, send them to the door — a logout that appears
       // to do nothing is worse than one that redirects with a stale cookie.
-      router.push("/login");
+      // The landing page, not the sign-in modal: someone who just signed out is
+      // not asking to sign back in.
+      router.push("/");
       router.refresh();
     }
   }
 
   return (
-    <Button variant="ghost" size="sm" onClick={logout} disabled={busy}>
+    <button type="button" className="btn btn-ghost btn-sm" onClick={logout} disabled={busy}>
       {busy ? "Signing out…" : "Sign out"}
-    </Button>
+    </button>
   );
 }

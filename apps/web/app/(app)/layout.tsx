@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
-import Link from "next/link";
-import { Wordmark } from "@/components/ui";
-import { LogoutButton } from "./LogoutButton";
+import { AppTopbar } from "./AppTopbar";
+import { currentUser, initialsOf } from "./currentUser";
 
 /**
  * Every route in this group is signed-in, per-candidate data. Restated here
@@ -15,35 +14,27 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false, nocache: true },
 };
 
-const NAV_LINK =
-  "relative text-sm text-ink-muted transition-colors after:absolute after:-inset-x-2 after:-inset-y-3.5 after:content-[''] hover:text-ink";
+/**
+ * The shell every signed-in page sits in: one warm room, grain over it, chrome
+ * top and bottom. Pages supply their own key-light (the report's comes from the
+ * other side of the page than the dashboard's), so it isn't rendered here.
+ */
+export default async function AppLayout({ children }: { children: React.ReactNode }) {
+  const user = await currentUser();
 
-export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-dvh">
-      {/* No fill: a raised bar reads as a brown band across the top. The room's
-          chrome is the page colour plus a hairline, as in the reference. */}
-      <header className="border-b border-line">
-        <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-4 sm:px-6">
-          <Link href="/dashboard">
-            <Wordmark className="text-xl" />
-          </Link>
-          <nav className="flex items-center gap-5">
-            {/* Pseudo-element hit area (~68x46) rather than `h-11`: the row's
-                height is set by the 36px Sign out button, so a real 44px box
-                here would push the header taller on every page, desktop
-                included, to solve a touch problem. */}
-            <Link href="/starred" className={NAV_LINK}>
-              Starred
-            </Link>
-            <Link href="/profile" className={NAV_LINK}>
-              Profile
-            </Link>
-            <LogoutButton />
-          </nav>
-        </div>
-      </header>
+    <div className="app-root">
+      <div className="grain" aria-hidden="true" />
+      <AppTopbar name={user?.name ?? null} initials={initialsOf(user?.name ?? null)} />
       {children}
+      <footer className="foot">
+        <div className="wrap foot-in">
+          <span className="wordmark" style={{ fontSize: 17 }}>
+            grill<i>.</i>
+          </span>
+          <span className="foot-note">practice under heat</span>
+        </div>
+      </footer>
     </div>
   );
 }

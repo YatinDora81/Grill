@@ -28,7 +28,7 @@ export default async function SessionPage({
 }) {
   const { sessionId } = await params;
   const userId = await getUserId();
-  if (!userId) redirect(`/login?next=/session/${sessionId}`);
+  if (!userId) redirect(`/?auth=login&next=/session/${sessionId}`);
 
   // User-scoped: someone else's session id is simply "not found".
   const session = await repo.getSession(sessionId, userId);

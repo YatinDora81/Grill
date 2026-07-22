@@ -35,9 +35,9 @@ export function DeleteInterviewButton({ sessionId }: { sessionId: string }) {
 
   return (
     <>
-      <Button type="button" variant="danger" onClick={() => setOpen(true)}>
+      <button type="button" className="btn btn-danger" onClick={() => setOpen(true)}>
         Delete interview
-      </Button>
+      </button>
 
       {open ? (
         <div

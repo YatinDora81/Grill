@@ -5,7 +5,8 @@ import type { RecentSession, SessionStatus } from "@repo/types";
 import { getUserId } from "@/lib/auth";
 import { getDashboardData } from "@/lib/services/dashboardService";
 import { UNTITLED } from "@/lib/interviewMeta";
-import { ButtonLink, Card, Eyebrow, cx, scoreTone } from "@/components/ui";
+import { cx, scoreTone } from "@/components/ui";
+import { Reveal } from "@/components/Reveal";
 import { Trend } from "./Trend";
 
 export const metadata: Metadata = {
@@ -19,7 +20,7 @@ export default async function DashboardPage() {
   // proxy.ts already gates this, but a Server Component must never assume that —
   // it reads the DB, so it re-checks rather than trusting the gate.
   const userId = await getUserId();
-  if (!userId) redirect("/login?next=/dashboard");
+  if (!userId) redirect("/?auth=login&next=/dashboard");
 
   const { user, stats, recent } = await getDashboardData(userId);
   const firstName = user.name?.split(" ")[0] ?? null;
@@ -34,68 +35,106 @@ export default async function DashboardPage() {
   const rest = recent.filter((s) => s.session_id !== resumable?.session_id);
 
   return (
-    <main className="mx-auto max-w-5xl px-6 py-10">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="font-display text-4xl">
-            {firstName ? `Hello, ${firstName}` : "Your dashboard"}
-          </h1>
-          <p className="mt-1.5 text-sm text-ink-soft">
-            {scored
-              ? `${stats.completed} interview${stats.completed === 1 ? "" : "s"} on the record.`
-              : resumable
-                ? "You left one on the table."
-                : "No interviews yet. The first one is the hardest."}
-          </p>
+    <>
+      <Reveal threshold={0.12} />
+      <div className="keylight" aria-hidden="true" />
+
+      <main className="wrap" style={{ paddingBottom: 56 }}>
+        <div className="page-head">
+          <div>
+            <h1 className="h1">
+              {firstName ? (
+                <>
+                  Hello, <i>{firstName}.</i>
+                </>
+              ) : (
+                "Your dashboard"
+              )}
+            </h1>
+            <p className="page-sub">
+              {scored ? (
+                <>
+                  <b>
+                    {stats.completed} interview{stats.completed === 1 ? "" : "s"}
+                  </b>{" "}
+                  on the record.
+                  {resumable ? " One still on the burner." : ""}
+                </>
+              ) : resumable ? (
+                "You left one on the table."
+              ) : (
+                "No interviews yet. The first one is the hardest."
+              )}
+            </p>
+          </div>
+          {/* Only ever one ember button per screen — if there's a session to
+              resume, that's the hot action and this steps back. */}
+          <Link href="/new" className={cx("btn", resumable ? "btn-secondary" : "btn-primary")}>
+            New interview
+          </Link>
         </div>
-        {/* Only ever one ember button per screen — if there's a session to
-            resume, that's the hot action and this steps back. */}
-        <ButtonLink href="/new" variant={resumable ? "secondary" : "primary"}>
-          New interview
-        </ButtonLink>
-      </div>
 
-      {resumable ? <ResumeCard session={resumable} /> : null}
+        {resumable ? <ResumeCard session={resumable} /> : null}
 
-      {scored ? (
-        <>
-          <section className="mt-8 grid gap-3 sm:grid-cols-4">
-            <Stat label="Completed" value={String(stats.completed)} />
-            <Stat label="Average" value={fmtScore(stats.avg_score)} tone={stats.avg_score} />
-            <Stat label="Best" value={fmtScore(stats.best_score)} tone={stats.best_score} />
-            <Stat label="Latest" value={fmtScore(stats.last_score)} tone={stats.last_score} />
-          </section>
+        {scored ? (
+          <>
+            <section className="stats rv" data-io aria-label="Your numbers">
+              <Stat label="Completed" value={stats.completed} unit={false} />
+              <Stat label="Average" value={stats.avg_score} />
+              <Stat label="Best" value={stats.best_score} />
+              <Stat label="Latest" value={stats.last_score} />
+            </section>
 
-          {stats.trend.length > 1 && (
-            <Card className="mt-3 p-6">
-              <Eyebrow>Progress</Eyebrow>
-              <p className="mt-1 text-xs text-ink-muted">Overall score, oldest to newest.</p>
-              <div className="mt-5">
+            {stats.trend.length > 1 && (
+              <section className="trend rv" data-io>
+                <div className="trend-head">
+                  <p className="kicker">Progress</p>
+                  <p className="trend-note">overall score · oldest → newest</p>
+                </div>
                 <Trend scores={stats.trend} />
-              </div>
-            </Card>
-          )}
-        </>
-      ) : null}
+              </section>
+            )}
+          </>
+        ) : null}
 
-      {!scored && !resumable ? <EmptyState /> : null}
+        {!scored && !resumable ? <EmptyState /> : null}
 
-      {rest.length > 0 ? (
-        <section className="mt-10">
-          <Eyebrow>Recent sessions</Eyebrow>
-          <ul className="rounded-card mt-3 divide-y divide-line overflow-hidden border border-line bg-paper-raised">
-            {rest.map((s) => (
-              <SessionRow key={s.session_id} session={s} />
-            ))}
-          </ul>
-        </section>
-      ) : null}
-    </main>
+        {rest.length > 0 ? (
+          <section className="rv" data-io>
+            <div className="ledger-head">
+              <p className="kicker">Recent sessions</p>
+              <p className="trend-note">{rest.length} shown</p>
+            </div>
+            <div className="ledger">
+              {rest.map((s) => (
+                <SessionRow key={s.session_id} session={s} />
+              ))}
+            </div>
+          </section>
+        ) : null}
+      </main>
+    </>
   );
 }
 
-function fmtScore(v: number | null): string {
-  return v === null ? "—" : String(v);
+const TONE_CLASS = { strong: "tone-strong", mixed: "tone-mixed", weak: "tone-weak" } as const;
+
+/** Score → verdict class, or nothing at all when there is no score to colour. */
+function tone(v: number | null): string {
+  return v === null ? "" : TONE_CLASS[scoreTone(v)];
+}
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/**
+ * `2026-07-20` → `Jul 20`. Sliced rather than handed to Date: the string is
+ * already the date we mean, and parsing it would reinterpret it in whatever
+ * timezone the renderer happens to sit in — which moves half the rows a day.
+ */
+function fmtDay(iso: string): string {
+  const month = MONTHS[Number(iso.slice(5, 7)) - 1];
+  if (!month) return iso;
+  return `${month} ${Number(iso.slice(8, 10))}`;
 }
 
 /**
@@ -110,61 +149,76 @@ function sessionTitle(s: RecentSession): string {
 }
 
 /**
- * The unfinished interview, pulled out of the list. No key-light here: the glow
- * is the hot seat's signature, and spending it on a dashboard card would stop
- * it meaning "you're live". An ember edge is enough to say "open".
+ * The unfinished interview, pulled out of the list and given the one ember
+ * button on the page: it is the only thing here with a deadline attached.
  */
 function ResumeCard({ session: s }: { session: RecentSession }) {
+  const detail = [
+    s.name?.trim() && s.role?.trim() ? s.role.trim() : null,
+    `started ${fmtDay(s.date)}`,
+    "not scored until you finish",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
   return (
-    <div className="rounded-card mt-8 flex flex-wrap items-center justify-between gap-4 border border-line border-l-2 border-l-ember bg-paper-raised p-6">
-      <div className="min-w-0">
-        <Eyebrow tone="ember">Still open</Eyebrow>
-        <p className="mt-2 truncate font-display text-xl">{sessionTitle(s)}</p>
-        <p className="mt-1 font-mono text-xs text-ink-muted">
-          Started {s.date}
-          {s.name && s.role ? ` · ${s.role}` : ""} · not scored until you finish
+    <section className="resume rv" data-io aria-label="Interview in progress">
+      <div style={{ minWidth: 0 }}>
+        <p className="resume-label">
+          <span className="live-dot" aria-hidden="true" />
+          Still on the burner
         </p>
+        <h2 className="resume-t">{sessionTitle(s)}</h2>
+        <p className="resume-d">{detail}</p>
       </div>
-      <ButtonLink href={`/session/${s.session_id}`}>Resume</ButtonLink>
-    </div>
+      <Link href={`/session/${s.session_id}`} className="btn btn-primary">
+        Back to the hot seat
+      </Link>
+    </section>
   );
 }
 
-function Stat({ label, value, tone }: { label: string; value: string; tone?: number | null }) {
-  const toneClass =
-    tone === null || tone === undefined
-      ? "text-ink"
-      : { strong: "text-strong", mixed: "text-mixed", weak: "text-weak" }[scoreTone(tone)];
+function Stat({
+  label,
+  value,
+  unit = true,
+}: {
+  label: string;
+  value: number | null;
+  /** Completed is a count, not a score — it has no denominator. */
+  unit?: boolean;
+}) {
   return (
-    <Card className="p-5">
-      <Eyebrow>{label}</Eyebrow>
-      <p className={cx("tabular mt-2 font-display text-3xl", toneClass)}>{value}</p>
-    </Card>
+    <div className="stat">
+      <p className="stat-k">{label}</p>
+      <p className={cx("stat-v", unit ? tone(value) : "")}>
+        {value === null ? "—" : value}
+        {unit && value !== null ? <small>/100</small> : null}
+      </p>
+    </div>
   );
 }
 
 function EmptyState() {
   return (
-    <Card className="mt-8 p-8 text-center">
-      <h2 className="font-display text-2xl">Nothing to show yet</h2>
-      <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-ink-soft">
-        Run an interview and you&apos;ll get a scored report grounded in your own words —
-        plus how you actually sounded saying them.
+    <div className="empty rv" data-io>
+      <h2>No interviews yet. The first one is the hardest.</h2>
+      <p>
+        Run one and you&apos;ll get a scored report grounded in your own words — plus how
+        you actually sounded saying them.
       </p>
-      <div className="mt-5 flex justify-center">
-        <ButtonLink href="/new">Start your first interview</ButtonLink>
-      </div>
-    </Card>
+    </div>
   );
 }
 
-const STATUS_LABEL: Record<SessionStatus, string> = {
-  in_progress: "In progress",
-  generating_report: "Building report",
-  completed: "Completed",
-  cancelled: "Cancelled",
-  abandoned: "Abandoned",
-  error: "Failed",
+/** Non-completed statuses read as a chip rather than a score they don't have. */
+const STATUS_CHIP: Record<SessionStatus, { label: string; className: string }> = {
+  in_progress: { label: "in progress", className: "chip-gen" },
+  generating_report: { label: "report cooking", className: "chip-gen" },
+  completed: { label: "completed", className: "" },
+  cancelled: { label: "cancelled", className: "" },
+  abandoned: { label: "abandoned", className: "" },
+  error: { label: "error", className: "chip-error" },
 };
 
 function SessionRow({ session: s }: { session: RecentSession }) {
@@ -183,49 +237,37 @@ function SessionRow({ session: s }: { session: RecentSession }) {
         ? `/report/${s.session_id}`
         : null;
 
+  const chip = STATUS_CHIP[s.status];
+
   const body = (
-    <div className="flex items-center justify-between gap-4 px-5 py-4">
-      <div className="min-w-0">
-        <p className="truncate text-sm font-medium">{sessionTitle(s)}</p>
-        <p className="mt-1 truncate font-mono text-[11px] text-ink-muted">
-          {s.date} · {STATUS_LABEL[s.status]}
-          {s.name && s.role ? ` · ${s.role}` : ""}
-        </p>
-      </div>
-      <div className="flex shrink-0 items-center gap-4">
-        {s.score !== null ? (
-          <span
-            className={cx(
-              "tabular font-display text-2xl",
-              { strong: "text-strong", mixed: "text-mixed", weak: "text-weak" }[
-                scoreTone(s.score)
-              ],
-            )}
-          >
-            {s.score}
-          </span>
-        ) : null}
-        {href ? (
-          <span
-            aria-hidden
-            className="text-ink-muted transition-colors group-hover:text-ember"
-          >
-            →
-          </span>
-        ) : null}
-      </div>
-    </div>
+    <>
+      <span className="row-t">
+        <span>{sessionTitle(s)}</span>
+        {s.name?.trim() && s.role?.trim() ? <span className="row-role">{s.role}</span> : null}
+      </span>
+      <span className="row-date">{fmtDay(s.date)}</span>
+      {s.status === "completed" && s.score !== null ? (
+        <span className={cx("row-score", tone(s.score))}>{s.score}</span>
+      ) : (
+        <span className={cx("chip", chip.className)}>{chip.label}</span>
+      )}
+      <span className="row-arrow" aria-hidden="true">
+        {href ? "→" : ""}
+      </span>
+    </>
   );
 
-  return (
-    <li>
-      {href ? (
-        <Link href={href} className="group block transition-colors hover:bg-paper-sunken">
-          {body}
-        </Link>
-      ) : (
-        body
-      )}
-    </li>
+  // Cancelled and abandoned sessions have nothing to open — a row that looks
+  // like a link and does nothing is worse than one that plainly doesn't.
+  //
+  // No `aria-label`: it would replace the row's own text as the accessible
+  // name, so a screen reader would hear the title and lose the date, the score
+  // and the status — everything the row is actually for.
+  return href ? (
+    <Link href={href} className="row">
+      {body}
+    </Link>
+  ) : (
+    <div className="row">{body}</div>
   );
 }

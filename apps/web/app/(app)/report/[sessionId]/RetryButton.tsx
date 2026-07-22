@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 import type { StartResponse } from "@repo/types";
 import { apiPost, ApiClientError } from "@/lib/apiClient";
-import { Button, Spinner } from "@/components/ui";
 import { GrillToaster } from "@/components/toast";
 
 /**
@@ -35,10 +34,12 @@ export function RetryButton({ sessionId }: { sessionId: string }) {
   return (
     <>
       <GrillToaster />
-      <Button onClick={go} disabled={busy} variant="secondary">
-        {busy ? <Spinner /> : null}
-        {busy ? "Setting it up…" : "Retry these questions"}
-      </Button>
+      {/* The report's single ember button: re-running the same questions is the
+          only way to measure progress on identical material. */}
+      <button type="button" className="btn btn-primary" onClick={go} disabled={busy}>
+        {busy ? <span className="spinner" aria-hidden="true" /> : null}
+        {busy ? "Setting it up…" : "Run it again"}
+      </button>
     </>
   );
 }

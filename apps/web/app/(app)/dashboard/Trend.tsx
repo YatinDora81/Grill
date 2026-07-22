@@ -1,148 +1,149 @@
 "use client";
 
-import { useLayoutEffect, useRef, useState } from "react";
+import { useState } from "react";
 
 /**
- * Score-over-time sparkline. One series, so: one hue, no legend (the card title
- * names it). The line is ink — ember is reserved for heat — and only the latest
- * point is ember, marking where you stand now.
+ * Score over time. One series, so: one hue, no legend — the card title names it.
+ * The line draws itself once on load, the area fades in behind it, and the
+ * latest point stays lit with its number showing, because that is the one that
+ * says where you stand now.
+ *
+ * Every other point gives up its number on hover: a guide line, a lit dot and
+ * the score. Hover, not always-on labels — eight numbers stacked along a
+ * 560-unit line collide, and the shape of the line is the point of the chart.
  *
  * The y-domain is pinned to the full 0–100 score range, never the data's own
  * min/max: an auto-domain would turn a 71→73 wobble into a triumphant climb.
  */
-const PAD = { top: 10, right: 14, bottom: 10, left: 14 };
-const HEIGHT = 116;
+const W = 560;
+const H = 140;
+const PAD_X = 14;
+const TOP = 18;
+const BOTTOM = 120;
+
+/** Smooth line through the points — midpoint cubic béziers, no overshoot. */
+function smoothPath(pts: [number, number][]): string {
+  let d = `M ${pts[0]![0]} ${pts[0]![1]}`;
+  for (let i = 1; i < pts.length; i++) {
+    const [x0, y0] = pts[i - 1]!;
+    const [x1, y1] = pts[i]!;
+    const mx = (x0 + x1) / 2;
+    d += ` C ${mx} ${y0}, ${mx} ${y1}, ${x1} ${y1}`;
+  }
+  return d;
+}
+
+/**
+ * Keep a label inside the viewBox.
+ *
+ * Floored at 12 vertically so a perfect 100 — which sits at y=18 — doesn't put
+ * its own ascenders outside the box and lose the top of the digits.
+ */
+const labelY = (y: number) => Math.max(12, y - 12);
+const labelX = (x: number) => Math.max(16, Math.min(W - 16, x));
 
 export function Trend({ scores }: { scores: number[] }) {
-  const wrapRef = useRef<HTMLDivElement>(null);
-  const [width, setWidth] = useState(0);
   const [hover, setHover] = useState<number | null>(null);
 
-  // Measure rather than rely on preserveAspectRatio: non-uniform scaling would
-  // turn the end-dot into an ellipse and make hover hit-testing lie.
-  useLayoutEffect(() => {
-    const el = wrapRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(([entry]) => {
-      if (entry) setWidth(entry.contentRect.width);
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
+  const clamp = (v: number) => Math.max(0, Math.min(100, v));
+  const pts: [number, number][] = scores.map((s, i) => [
+    PAD_X + (i * (W - PAD_X * 2)) / (Math.max(2, scores.length) - 1),
+    BOTTOM - (clamp(s) / 100) * (BOTTOM - TOP),
+  ]);
 
-  const innerW = Math.max(0, width - PAD.left - PAD.right);
-  const innerH = HEIGHT - PAD.top - PAD.bottom;
+  // Rendered only when there are at least two points — one score is not a
+  // trend. After the hooks, so the hook order never depends on the data.
+  if (scores.length < 2) return null;
 
-  const x = (i: number) =>
-    PAD.left + (scores.length === 1 ? innerW / 2 : (i / (scores.length - 1)) * innerW);
-  const y = (v: number) => PAD.top + innerH - (Math.max(0, Math.min(100, v)) / 100) * innerH;
+  const line = smoothPath(pts);
+  const first = pts[0]!;
+  const lastIndex = pts.length - 1;
+  const last = pts[lastIndex]!;
+  const area = `${line} L ${last[0]} ${H - 6} L ${first[0]} ${H - 6} Z`;
 
-  const pts = scores.map((s, i) => ({ x: x(i), y: y(s), v: s, i }));
-  const line = pts.map((p, i) => `${i === 0 ? "M" : "L"}${p.x},${p.y}`).join(" ");
-  const area =
-    pts.length > 0
-      ? `${line} L${pts[pts.length - 1]!.x},${PAD.top + innerH} L${pts[0]!.x},${PAD.top + innerH} Z`
-      : "";
-
-  const last = pts[pts.length - 1];
-  const active = hover !== null ? pts[hover] : null;
-
+  /**
+   * Nearest point to the pointer, horizontally.
+   *
+   * The SVG scales to its container, so client pixels have to come back through
+   * the viewBox before they mean anything: `getBoundingClientRect` gives the
+   * rendered width, and W is what the coordinates below are drawn in.
+   */
   function onMove(e: React.PointerEvent<SVGSVGElement>) {
-    if (!innerW || pts.length === 0) return;
     const rect = e.currentTarget.getBoundingClientRect();
-    const px = e.clientX - rect.left;
+    if (!rect.width) return;
+    const x = ((e.clientX - rect.left) / rect.width) * W;
     let nearest = 0;
     for (let i = 1; i < pts.length; i++) {
-      if (Math.abs(pts[i]!.x - px) < Math.abs(pts[nearest]!.x - px)) nearest = i;
+      if (Math.abs(pts[i]![0] - x) < Math.abs(pts[nearest]![0] - x)) nearest = i;
     }
     setHover(nearest);
   }
 
+  // The latest point keeps its own permanent label, so hovering it must not
+  // paint a second one on top.
+  const active = hover !== null && hover !== lastIndex ? hover : null;
+  const activePt = active !== null ? pts[active]! : null;
+
   return (
-    <div ref={wrapRef} className="relative">
-      {width > 0 && (
-        <svg
-          width={width}
-          height={HEIGHT}
-          // `touch-none` here meant a vertical swipe that happened to start on
-          // the chart scrolled nothing — the dashboard just stuck. Only the
-          // horizontal axis carries the hover readout, so give the browser back
-          // vertical panning and pinch-zoom and keep the rest.
-          className="touch-pan-y touch-pinch-zoom select-none"
-          onPointerMove={onMove}
-          onPointerLeave={() => setHover(null)}
-          role="img"
-          aria-label={`Score trend across ${scores.length} interviews, oldest to newest: ${scores.join(", ")}`}
+    <svg
+      className="trend-svg"
+      viewBox={`0 0 ${W} ${H}`}
+      onPointerMove={onMove}
+      onPointerLeave={() => setHover(null)}
+      role="img"
+      aria-label={`Score trend across ${scores.length} interviews, oldest to newest: ${scores.join(", ")}`}
+    >
+      <defs>
+        <linearGradient id="trendGrad" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" className="g-stop-ember" />
+          <stop offset="70%" className="g-stop-hot" />
+          <stop offset="100%" className="g-stop-glow" />
+        </linearGradient>
+        <linearGradient id="trendFill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" className="g-stop-ember-22" />
+          <stop offset="100%" className="g-stop-ember-0" />
+        </linearGradient>
+      </defs>
+
+      <path d={area} className="trend-area" />
+      {/* pathLength="1" so one dash covers the line whatever its real length. */}
+      <path d={line} className="trend-line trend-draw" pathLength="1" />
+
+      {activePt ? (
+        <line
+          x1={activePt[0]}
+          x2={activePt[0]}
+          y1={TOP - 6}
+          y2={BOTTOM}
+          className="trend-guide"
+        />
+      ) : null}
+
+      {pts.slice(0, -1).map((p, i) => (
+        <circle
+          key={i}
+          cx={p[0]}
+          cy={p[1]}
+          r={active === i ? 3.4 : 2.6}
+          className={active === i ? "trend-dot-hover" : "trend-dot"}
+        />
+      ))}
+
+      <circle cx={last[0]} cy={last[1]} r="3.4" className="trend-dot-last" />
+      <text x={last[0] - 6} y={labelY(last[1])} textAnchor="end" className="trend-val">
+        {scores[lastIndex]}
+      </text>
+
+      {activePt ? (
+        <text
+          x={labelX(activePt[0])}
+          y={labelY(activePt[1])}
+          textAnchor="middle"
+          className="trend-val"
         >
-          {/* Recessive reference lines at 0/50/100 — hairline, solid. */}
-          {[0, 50, 100].map((v) => (
-            <line
-              key={v}
-              x1={PAD.left}
-              x2={PAD.left + innerW}
-              y1={y(v)}
-              y2={y(v)}
-              stroke="var(--color-line)"
-              strokeWidth={1}
-            />
-          ))}
-
-          <path d={area} fill="var(--color-ink-soft)" opacity={0.08} />
-          <path
-            d={line}
-            fill="none"
-            stroke="var(--color-ink-soft)"
-            strokeWidth={2}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-
-          {active && (
-            <line
-              x1={active.x}
-              x2={active.x}
-              y1={PAD.top}
-              y2={PAD.top + innerH}
-              stroke="var(--color-line-strong)"
-              strokeWidth={1}
-            />
-          )}
-
-          {/* Latest point: emphasis, with a 2px surface ring so it stays legible. */}
-          {last && (
-            <circle
-              cx={last.x}
-              cy={last.y}
-              r={4.5}
-              fill="var(--color-ember)"
-              stroke="var(--color-paper-raised)"
-              strokeWidth={2}
-            />
-          )}
-          {active && active.i !== last?.i && (
-            <circle
-              cx={active.x}
-              cy={active.y}
-              r={4.5}
-              fill="var(--color-ink-soft)"
-              stroke="var(--color-paper-raised)"
-              strokeWidth={2}
-            />
-          )}
-        </svg>
-      )}
-
-      {active && (
-        <div
-          className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full rounded-lg border border-line bg-paper-raised px-2.5 py-1.5 shadow-sm"
-          style={{ left: active.x, top: active.y - 10 }}
-        >
-          <p className="tabular font-mono text-sm font-semibold">{active.v}</p>
-          <p className="text-[11px] whitespace-nowrap text-ink-muted">
-            {active.i === scores.length - 1 ? "Latest" : `#${active.i + 1}`}
-          </p>
-        </div>
-      )}
-    </div>
+          {scores[active!]}
+        </text>
+      ) : null}
+    </svg>
   );
 }

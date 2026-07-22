@@ -26,7 +26,7 @@ export default async function StarredPage() {
   // proxy.ts gates this, but a Server Component reading the DB must never
   // assume that — it re-checks rather than trusting the gate.
   const userId = await getUserId();
-  if (!userId) redirect("/login?next=/starred");
+  if (!userId) redirect("/?auth=login&next=/starred");
 
   const starred = await repo.listStarredQuestions(userId);
 
