@@ -4,7 +4,10 @@ import { getUserId, toUserDTO } from "@/lib/auth";
 import * as repo from "@/lib/db/repo";
 import { ProfileForm } from "./ProfileForm";
 
-export const metadata: Metadata = { title: "Profile" };
+export const metadata: Metadata = {
+  title: "Profile",
+  description: "Your account details and interview defaults.",
+};
 export const dynamic = "force-dynamic";
 
 export default async function ProfilePage() {

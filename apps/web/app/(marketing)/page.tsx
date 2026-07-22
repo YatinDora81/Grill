@@ -1,6 +1,23 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { getUserId } from "@/lib/auth";
+import { OG_IMAGE, SITE_DESCRIPTION, SITE_TAGLINE } from "@/lib/siteMeta";
 import { ButtonLink, Wordmark } from "@/components/ui";
+
+export const metadata: Metadata = {
+  // `absolute` so the root template doesn't render "Grill — … · Grill".
+  title: { absolute: SITE_TAGLINE },
+  description: SITE_DESCRIPTION,
+  // The one page that opts out of the root's noindex default.
+  robots: { index: true, follow: true },
+  alternates: { canonical: "/" },
+  openGraph: {
+    url: "/",
+    title: SITE_TAGLINE,
+    description: SITE_DESCRIPTION,
+    images: [OG_IMAGE],
+  },
+};
 
 export default async function LandingPage() {
   // Signed-in visitors get "Dashboard" instead of "Sign up" — being sold to

@@ -1,6 +1,19 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { Wordmark } from "@/components/ui";
 import { LogoutButton } from "./LogoutButton";
+
+/**
+ * Every route in this group is signed-in, per-candidate data. Restated here
+ * rather than left to the root default so that flipping the root to
+ * index-by-default later can't silently expose reports and transcripts.
+ *
+ * `nocache` on top of noindex: it also tells Google and Bing to drop any cached
+ * copy, which plain noindex does not.
+ */
+export const metadata: Metadata = {
+  robots: { index: false, follow: false, nocache: true },
+};
 
 const NAV_LINK =
   "relative text-sm text-ink-muted transition-colors after:absolute after:-inset-x-2 after:-inset-y-3.5 after:content-[''] hover:text-ink";

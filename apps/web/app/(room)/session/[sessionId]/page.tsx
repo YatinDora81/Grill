@@ -8,7 +8,13 @@ import { toSessionContext } from "@/lib/services/sessionContext";
 import { followUp, questionInputs } from "@/lib/services/questionService";
 import { HotSeat } from "./HotSeat";
 
-export const metadata: Metadata = { title: "Interview" };
+export const metadata: Metadata = {
+  title: "Interview",
+  description: "The hot seat — one question at a time, follow-ups included.",
+  // (room) has no layout of its own, so unlike the (app) group this restates the
+  // noindex itself rather than inheriting it from one.
+  robots: { index: false, follow: false, nocache: true },
+};
 export const dynamic = "force-dynamic";
 
 /**

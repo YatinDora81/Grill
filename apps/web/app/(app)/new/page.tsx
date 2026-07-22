@@ -1,7 +1,11 @@
 import type { Metadata } from "next";
 import { NewInterviewForm } from "./NewInterviewForm";
 
-export const metadata: Metadata = { title: "New interview" };
+export const metadata: Metadata = {
+  title: "New interview",
+  description:
+    "Set the brief — role, difficulty and source — and start a mock interview.",
+};
 
 export default function NewInterviewPage() {
   return (

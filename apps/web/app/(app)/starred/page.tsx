@@ -7,7 +7,10 @@ import * as repo from "@/lib/db/repo";
 import { ButtonLink, Card, cx } from "@/components/ui";
 import { Unstar } from "./Unstar";
 
-export const metadata: Metadata = { title: "Starred" };
+export const metadata: Metadata = {
+  title: "Starred",
+  description: "Questions you kept — the ones worth rehearsing again.",
+};
 // Stars change from the report page; never serve a stale collection.
 export const dynamic = "force-dynamic";
 

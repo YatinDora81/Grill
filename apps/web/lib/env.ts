@@ -133,6 +133,24 @@ export const config = {
   interview: {
     defaultNumQuestions: num("DEFAULT_NUM_QUESTIONS", 8),
   },
+  site: {
+    /**
+     * Absolute origin behind `metadataBase`. Canonical and OG/Twitter image URLs
+     * MUST be absolute — emitted relative, a crawler resolves them against its
+     * own host and the card comes back imageless.
+     *
+     * Vercel injects VERCEL_URL per deployment (host only, no scheme), so every
+     * preview describes itself correctly without configuration. Production must
+     * still set NEXT_PUBLIC_SITE_URL: on the production deployment VERCEL_URL is
+     * the deployment hash, not the domain, so canonicals would point at a URL
+     * that changes every push.
+     */
+    url: process.env.NEXT_PUBLIC_SITE_URL
+      ? process.env.NEXT_PUBLIC_SITE_URL.replace(/\/+$/, "")
+      : process.env.VERCEL_URL
+        ? `https://${process.env.VERCEL_URL}`
+        : "http://localhost:4000",
+  },
   presignExpirySeconds: num("PRESIGN_EXPIRY_SECONDS", 300),
 
   get storageConfigured(): boolean {

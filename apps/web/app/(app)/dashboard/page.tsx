@@ -8,7 +8,10 @@ import { UNTITLED } from "@/lib/interviewMeta";
 import { ButtonLink, Card, Eyebrow, cx, scoreTone } from "@/components/ui";
 import { Trend } from "./Trend";
 
-export const metadata: Metadata = { title: "Dashboard" };
+export const metadata: Metadata = {
+  title: "Dashboard",
+  description: "Your recent interviews, scores and where the trend is going.",
+};
 // Scores change as sessions finish; never serve a cached dashboard.
 export const dynamic = "force-dynamic";
 

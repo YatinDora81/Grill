@@ -14,7 +14,10 @@ import { Progress } from "./Progress";
 import { Replay } from "./Replay";
 import { RetryButton } from "./RetryButton";
 
-export const metadata: Metadata = { title: "Report" };
+export const metadata: Metadata = {
+  title: "Report",
+  description: "Scores, per-question feedback and delivery for this interview.",
+};
 export const dynamic = "force-dynamic";
 
 export default async function ReportPage({
