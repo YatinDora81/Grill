@@ -509,9 +509,6 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
                 </button>
               </>
             )}
-            <a href="https://github.com/YatinDora81/Grill" target="_blank" rel="noreferrer">
-              GitHub
-            </a>
           </nav>
           <span className="footer-note">practice under heat</span>
         </div>
