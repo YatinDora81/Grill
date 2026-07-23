@@ -67,6 +67,10 @@ export function Trend({ scores }: { scores: number[] }) {
    * The SVG scales to its container, so client pixels have to come back through
    * the viewBox before they mean anything: `getBoundingClientRect` gives the
    * rendered width, and W is what the coordinates below are drawn in.
+   *
+   * Bound to pointerdown as well as pointermove. A finger that taps without
+   * travelling fires no pointermove whatsoever — move-only is why this chart
+   * read as dead on a phone while working perfectly under a mouse.
    */
   function onMove(e: React.PointerEvent<SVGSVGElement>) {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -79,8 +83,15 @@ export function Trend({ scores }: { scores: number[] }) {
     setHover(nearest);
   }
 
-  // The latest point keeps its own permanent label, so hovering it must not
-  // paint a second one on top.
+  // The guide line and the lit dot follow the pointer everywhere, the latest
+  // point included. Gating all three of them on one variable left the whole
+  // right-hand end of the chart inert — and that is exactly where the eye goes,
+  // because the brightest dot and the only standing number live there. With two
+  // scores on record it was half the card giving no answer at all.
+  //
+  // Only the *label* still steps back at the last point: it already carries a
+  // permanent one, and a second would print straight on top of it.
+  const marked = hover !== null ? pts[hover]! : null;
   const active = hover !== null && hover !== lastIndex ? hover : null;
   const activePt = active !== null ? pts[active]! : null;
 
@@ -88,8 +99,19 @@ export function Trend({ scores }: { scores: number[] }) {
     <svg
       className="trend-svg"
       viewBox={`0 0 ${W} ${H}`}
+      onPointerDown={onMove}
       onPointerMove={onMove}
-      onPointerLeave={() => setHover(null)}
+      onPointerLeave={(e) => {
+        // A finger fires pointerleave the moment it lifts, so honouring it on
+        // touch would flash the number and snatch it away again — the tap reads
+        // as a chart that ignored you. Only a pointer that can genuinely hover
+        // gets to clear; a tapped read-out stands until the next tap.
+        if (e.pointerType !== "touch") setHover(null);
+      }}
+      // `touch-action: pan-y pinch-zoom` means a vertical swipe that began on
+      // the chart cancels the pointer. Without this the read-out would survive
+      // a scroll and sit there pointing at nothing.
+      onPointerCancel={() => setHover(null)}
       role="img"
       aria-label={`Score trend across ${scores.length} interviews, oldest to newest: ${scores.join(", ")}`}
     >
@@ -109,23 +131,20 @@ export function Trend({ scores }: { scores: number[] }) {
       {/* pathLength="1" so one dash covers the line whatever its real length. */}
       <path d={line} className="trend-line trend-draw" pathLength="1" />
 
-      {activePt ? (
-        <line
-          x1={activePt[0]}
-          x2={activePt[0]}
-          y1={TOP - 6}
-          y2={BOTTOM}
-          className="trend-guide"
-        />
+      {marked ? (
+        <line x1={marked[0]} x2={marked[0]} y1={TOP - 6} y2={BOTTOM} className="trend-guide" />
       ) : null}
 
+      {/* `slice(0, -1)` already excludes the latest point, so keying these off
+          `hover` rather than `active` cannot double-draw it — the index simply
+          never matches. */}
       {pts.slice(0, -1).map((p, i) => (
         <circle
           key={i}
           cx={p[0]}
           cy={p[1]}
-          r={active === i ? 3.4 : 2.6}
-          className={active === i ? "trend-dot-hover" : "trend-dot"}
+          r={hover === i ? 3.4 : 2.6}
+          className={hover === i ? "trend-dot-hover" : "trend-dot"}
         />
       ))}
 

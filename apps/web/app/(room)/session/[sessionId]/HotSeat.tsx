@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 import type { AnswerResponse, EndResponse, QuestionType } from "@repo/types";
 import { apiPost, apiPostForm, ApiClientError } from "@/lib/apiClient";
-import { cx } from "@/components/ui";
 import { GrillToaster } from "@/components/toast";
 import { useSpeech } from "@/hooks/useSpeech";
 import { useRecorder } from "./useRecorder";
@@ -56,6 +55,12 @@ const TYPE_LABEL: Record<QuestionType, string> = {
   // still carry it and it always meant the same thing as cultural.
   behavioral: "Cultural",
 };
+
+/**
+ * Past this, the per-question cells drop below legibility and the progress
+ * strip degrades to a plain bar — an interview can run up to 100 questions.
+ */
+const MAX_SEGMENTS = 24;
 
 export function HotSeat(props: Props) {
   const router = useRouter();
@@ -270,163 +275,130 @@ export function HotSeat(props: Props) {
     return <ThankYou sessionId={props.sessionId} saving={finishVideo.current} />;
   }
 
+  const currentQ = Math.min(answered + 1, props.numQuestions);
+
   return (
     // The room is a fixed pane, not a document: it is exactly the viewport and
-    // never scrolls as a page. Anything that doesn't fit scrolls inside <main>,
-    // so the header and the mic button stay put — a control that slides away
-    // mid-answer is worse than a short scroll.
-    <div className="flex h-dvh flex-col overflow-hidden bg-room text-room-ink">
+    // never scrolls as a page. Anything that doesn't fit scrolls inside
+    // `.room-main`, so the header and the mic button stay put — a control that
+    // slides away mid-answer is worse than a short scroll.
+    <div className="room-root">
+      <div className="grain" aria-hidden="true" />
       <GrillToaster />
       {/* Purely a preview. Unmounting it no longer touches the camera — the
           stream belongs to useSessionVideo, and the recording outlives this. */}
-      {pipOpen && video.stream && <SelfView stream={video.stream} onClose={() => setPipOpen(false)} />}
-      {/* Room header: progress, and a way out. */}
-      <header className="shrink-0 border-b border-room-line">
-        {/* Wraps to two lines on a phone: title + controls, then the bar
-            across the full width. Unwrapped, the control cluster's `flex-1`
-            (basis 0 ⇒ scaled shrink factor 0 ⇒ cannot shrink) pinned it at its
-            134px min-content and left the bar 0px of the 327px available.
-            Above `sm` the order classes rebuild the original single row. */}
-        <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 sm:flex-nowrap sm:px-6 sm:py-4">
-          <div className="order-1 min-w-0 flex-1 sm:flex-none">
+      {pipOpen && video.stream && (
+        <SelfView stream={video.stream} onClose={() => setPipOpen(false)} />
+      )}
+
+      {/* Room chrome: what this is, how far in you are, and a way out. */}
+      <header className="room-top">
+        <div className="room-top-in">
+          <div className="room-id">
             {/* The name the candidate gave this interview, with the role
-                demoted to a subtitle — the role is what the questions aim at,
-                but the name is what they called it. */}
-            <p className="truncate text-sm font-medium">
-              {props.name?.trim() || props.role?.trim() || "Interview"}
-            </p>
-            <p className="tabular mt-0.5 truncate font-mono text-xs text-room-muted">
-              {Math.min(answered + 1, props.numQuestions)} / {props.numQuestions}
+                demoted to the meta line — the role is what the questions aim
+                at, but the name is what they called it. */}
+            <p className="room-name">{props.name?.trim() || props.role?.trim() || "Interview"}</p>
+            <p className="room-meta">
+              <b>Q{currentQ}</b> / {props.numQuestions}
               {props.name && props.role ? ` · ${props.role}` : ""}
             </p>
           </div>
-          <div className="order-3 h-1 w-full overflow-hidden rounded-full bg-room-line sm:order-2 sm:w-auto sm:flex-1">
-            <div
-              className="h-full rounded-full bg-ember transition-[width] duration-500"
-              style={{ width: `${(answered / props.numQuestions) * 100}%` }}
-            />
-          </div>
-          <div className="order-2 flex shrink-0 items-center gap-3 sm:order-3">
+
+          <Progress answered={answered} total={props.numQuestions} />
+
+          <div className="room-ctl">
             <RecDot state={video.state} />
-            {video.stream && (
-              <CameraToggle on={pipOpen} onClick={() => setPipOpen((c) => !c)} />
-            )}
-            <button
-              onClick={quit}
-              disabled={busy}
-              // The pseudo-element grows the touch target to ~49x44 without
-              // occupying a single pixel of layout — `min-h-11` here would tax
-              // the header's height on every viewport to fix a phone problem.
-              className="relative shrink-0 text-xs text-room-muted underline underline-offset-4 after:absolute after:-inset-x-2 after:-inset-y-3.5 after:content-[''] hover:text-room-ink disabled:opacity-50"
-            >
+            {video.stream && <CameraToggle on={pipOpen} onClick={() => setPipOpen((c) => !c)} />}
+            <button onClick={quit} disabled={busy} className="underlink">
               Leave
             </button>
           </div>
         </div>
       </header>
 
-      {/* `min-h-0` is what lets this shrink below its content — without it a
-          flex child refuses to shrink and pushes the page tall again, which is
-          the scrollbar we're getting rid of. */}
-      {/* The vertical rhythm is keyed off viewport HEIGHT, not width: a 1280x720
-          laptop is wide but short, and it's the height that decides whether the
-          room fits. Short screens get the compact tier; tall ones get the air. */}
-      <main className="mx-auto flex w-full min-h-0 max-w-3xl flex-1 flex-col overflow-y-auto px-6 py-4 [@media(min-height:820px)]:py-8">
-        {/* `my-auto` rather than `justify-center` on the scroller: centring a
-            flex container's overflowing content makes the top unreachable —
-            it overflows past the scroll origin. Auto margins centre without
-            that, and collapse to zero the moment content fills the pane. */}
-        <div className="my-auto w-full">
-          <div className="flex items-center justify-between gap-4">
-            {/* While the answer is scored, the eyebrow reports what's happening —
-              the question below it is stale until the next one arrives. */}
-            <span
-              className={cx(
-                "font-mono text-xs tracking-[0.16em] uppercase",
-                busy ? "animate-pulse text-room-muted" : "text-ember",
+      <main className="room-main">
+        <div className="room-in">
+          {/* Auto margins centre the block without making the top unreachable
+              when a long question overflows a short viewport. */}
+          <div className="room-center">
+            <div className="q-head">
+              {/* While the answer is scored, the eyebrow reports what's
+                  happening — the question below it is stale until the next one
+                  arrives. */}
+              {busy ? (
+                <span className="q-wait animate-pulse">Writing the next question…</span>
+              ) : (
+                <span className="q-type" data-kind={questionType}>
+                  {TYPE_LABEL[questionType]}
+                </span>
               )}
-            >
-              {busy ? "Writing the next question…" : TYPE_LABEL[questionType]}
-            </span>
-            {!busy && <Interviewer speech={speech} question={question} />}
-          </div>
-
-          {/* The question sits under the key-light — the one lit object in the
-            room. While sending, it dims and softens: the light is off you until
-            the next question turns it back on. */}
-          <div
-            className={cx(
-              "relative mt-3 transition-all duration-500",
-              busy && "scale-[0.99] opacity-40 blur-[2px]",
-            )}
-          >
-            <div
-              aria-hidden
-              className={cx(
-                "ember-glow pointer-events-none absolute -top-7 left-1/2 h-[150px] w-[82%] -translate-x-1/2 transition-opacity duration-500",
-                busy && "opacity-0",
-              )}
-            />
-            <div className="rounded-card relative border border-line bg-paper-raised p-5 shadow-[0_22px_60px_-32px_rgba(0,0,0,0.85)] [@media(min-height:820px)]:p-6">
-              {/* `key` remounts on every new turn, which is what replays the
-                stagger — without it React would patch the text in place. */}
-              <Question key={turnIndex} text={question} />
+              {!busy && <Interviewer speech={speech} question={question} />}
             </div>
-          </div>
 
-          <div className="mt-6 [@media(min-height:820px)]:mt-8">
-            {mode === "voice" ? (
-              <VoicePanel
-                rec={rec}
-                busy={busy}
-                onStart={startRecording}
-                onStop={finishRecording}
-                max={props.maxSeconds}
-              />
-            ) : (
-              <TextPanel
-                text={text}
-                setText={setText}
-                onSubmit={submitText}
-                busy={busy}
-                disabled={!text.trim()}
-              />
-            )}
+            {/* The question sits under the key-light — the one lit object in
+                the room. While sending, it dims and softens: the light is off
+                you until the next question turns it back on. */}
+            <div className="q-wrap" data-busy={busy}>
+              <div aria-hidden="true" className="q-light ember-glow" />
+              <div className="q-card">
+                {/* The turn number, seared into the card behind the words. */}
+                <span className="q-n" aria-hidden="true">
+                  {String(currentQ).padStart(2, "0")}
+                </span>
+                {/* `key` remounts on every new turn, which is what replays the
+                    stagger — without it React would patch the text in place. */}
+                <Question key={turnIndex} text={question} />
+              </div>
+            </div>
 
-            {(error || rec.error) && (
-              <p
-                role="alert"
-                className="mt-4 rounded-lg border border-weak/40 bg-weak/10 px-3 py-2 text-sm text-weak"
-              >
-                {error || rec.error}
-              </p>
-            )}
+            <div className="mic-zone">
+              {mode === "voice" ? (
+                <VoicePanel
+                  rec={rec}
+                  busy={busy}
+                  onStart={startRecording}
+                  onStop={finishRecording}
+                  max={props.maxSeconds}
+                />
+              ) : (
+                <TextPanel
+                  text={text}
+                  setText={setText}
+                  onSubmit={submitText}
+                  busy={busy}
+                  disabled={!text.trim()}
+                />
+              )}
 
-            <div className="mt-6 flex justify-center">
-              <button
-                onClick={() => {
-                  setMode((m) => (m === "voice" ? "text" : "voice"));
-                  setError("");
-                  rec.reset();
-                }}
-                disabled={busy || rec.state === "recording"}
-                // ~113x44 touch target via the pseudo-element, with the type
-                // scale and the room's vertical rhythm both left alone. This is
-                // the only way out when the mic is unavailable, so it has to be
-                // hittable on a phone.
-                className="relative text-xs text-room-muted underline underline-offset-4 after:absolute after:-inset-x-2 after:-inset-y-3.5 after:content-[''] hover:text-room-ink disabled:opacity-40"
-              >
-                {mode === "voice" ? "Type it instead" : "Answer out loud instead"}
-              </button>
+              {(error || rec.error) && (
+                <p className="error-note room-error" role="alert" key={error || rec.error}>
+                  {error || rec.error}
+                </p>
+              )}
+
+              <div className="mode-swap">
+                <button
+                  onClick={() => {
+                    setMode((m) => (m === "voice" ? "text" : "voice"));
+                    setError("");
+                    rec.reset();
+                  }}
+                  disabled={busy || rec.state === "recording"}
+                  className="underlink"
+                >
+                  {mode === "voice" ? "Type it instead" : "Answer out loud instead"}
+                </button>
+              </div>
             </div>
           </div>
         </div>
       </main>
 
-      {/* Recording is always on and there is no way to turn it off, so saying so
-          is the minimum this screen owes the candidate. The REC dot in the header
-          says it's happening; this says what happens to it. */}
-      <footer className="shrink-0 space-y-1 px-6 pb-6 text-center text-xs text-room-muted">
+      {/* Recording is always on and there is no way to turn it off, so saying
+          so is the minimum this screen owes the candidate. The REC dot in the
+          header says it's happening; this says what happens to it. */}
+      <footer className="room-foot">
         <p>
           {mode === "voice"
             ? "Spoken answers get delivery scoring — pace, pauses, fillers, tone."
@@ -441,6 +413,32 @@ export function HotSeat(props: Props) {
 }
 
 /**
+ * Progress as a burner strip: one cell per question, lighting left to right,
+ * the current one warming. Past MAX_SEGMENTS the cells drop below legibility
+ * (an interview can run to 100 questions), so it degrades to a plain bar.
+ */
+function Progress({ answered, total }: { answered: number; total: number }) {
+  if (total > MAX_SEGMENTS) {
+    return (
+      <div className="rprog" aria-hidden="true">
+        <div className="bar-track">
+          <div className="bar-fill" style={{ width: `${(answered / total) * 100}%` }} />
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="rprog" aria-hidden="true">
+      <div className="segs">
+        {Array.from({ length: total }).map((_, i) => (
+          <span key={i} className="seg-i" data-done={i < answered} data-live={i === answered} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
  * The recording indicator.
  *
  * There is no opt-out, so this is the only thing telling the candidate the
@@ -450,12 +448,12 @@ export function HotSeat(props: Props) {
  */
 function RecDot({ state }: { state: ReturnType<typeof useSessionVideo>["state"] }) {
   if (state === "starting") {
-    return <span className="font-mono text-[10px] tracking-wider text-room-muted">CAM…</span>;
+    return <span className="rec-chip">CAM…</span>;
   }
   if (state === "denied" || state === "failed") {
     return (
       <span
-        className="font-mono text-[10px] tracking-wider text-room-muted"
+        className="rec-chip"
         title={
           state === "denied"
             ? "Camera blocked — the interview still works, but the replay will have no video."
@@ -468,9 +466,9 @@ function RecDot({ state }: { state: ReturnType<typeof useSessionVideo>["state"] 
   }
   if (state !== "recording") return null;
   return (
-    <span className="flex shrink-0 items-center gap-1.5" title="This interview is being recorded">
-      <span aria-hidden className="size-2 animate-pulse-rec rounded-full bg-weak" />
-      <span className="font-mono text-[10px] tracking-wider text-room-muted">REC</span>
+    <span className="rec-chip" title="This interview is being recorded">
+      <span aria-hidden="true" className="rec-dot animate-pulse-rec" />
+      REC
     </span>
   );
 }
@@ -490,18 +488,13 @@ const WORD_STAGGER_CAP_MS = 900;
 function Question({ text }: { text: string }) {
   const words = text.split(" ");
   return (
-    // The step up to 3xl needs both room to wrap and room to breathe: on a short
-    // laptop a long question at 3xl runs seven lines and forces the very scroll
-    // this layout exists to avoid.
-    <h1
-      aria-label={text}
-      className="font-display text-2xl leading-snug sm:[@media(min-height:820px)]:text-3xl"
-    >
+    <h1 aria-label={text} className="q-text">
       {words.map((word, i) => (
         <span key={i} aria-hidden>
           <span
             className="animate-word inline-block"
             style={{
+              display: "inline-block",
               animationDelay: `${Math.min(i * WORD_STAGGER_MS, WORD_STAGGER_CAP_MS)}ms`,
             }}
           >
@@ -534,36 +527,25 @@ function VoicePanel({
 
   if (!rec.supported) {
     return (
-      <p className="text-center text-sm text-room-muted">
+      <p className="mic-unsupported">
         This browser can&apos;t record audio. Use the typing option below.
       </p>
     );
   }
 
   return (
-    <div className="flex flex-col items-center">
+    <div className="mic-col">
       {/* Live input level — the real mic signal, so a dead mic is obvious. */}
-      <div
-        className="mb-4 flex h-10 items-end gap-1 [@media(min-height:820px)]:mb-6 [@media(min-height:820px)]:h-12"
-        aria-hidden
-      >
+      <div className="lvl" aria-hidden="true">
         {Array.from({ length: 28 }).map((_, i) => {
           // Centre bars react most, so it reads as a voice, not a bar chart.
           const falloff = 1 - Math.abs(i - 13.5) / 15;
           const h = recording ? Math.max(3, rec.level * 46 * falloff) : 3;
           return (
-            <span
-              key={i}
-              className={cx(
-                // No height transition while live: the level updates every
-                // animation frame, so a 75ms ease never finishes and the bars
-                // crawl toward a level that has already moved on. The analyser's
-                // own smoothing is what keeps this from looking twitchy.
-                "w-1 rounded-full",
-                recording ? "bg-ember" : "bg-room-line transition-[height] duration-200",
-              )}
-              style={{ height: h }}
-            />
+            // No height transition while live: the level updates every frame,
+            // so an ease never finishes and the bars crawl toward a level that
+            // has already moved on. The analyser's smoothing does the work.
+            <span key={i} className="lvl-bar" data-hot={recording} style={{ height: h }} />
           );
         })}
       </div>
@@ -573,33 +555,30 @@ function VoicePanel({
           <button
             onClick={onStop}
             disabled={busy}
-            className="relative flex size-20 items-center justify-center rounded-full bg-ember text-paper transition-transform hover:scale-105 disabled:opacity-50"
+            className="stop-btn"
             aria-label="Stop recording and submit"
           >
-            <span
-              aria-hidden
-              className="animate-ring absolute -inset-1.5 rounded-full border-2 border-ember"
-            />
-            <span className="size-6 rounded-sm bg-paper" />
+            <span aria-hidden="true" className="stop-ring animate-ring" />
+            <span className="stop-sq" />
           </button>
-          <p className="tabular mt-4 font-mono text-sm">
-            <span className="mr-2 inline-block size-2 animate-pulse-rec rounded-full bg-ember align-middle" />
+          <p className="take-time">
+            <span className="take-dot animate-pulse-rec" aria-hidden="true" />
             {fmtTime(rec.seconds)}
-            {remaining <= 30 && <span className="ml-2 text-room-muted">{remaining}s left</span>}
+            {remaining <= 30 && <span className="take-left">{remaining}s left</span>}
           </p>
-          <p className="mt-1 text-xs text-room-muted">Tap to finish</p>
+          <p className="mic-note">Tap to finish</p>
         </>
       ) : (
         <>
           <button
             onClick={onStart}
             disabled={busy || rec.state === "requesting"}
-            className="flex size-20 items-center justify-center rounded-full border-2 border-ember bg-transparent text-ember transition-colors hover:bg-ember hover:text-paper disabled:opacity-50"
+            className="mic-btn"
             aria-label="Start recording your answer"
           >
             <MicIcon />
           </button>
-          <p className="mt-4 text-sm text-room-muted">
+          <p className="mic-note">
             {busy
               ? "Sending…"
               : rec.state === "requesting"
@@ -638,15 +617,11 @@ function TextPanel({
           if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) onSubmit();
         }}
         placeholder="Talk me through it…"
-        className="w-full resize-y rounded-xl border border-room-line bg-room-raised px-4 py-3 text-base leading-relaxed text-room-ink placeholder:text-room-muted focus:border-ember focus:outline-none"
+        className="input area"
       />
-      <div className="mt-3 flex items-center justify-between gap-3">
-        <span className="text-xs text-room-muted">⌘↵ to send</span>
-        <button
-          onClick={onSubmit}
-          disabled={busy || disabled}
-          className="rounded-full bg-ember px-6 py-2.5 text-sm font-medium text-paper transition-colors hover:bg-ember-hot disabled:opacity-40"
-        >
+      <div className="send-row">
+        <span className="kbd-note">⌘↵ to send</span>
+        <button onClick={onSubmit} disabled={busy || disabled} className="btn btn-primary btn-sm">
           {busy ? "Sending…" : "Submit answer"}
         </button>
       </div>
@@ -656,6 +631,41 @@ function TextPanel({
 
 /** How long the thank-you screen holds before it sends them to the dashboard. */
 const REDIRECT_MS = 5_000;
+
+/** r=30 circle. The arc sweep and the check draw are both dash tricks on it. */
+const MARK_C = 2 * Math.PI * 30;
+
+/**
+ * The completion seal — the same ember-ringed disc as the profile page's
+ * initials seal, holding a drawn check instead of a monogram.
+ *
+ * Static geometry, animated only by CSS dash offsets: the arc sweeps around the
+ * ring and the check draws itself a beat later (`g-sweep` / `g-draw`). Nothing
+ * random and nothing computed per-render, so server and client HTML match.
+ */
+function DoneMark() {
+  return (
+    <svg
+      className="done-mark"
+      viewBox="0 0 72 72"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+    >
+      {/* The disc — ember-soft fill on a resting hairline. */}
+      <circle cx="36" cy="36" r="30" className="dmark-disc" />
+      {/* The sweep: one ember lap, ending as the check begins. */}
+      <circle
+        cx="36"
+        cy="36"
+        r="30"
+        className="dmark-arc"
+        style={{ "--c": MARK_C } as React.CSSProperties}
+        transform="rotate(-90 36 36)"
+      />
+      <path className="dmark-check" d="M24.5 37.5 L32.5 45 L48 28.5" pathLength={100} />
+    </svg>
+  );
+}
 
 /**
  * The end of the interview.
@@ -709,25 +719,22 @@ function ThankYou({ sessionId, saving }: { sessionId: string; saving: Promise<vo
   }, [saving, router]);
 
   return (
-    <div className="flex min-h-dvh flex-col items-center justify-center bg-room px-6 text-center text-room-ink">
-      <div className="animate-rise">
-        <h1 className="font-display text-4xl tracking-tight">That&apos;s the interview</h1>
-        <p className="mx-auto mt-3 max-w-sm text-sm leading-relaxed text-room-muted">
+    <div className="done">
+      <div className="grain" aria-hidden="true" />
+      <div className="done-glow" aria-hidden="true" />
+      <div className="done-in animate-rise">
+        <DoneMark />
+        <h1 className="done-h">That&apos;s the interview.</h1>
+        <p className="done-sub">
           {flushing
             ? "Saving the last of your recording — this only takes a moment."
             : "You can close this — we're scoring every answer and measuring how you sounded. Your report will be waiting on the dashboard."}
         </p>
-        <div className="mt-8 flex flex-col items-center gap-3">
-          <button
-            onClick={() => router.push(`/report/${sessionId}`)}
-            className="rounded-full bg-ember px-6 py-2.5 text-sm font-medium text-paper transition-colors hover:bg-ember-hot"
-          >
-            Wait for it
+        <div className="done-btns">
+          <button onClick={() => router.push(`/report/${sessionId}`)} className="btn btn-primary">
+            Wait for the report
           </button>
-          <button
-            onClick={() => router.push("/dashboard")}
-            className="text-xs text-room-muted underline underline-offset-4 hover:text-room-ink"
-          >
+          <button onClick={() => router.push("/dashboard")} className="underlink">
             Go to the dashboard now
           </button>
         </div>

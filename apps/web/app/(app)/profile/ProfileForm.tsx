@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 import type { User } from "@repo/types";
 import { apiPost, ApiClientError } from "@/lib/apiClient";
-import { Button, Card, ErrorNote, Eyebrow, Field, Input, Spinner } from "@/components/ui";
 import { GrillToaster } from "@/components/toast";
 
 async function apiPatch<T>(path: string, payload: unknown): Promise<T> {
@@ -35,8 +34,19 @@ export function ProfileForm({ user }: { user: User }) {
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
+  const [showCurrent, setShowCurrent] = useState(false);
+  const [showNext, setShowNext] = useState(false);
   const [savingPw, setSavingPw] = useState(false);
   const [pwError, setPwError] = useState("");
+
+  // A save button that's live when nothing changed promises work it can't do.
+  const dirty = name.trim() !== (user.name ?? "");
+
+  // Same meter as the signup modal — the two must never disagree about what a
+  // good password looks like.
+  const pwPct = Math.min((next.length / 12) * 100, 100);
+  const pwOk = next.length >= 8;
+  const confirmOk = confirm.length > 0 && next === confirm;
 
   async function saveName(e: React.FormEvent) {
     e.preventDefault();
@@ -49,7 +59,8 @@ export function ProfileForm({ user }: { user: User }) {
     try {
       await apiPatch<User>("/api/profile", { name: name.trim() });
       toast.success("Saved");
-      // The name is server-rendered in the greeting — refresh so it updates.
+      // The name is server-rendered in the plate, the greeting and the topbar
+      // seal — refresh so all three update.
       router.refresh();
     } catch (err) {
       setNameError(err instanceof ApiClientError ? err.message : "Couldn't save that.");
@@ -77,6 +88,8 @@ export function ProfileForm({ user }: { user: User }) {
       setCurrent("");
       setNext("");
       setConfirm("");
+      setShowCurrent(false);
+      setShowNext(false);
     } catch (err) {
       setPwError(err instanceof ApiClientError ? err.message : "Couldn't change it.");
     } finally {
@@ -85,74 +98,171 @@ export function ProfileForm({ user }: { user: User }) {
   }
 
   return (
-    <div className="mt-8 space-y-6">
+    <div className="profile-grid rv" data-io>
       <GrillToaster />
 
-      <Card className="p-5">
-        <Eyebrow>Details</Eyebrow>
-        <form onSubmit={saveName} className="mt-4 space-y-4">
-          <Field label="Name" htmlFor="name" hint="What the dashboard calls you.">
-            <Input
+      <section className="card card-hairline" aria-label="Your details">
+        <p className="kicker">Details</p>
+        <form onSubmit={saveName} className="mform">
+          <div>
+            <div className="field-row">
+              <label className="label" htmlFor="name">
+                Name
+              </label>
+              <span className="hint">what the dashboard calls you</span>
+            </div>
+            <input
               id="name"
+              className="input"
               value={name}
               maxLength={80}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(e) => {
+                setName(e.target.value);
+                setNameError("");
+              }}
               placeholder="Yatin"
             />
-          </Field>
+          </div>
 
-          <Field label="Email" htmlFor="email" hint="Sign-in address — not changeable here.">
-            <Input id="email" value={user.email} disabled readOnly />
-          </Field>
+          <div>
+            <div className="field-row">
+              <label className="label" htmlFor="email">
+                Email
+              </label>
+              <span className="hint">sign-in address — fixed for now</span>
+            </div>
+            <input id="email" className="input" value={user.email} disabled readOnly />
+          </div>
 
-          <ErrorNote>{nameError}</ErrorNote>
+          {/* `key` so a repeated failure shakes again instead of sitting there
+              looking like nothing happened. */}
+          {nameError && (
+            <p className="error-note" role="alert" key={nameError}>
+              {nameError}
+            </p>
+          )}
 
-          <Button type="submit" disabled={savingName}>
-            {savingName ? <Spinner /> : null}
-            {savingName ? "Saving…" : "Save"}
-          </Button>
+          <div>
+            <button type="submit" className="btn btn-primary" disabled={savingName || !dirty}>
+              {savingName ? <span className="spinner" aria-hidden="true" /> : null}
+              {savingName ? "Saving…" : "Save"}
+            </button>
+          </div>
         </form>
-      </Card>
+      </section>
 
-      <Card className="p-5">
-        <Eyebrow>Password</Eyebrow>
-        <form onSubmit={savePassword} className="mt-4 space-y-4">
-          <Field label="Current password" htmlFor="current">
-            <Input
-              id="current"
-              type="password"
-              autoComplete="current-password"
-              value={current}
-              onChange={(e) => setCurrent(e.target.value)}
-            />
-          </Field>
-          <Field label="New password" htmlFor="next" hint="At least 8 characters.">
-            <Input
-              id="next"
-              type="password"
-              autoComplete="new-password"
-              value={next}
-              onChange={(e) => setNext(e.target.value)}
-            />
-          </Field>
-          <Field label="Confirm new password" htmlFor="confirm">
-            <Input
+      <section className="card card-hairline" aria-label="Your password">
+        <p className="kicker">Password</p>
+        <form onSubmit={savePassword} className="mform">
+          <div>
+            <div className="field-row">
+              <label className="label" htmlFor="current">
+                Current password
+              </label>
+            </div>
+            <div className="input-wrap">
+              <input
+                id="current"
+                className="input has-toggle"
+                type={showCurrent ? "text" : "password"}
+                autoComplete="current-password"
+                value={current}
+                onChange={(e) => {
+                  setCurrent(e.target.value);
+                  setPwError("");
+                }}
+              />
+              <button
+                type="button"
+                className="pw-toggle"
+                onClick={() => setShowCurrent((v) => !v)}
+                aria-label={showCurrent ? "Hide current password" : "Show current password"}
+              >
+                {showCurrent ? "hide" : "show"}
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <div className="field-row">
+              <label className="label" htmlFor="next">
+                New password
+              </label>
+              <span className={"hint" + (pwOk ? " ok" : "")}>
+                {pwOk ? "that’ll do" : "at least 8 characters"}
+              </span>
+            </div>
+            <div className="input-wrap">
+              <input
+                id="next"
+                className="input has-toggle"
+                type={showNext ? "text" : "password"}
+                autoComplete="new-password"
+                value={next}
+                onChange={(e) => {
+                  setNext(e.target.value);
+                  setPwError("");
+                }}
+              />
+              <button
+                type="button"
+                className="pw-toggle"
+                onClick={() => setShowNext((v) => !v)}
+                aria-label={showNext ? "Hide new password" : "Show new password"}
+              >
+                {showNext ? "hide" : "show"}
+              </button>
+            </div>
+            <div className="pw-meter" aria-hidden="true">
+              <div
+                className={"pw-meter-fill" + (pwOk ? " ok" : "")}
+                style={{ width: pwPct + "%" }}
+              />
+            </div>
+          </div>
+
+          <div>
+            <div className="field-row">
+              <label className="label" htmlFor="confirm">
+                Confirm new password
+              </label>
+              {confirm.length > 0 && (
+                <span className={"hint" + (confirmOk ? " ok" : "")}>
+                  {confirmOk ? "they match" : "doesn’t match yet"}
+                </span>
+              )}
+            </div>
+            <input
               id="confirm"
-              type="password"
+              className="input"
+              type={showNext ? "text" : "password"}
               autoComplete="new-password"
               value={confirm}
-              onChange={(e) => setConfirm(e.target.value)}
+              onChange={(e) => {
+                setConfirm(e.target.value);
+                setPwError("");
+              }}
             />
-          </Field>
+          </div>
 
-          <ErrorNote>{pwError}</ErrorNote>
+          {pwError && (
+            <p className="error-note" role="alert" key={pwError}>
+              {pwError}
+            </p>
+          )}
 
-          <Button type="submit" disabled={savingPw || !current || !next || !confirm}>
-            {savingPw ? <Spinner /> : null}
-            {savingPw ? "Changing…" : "Change password"}
-          </Button>
+          <div>
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={savingPw || !current || !next || !confirm}
+            >
+              {savingPw ? <span className="spinner" aria-hidden="true" /> : null}
+              {savingPw ? "Changing…" : "Change password"}
+            </button>
+          </div>
         </form>
-      </Card>
+      </section>
     </div>
   );
 }

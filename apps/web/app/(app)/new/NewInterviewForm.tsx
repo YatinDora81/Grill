@@ -12,21 +12,17 @@ import {
   SOURCE_META,
   perAnswerCapSeconds,
 } from "@/lib/interviewMeta";
-
-import {
-  Button,
-  Card,
-  ErrorNote,
-  Eyebrow,
-  Field,
-  Input,
-  Spinner,
-  Textarea,
-  cx,
-} from "@/components/ui";
+import { cx } from "@/components/ui";
 
 const SOURCES: InterviewSource[] = ["resume", "topic", "cultural"];
-const MODES: ExclusiveMode[] = ["jd", "project", "real", "topic_only", "cultural_only", "weak_spots"];
+const MODES: ExclusiveMode[] = [
+  "jd",
+  "project",
+  "real",
+  "topic_only",
+  "cultural_only",
+  "weak_spots",
+];
 
 /** What /api/interview/project/extract returns for the imported repo. */
 interface RepoInfo {
@@ -186,7 +182,9 @@ export function NewInterviewForm() {
       if (!name.trim()) setName(res.repo.repo);
     } catch (err) {
       setError(
-        err instanceof ApiClientError ? err.message : "Couldn't read that repo. Paste a description instead.",
+        err instanceof ApiClientError
+          ? err.message
+          : "Couldn't read that repo. Paste a description instead.",
       );
     } finally {
       setImporting(false);
@@ -196,14 +194,16 @@ export function NewInterviewForm() {
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (submitting.current) return;
-    if (!name.trim()) return setError("Give this interview a name — it's how you'll find it later.");
+    if (!name.trim())
+      return setError("Give this interview a name — it's how you'll find it later.");
     // A project interview brings its own material, so the résumé is optional
     // there and only there — every other shape is built around it.
     if (!hasResume && !needsProject)
       return setError("Upload your résumé first — every interview is built around it.");
     if (!mode && sources.length === 0) return setError("Pick what this interview should draw on.");
     if (needsTopic && !topic.trim()) return setError("Name the topic you want drilled on.");
-    if (needsJd && !jobDescription.trim()) return setError("Paste the job description you're going for.");
+    if (needsJd && !jobDescription.trim())
+      return setError("Paste the job description you're going for.");
     if (needsProject && !hasProject)
       return setError("Describe the project, or import a GitHub repo.");
 
@@ -242,35 +242,245 @@ export function NewInterviewForm() {
     }
   }
 
+  const heat = DIFFICULTY_META[difficulty];
+  const rangePct =
+    ((numQuestions - QUESTION_BOUNDS.min) / (QUESTION_BOUNDS.max - QUESTION_BOUNDS.min)) * 100;
+
   return (
-    <form onSubmit={onSubmit} className="mt-6 space-y-5 sm:mt-8 sm:space-y-6">
-      {/* The name leads, borderless and large: it's the title of the thing being
-          made, not another field in a stack of fields. */}
-      <div>
+    <form onSubmit={onSubmit} className="brief">
+      {/* The name leads, borderless and display-sized: it's the title of the
+          thing being made, not another field in a stack of fields. */}
+      <div className="brief-name-wrap rv" data-io>
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
           maxLength={80}
           placeholder="Name this interview…"
           aria-label="Interview name"
-          className="font-display w-full bg-transparent text-2xl tracking-tight text-ink placeholder:text-ink-muted/60 focus:outline-none sm:text-3xl"
+          className="brief-name"
         />
-        <div className="mt-2 h-px bg-line" />
+        <div className="brief-rule" aria-hidden="true" />
       </div>
 
-      {/* Step 1 — the résumé. Required, and first: it's the candidate. */}
-      <Card className="p-4 sm:p-5">
-        <div className="flex items-center justify-between gap-3">
-          <Eyebrow>Step 1 · Your résumé</Eyebrow>
-          {hasResume ? (
-            <span className="font-mono text-[11px] text-strong">✓ loaded</span>
-          ) : needsProject ? (
-            // A project interview brings its own material — the résumé is only
-            // ever background here, so it isn't required.
-            <Eyebrow>optional — background only</Eyebrow>
-          ) : (
-            <Eyebrow tone="ember">required</Eyebrow>
-          )}
+      {/* ── 01 · the shape ────────────────────────────────────────────── */}
+      <section className="card card-hairline rv" data-io>
+        <div className="bstep-head">
+          <span className="bstep-n" aria-hidden="true">
+            01
+          </span>
+          <div>
+            <h2 className="bstep-t">What kind of interview</h2>
+            <p className="bstep-d">Blend sources into one conversation, or hand it a mode.</p>
+          </div>
+        </div>
+
+        <p className="form-note">Mix as many as you want — it stays one conversation.</p>
+        <div className="pick-grid-3">
+          {SOURCES.map((s) => (
+            <Pick
+              key={s}
+              selected={sources.includes(s)}
+              onClick={() => toggleSource(s)}
+              label={SOURCE_META[s].label}
+              blurb={SOURCE_META[s].blurb}
+              kind="checkbox"
+            />
+          ))}
+        </div>
+
+        <div className="or-rule">or</div>
+
+        <p className="form-note" style={{ marginTop: 0 }}>
+          These bring their own shape, so they run on their own. Cultural only ignores your résumé —
+          use it for a pure culture-fit screen.
+        </p>
+        <div className="pick-grid-2">
+          {MODES.map((m) => (
+            <Pick
+              key={m}
+              selected={mode === m}
+              onClick={() => pickMode(m)}
+              label={MODE_META[m].label}
+              blurb={MODE_META[m].blurb}
+              kind="radio"
+            />
+          ))}
+        </div>
+
+        {needsTopic && (
+          <div style={{ marginTop: 20 }}>
+            <div className="field-row">
+              <label className="label" htmlFor="topic">
+                Topic
+              </label>
+              <span className="hint">what should it drill you on?</span>
+            </div>
+            <input
+              id="topic"
+              className="input"
+              value={topic}
+              onChange={(e) => setTopic(e.target.value)}
+              maxLength={2_000}
+              placeholder="Distributed systems: consistency, partitioning, failure modes…"
+            />
+          </div>
+        )}
+
+        {needsJd && (
+          <div style={{ marginTop: 20 }}>
+            <div className="field-row">
+              <label className="label" htmlFor="jd">
+                Job description
+              </label>
+              <span className="hint">the posting you&rsquo;re actually going for</span>
+            </div>
+            <textarea
+              id="jd"
+              className="input area"
+              rows={6}
+              maxLength={20_000}
+              value={jobDescription}
+              onChange={(e) => setJobDescription(e.target.value)}
+              placeholder="Senior Backend Engineer — you'll own our billing pipeline, work in Go and Postgres…"
+            />
+          </div>
+        )}
+
+        {needsProject && (
+          <div style={{ marginTop: 20 }}>
+            {/* Two ways in: describe the project, or import a repo. Both land in
+                the same editable textarea — the digest is just a pre-filled
+                starting point, exactly like the parsed résumé. */}
+            <div className="seg" role="tablist" aria-label="Project source">
+              {(["paste", "import"] as const).map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  role="tab"
+                  aria-selected={projectTab === t}
+                  onClick={() => setProjectTab(t)}
+                >
+                  {t === "paste" ? "Describe it" : "GitHub repo"}
+                </button>
+              ))}
+            </div>
+
+            {projectTab === "import" && (
+              <div style={{ marginTop: 14 }}>
+                <div className="repo-row">
+                  <input
+                    id="repo_url"
+                    className="input"
+                    value={repoUrl}
+                    onChange={(e) => setRepoUrl(e.target.value)}
+                    maxLength={500}
+                    placeholder="https://github.com/owner/repo"
+                    aria-label="GitHub repository URL"
+                    onKeyDown={(e) => {
+                      // Enter imports rather than submitting the whole form.
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        if (!importing) void importRepo();
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => void importRepo()}
+                    disabled={importing || !repoUrl.trim()}
+                  >
+                    {importing ? <span className="spinner" aria-hidden="true" /> : null}
+                    {importing ? "Reading the repo…" : "Import"}
+                  </button>
+                </div>
+                {repoInfo && (
+                  <div className="repo-meta">
+                    <span className="repo-chip">
+                      <b>
+                        {repoInfo.owner}/{repoInfo.repo}
+                      </b>
+                      {repoInfo.language ? ` · ${repoInfo.language}` : ""} · ★ {repoInfo.stars}
+                    </span>
+                    {repoInfo.truncated && (
+                      <span className="form-note" style={{ marginTop: 0 }}>
+                        large repo — imported a partial view; edit the summary to add what&apos;s
+                        missing.
+                      </span>
+                    )}
+                  </div>
+                )}
+                <p className="form-note">
+                  Public repos only. We read it once and build a summary you can edit — the
+                  interview itself never touches GitHub.
+                </p>
+              </div>
+            )}
+
+            {(projectTab === "paste" || hasProject) && (
+              <div>
+                <textarea
+                  id="project_context"
+                  aria-label="Project description"
+                  rows={10}
+                  maxLength={24_000}
+                  value={projectContext}
+                  onChange={(e) => setProjectContext(e.target.value)}
+                  placeholder="What did you build? Architecture, the hard decisions, what you'd redo, where it breaks…"
+                  className="input area area-mono"
+                />
+                <p className="count">
+                  {projectContext.length.toLocaleString()} / 24,000
+                  {projectRepoUrl ? " · edit anything the parser got wrong" : ""}
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Repeats live here, not in "shape": whether old questions can come
+            back is part of what kind of interview this is. */}
+        <div className="switch-row">
+          <div>
+            <span className="switch-l">Repeat past questions</span>
+            <p className="switch-d">
+              {allowRepeats
+                ? "Questions you've already been asked can come up again."
+                : "Every question you've been asked before is off the table."}
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={allowRepeats}
+            aria-label="Repeat past questions"
+            onClick={() => setAllowRepeats((v) => !v)}
+            className="switch"
+          />
+        </div>
+      </section>
+
+      {/* ── 02 · the material ─────────────────────────────────────────── */}
+      <section className="card card-hairline rv" data-io>
+        <div className="bstep-head">
+          <span className="bstep-n" aria-hidden="true">
+            02
+          </span>
+          <div>
+            <h2 className="bstep-t">The material</h2>
+            <p className="bstep-d">Your résumé — the interviewer reads it before you sit down.</p>
+          </div>
+          <span className="bstep-status">
+            {hasResume ? (
+              <span className="chip chip-ok">✓ loaded</span>
+            ) : needsProject ? (
+              // A project interview brings its own material — the résumé is only
+              // ever background here, so it isn't required.
+              <span className="chip">optional</span>
+            ) : (
+              <span className="chip chip-req">required</span>
+            )}
+          </span>
         </div>
 
         <input
@@ -286,28 +496,31 @@ export function NewInterviewForm() {
           // The drop zone only exists until there's a résumé — once the text is
           // in, the text IS the control, and a target to drop onto is clutter.
           // A <label>, not a <div>: touch devices never fire HTML5 drag events,
-          // so on a phone the only way in was the ~44x20px "browse" link — and
-          // a résumé is required to start an interview. Pointing the label at
-          // the sr-only file input makes the whole zone open the picker
-          // natively, with no click handler to double-fire against the input
-          // and no loss of keyboard access.
+          // so pointing the label at the sr-only file input makes the whole
+          // zone open the picker natively, with no click handler to double-fire
+          // against the input and no loss of keyboard access.
           <label
             htmlFor="resume"
+            data-drag={dragging}
             onDragOver={(e) => {
               e.preventDefault();
               setDragging(true);
             }}
             onDragLeave={() => setDragging(false)}
             onDrop={onDrop}
-            className={cx(
-              "mt-4 block cursor-pointer rounded-xl border-2 border-dashed px-6 py-10 text-center transition-colors sm:py-14",
-              dragging ? "border-ember bg-ember-soft" : "border-line-strong bg-paper-sunken",
-            )}
+            className="drop"
           >
             {extracting ? (
               <>
-                <Spinner className="text-ember" />
-                <p className="mt-3 text-sm text-ink-soft">Reading {fileName}…</p>
+                <span
+                  className="spinner"
+                  aria-hidden="true"
+                  style={{
+                    borderColor: "color-mix(in srgb, var(--color-ember) 30%, transparent)",
+                    borderTopColor: "var(--color-ember)",
+                  }}
+                />
+                <p className="drop-t">Reading {fileName}…</p>
               </>
             ) : (
               <>
@@ -315,307 +528,188 @@ export function NewInterviewForm() {
                 {/* A span, not a button: the whole label is the control now,
                     and a nested button would both double-fire the picker and be
                     invalid inside a <label>. */}
-                <p className="mt-3 text-sm font-medium text-ink">
-                  Drop your résumé here, or{" "}
-                  <span className="text-ember underline underline-offset-4">browse</span>
+                <p className="drop-t">
+                  Drop your résumé here, or <i>browse</i>
                 </p>
-                <p className="mt-1.5 text-xs text-ink-muted">PDF, DOCX or TXT — up to 20,000 characters</p>
+                <p className="drop-d">PDF, DOCX or TXT — up to 20,000 characters</p>
               </>
             )}
           </label>
         ) : (
-          <div className="mt-4">
+          <div>
             {/* What we actually parsed. Shown, not hidden behind a filename: the
                 extractor is the most likely thing to have quietly mangled a
                 two-column PDF, and only the candidate can tell. */}
-            <div className="flex items-center justify-between gap-3">
-              <p className="min-w-0 truncate text-sm text-ink">
-                <span className="text-ink-muted">Parsed from</span>{" "}
-                {fileName || "pasted text"}
+            <div className="parsed-row">
+              <p className="parsed-from">
+                <span>Parsed from</span> {fileName || "pasted text"}
               </p>
-              <div className="flex shrink-0 items-center gap-3">
+              <div className="parsed-acts">
                 <button
                   type="button"
                   onClick={() => fileRef.current?.click()}
-                  className="text-xs text-ink-muted underline underline-offset-4 hover:text-ink"
+                  className="underlink"
                 >
-                  Replace
+                  replace
                 </button>
-                <button
-                  type="button"
-                  onClick={clearResume}
-                  className="text-xs text-ink-muted underline underline-offset-4 hover:text-weak"
-                >
-                  Clear
+                <button type="button" onClick={clearResume} className="underlink hot">
+                  clear
                 </button>
               </div>
             </div>
-            <Textarea
+            <textarea
               id="resume_text"
               aria-label="Résumé text"
               rows={10}
               maxLength={20_000}
               value={resumeText}
               onChange={(e) => setResumeText(e.target.value)}
-              // `sm:text-xs` only: below sm this inherits CONTROL's 16px, which
-              // is what stops iOS zooming into the one field we ask people to
-              // proofread. A bare `text-xs` would apply at every width.
-              className="mt-2.5 font-mono leading-relaxed sm:text-xs"
+              className="input area area-mono"
             />
-            <p className="tabular mt-1.5 text-right text-xs text-ink-muted">
+            <p className="count">
               {resumeText.length.toLocaleString()} / 20,000 · edit anything the parser got wrong
             </p>
           </div>
         )}
-      </Card>
+      </section>
 
-      {/* Step 2 — what to do with it. */}
-      <Card className="p-4 sm:p-5">
-        <Eyebrow>Step 2 · What kind of interview</Eyebrow>
-
-        <p className="mt-3 text-xs text-ink-muted">Mix as many as you want — it stays one conversation.</p>
-        <div className="mt-2.5 grid gap-2 sm:grid-cols-3">
-          {SOURCES.map((s) => (
-            <Pick
-              key={s}
-              selected={sources.includes(s)}
-              onClick={() => toggleSource(s)}
-              label={SOURCE_META[s].label}
-              blurb={SOURCE_META[s].blurb}
-              kind="checkbox"
-            />
-          ))}
-        </div>
-
-        <div className="my-5 flex items-center gap-3">
-          <div className="h-px flex-1 bg-line" />
-          <span className="font-mono text-[11px] tracking-[0.16em] text-ink-muted uppercase">or</span>
-          <div className="h-px flex-1 bg-line" />
-        </div>
-
-        <p className="text-xs text-ink-muted">
-          These bring their own shape, so they run on their own. Cultural only
-          ignores your résumé — use it for a pure culture-fit screen.
-        </p>
-        <div className="mt-2.5 grid gap-2 sm:grid-cols-2">
-          {MODES.map((m) => (
-            <Pick
-              key={m}
-              selected={mode === m}
-              onClick={() => pickMode(m)}
-              label={MODE_META[m].label}
-              blurb={MODE_META[m].blurb}
-              kind="radio"
-            />
-          ))}
-        </div>
-
-        {needsTopic && (
-          <div className="mt-5">
-            <Field label="Topic" htmlFor="topic" hint="What should it drill you on?">
-              <Input
-                id="topic"
-                value={topic}
-                onChange={(e) => setTopic(e.target.value)}
-                maxLength={2_000}
-                placeholder="Distributed systems: consistency, partitioning, failure modes…"
-              />
-            </Field>
+      {/* ── 03 · the heat ─────────────────────────────────────────────── */}
+      <section className="card card-hairline rv" data-io>
+        <div className="bstep-head">
+          <span className="bstep-n" aria-hidden="true">
+            03
+          </span>
+          <div>
+            <h2 className="bstep-t">The heat</h2>
+            <p className="bstep-d">Role, difficulty, and how long you&rsquo;ll be in the seat.</p>
           </div>
-        )}
-
-        {needsJd && (
-          <div className="mt-5">
-            <Field
-              label="Job description"
-              htmlFor="jd"
-              hint="Paste the posting you're actually going for."
-            >
-              <Textarea
-                id="jd"
-                rows={6}
-                maxLength={20_000}
-                value={jobDescription}
-                onChange={(e) => setJobDescription(e.target.value)}
-                placeholder="Senior Backend Engineer — you'll own our billing pipeline, work in Go and Postgres…"
-              />
-            </Field>
-          </div>
-        )}
-
-        {needsProject && (
-          <div className="mt-5">
-            {/* Two ways in: describe the project, or import a repo. Both land in
-                the same editable textarea — the digest is just a pre-filled
-                starting point, exactly like the parsed résumé. */}
-            <div className="mb-3 inline-flex rounded-lg border border-line p-0.5">
-              {(["paste", "import"] as const).map((t) => (
-                <button
-                  key={t}
-                  type="button"
-                  onClick={() => setProjectTab(t)}
-                  className={cx(
-                    "rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
-                    projectTab === t ? "bg-ember-soft text-ink" : "text-ink-muted hover:text-ink",
-                  )}
-                >
-                  {t === "paste" ? "Describe it" : "GitHub repo"}
-                </button>
-              ))}
-            </div>
-
-            {projectTab === "import" && (
-              <div className="mb-4">
-                <div className="flex flex-col gap-2 sm:flex-row">
-                  <Input
-                    id="repo_url"
-                    value={repoUrl}
-                    onChange={(e) => setRepoUrl(e.target.value)}
-                    maxLength={500}
-                    placeholder="https://github.com/owner/repo"
-                    aria-label="GitHub repository URL"
-                    onKeyDown={(e) => {
-                      // Enter imports rather than submitting the whole form.
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        if (!importing) void importRepo();
-                      }
-                    }}
-                  />
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={() => void importRepo()}
-                    disabled={importing || !repoUrl.trim()}
-                    className="shrink-0"
-                  >
-                    {importing ? <Spinner /> : null}
-                    {importing ? "Reading the repo…" : "Import"}
-                  </Button>
-                </div>
-                {repoInfo && (
-                  <div className="mt-2.5 flex flex-wrap items-center gap-2 font-mono text-[11px] text-ink-soft">
-                    <span className="rounded-full bg-paper-sunken px-2 py-0.5">
-                      {repoInfo.owner}/{repoInfo.repo}
-                      {repoInfo.language ? ` · ${repoInfo.language}` : ""} · ★ {repoInfo.stars}
-                    </span>
-                    {repoInfo.truncated && (
-                      <span className="text-ink-muted">
-                        large repo — imported a partial view; edit the summary to add what&apos;s
-                        missing.
-                      </span>
-                    )}
-                  </div>
-                )}
-                <p className="mt-2 text-xs text-ink-muted">
-                  Public repos only. We read it once and build a summary you can edit — the interview
-                  itself never touches GitHub.
-                </p>
-              </div>
-            )}
-
-            {(projectTab === "paste" || hasProject) && (
-              <div>
-                <Textarea
-                  id="project_context"
-                  aria-label="Project description"
-                  rows={10}
-                  maxLength={24_000}
-                  value={projectContext}
-                  onChange={(e) => setProjectContext(e.target.value)}
-                  placeholder="What did you build? Architecture, the hard decisions, what you'd redo, where it breaks…"
-                  className="font-mono leading-relaxed sm:text-xs"
-                />
-                <p className="tabular mt-1.5 text-right text-xs text-ink-muted">
-                  {projectContext.length.toLocaleString()} / 24,000
-                  {projectRepoUrl ? " · edit anything the parser got wrong" : ""}
-                </p>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Repeats live here, not in "shape": whether old questions can come
-            back is part of what kind of interview this is. */}
-        <div className="mt-5 border-t border-line pt-5">
-          <Toggle
-            label="Repeat past questions"
-            hint={
-              allowRepeats
-                ? "Questions you've already been asked can come up again."
-                : "Every question you've been asked before is off the table."
-            }
-            checked={allowRepeats}
-            onChange={setAllowRepeats}
-          />
         </div>
-      </Card>
 
-      {/* Step 3 — shape. */}
-      <Card className="space-y-5 p-4 sm:p-5">
-        <Eyebrow>Step 3 · Shape</Eyebrow>
-
-        <Field label="Role" htmlFor="role" hint="Optional — helps aim the questions.">
-          <Input
+        <div style={{ marginTop: 20 }}>
+          <div className="field-row">
+            <label className="label" htmlFor="role">
+              Role
+            </label>
+            <span className="hint">optional — helps aim the questions</span>
+          </div>
+          <input
             id="role"
+            className="input"
             value={role}
             onChange={(e) => setRole(e.target.value)}
             maxLength={200}
             placeholder="Senior Backend Engineer"
           />
-        </Field>
+        </div>
 
-        <DifficultyPicker value={difficulty} onChange={setDifficulty} />
+        {/* Colour is the signal: green is warm-up, red is a promise the
+            questions will be brutal — not a flattering job title. */}
+        <div style={{ marginTop: 22 }}>
+          <div className="flabel-row">
+            <span className="flabel">Difficulty</span>
+            <span className="heat-chip" style={{ "--heat": heat.color } as React.CSSProperties}>
+              {heat.label}
+            </span>
+          </div>
+          <div className="heat-grid" role="radiogroup" aria-label="Difficulty">
+            {DIFFICULTIES.map((d) => {
+              const m = DIFFICULTY_META[d];
+              return (
+                <button
+                  key={d}
+                  type="button"
+                  role="radio"
+                  aria-checked={difficulty === d}
+                  onClick={() => setDifficulty(d)}
+                  className="heat"
+                  style={{ "--heat": m.color } as React.CSSProperties}
+                >
+                  <span className="heat-dot" aria-hidden="true" />
+                  {m.label}
+                </button>
+              );
+            })}
+          </div>
+          <p className="heat-blurb">{heat.blurb}</p>
+        </div>
 
-        <div>
-          <div className="mb-2 flex items-baseline justify-between gap-3">
-            <label htmlFor="num" className="block text-sm font-medium">
+        <div style={{ marginTop: 22 }}>
+          <div className="flabel-row">
+            <label className="flabel" htmlFor="num">
               Questions
             </label>
-            <span className="tabular font-mono text-sm text-ink-soft">
+            <span className="flabel-v">
               {numQuestions}
-              <span className="ml-2 text-ink-muted">≈ {estimateMinutes(numQuestions)} min</span>
+              <small>≈ {estimateMinutes(numQuestions)} min</small>
             </span>
           </div>
           <input
             id="num"
             type="range"
+            className="range"
             min={QUESTION_BOUNDS.min}
             max={QUESTION_BOUNDS.max}
             value={numQuestions}
             onChange={(e) => setNumQuestions(Number(e.target.value))}
-            className="w-full accent-ember"
+            style={{ "--fill": `${rangePct}%` } as React.CSSProperties}
           />
-          <div className="tabular mt-1 flex justify-between font-mono text-[11px] text-ink-muted">
+          <div className="range-ends">
             <span>{QUESTION_BOUNDS.min}</span>
             <span>{QUESTION_BOUNDS.max}</span>
           </div>
+
           {/* Display only — the start route derives and stores the real cap.
               More questions means less time for each: say so here rather than
               let it be discovered by the recorder cutting someone off. */}
-          {answerCap !== null && (
-            <p className="mt-2 text-[11px] text-ink-muted">
-              Up to <span className="tabular font-mono">{clock(answerCap)}</span> per answer
-            </p>
-          )}
+          <div className="tally">
+            <div>
+              <p className="dk">Questions</p>
+              <p className="dv tabular">{numQuestions}</p>
+            </div>
+            <div>
+              <p className="dk">Runtime</p>
+              <p className="dv tabular">
+                ≈{estimateMinutes(numQuestions)}
+                <small>min</small>
+              </p>
+            </div>
+            <div>
+              <p className="dk">Per answer</p>
+              <p className="dv tabular">
+                {answerCap !== null ? (
+                  <>
+                    {clock(answerCap)}
+                    <small>max</small>
+                  </>
+                ) : (
+                  "—"
+                )}
+              </p>
+            </div>
+          </div>
         </div>
-      </Card>
+      </section>
 
-      <ErrorNote>{error}</ErrorNote>
+      {/* `key` so a repeated failure shakes again instead of sitting there
+          looking like nothing happened. */}
+      {error && (
+        <p className="error-note" role="alert" key={error}>
+          {error}
+        </p>
+      )}
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-        <Button
+      <div className="launch rv" data-io>
+        <button
           type="submit"
-          size="lg"
+          className="btn btn-primary btn-lg"
           disabled={
             busy || extracting || importing || (!hasResume && !needsProject) || !name.trim()
           }
-          className="w-full sm:w-auto"
         >
-          {busy ? <Spinner /> : null}
-          {busy ? "Writing your first question…" : "Start interview"}
-        </Button>
-        <p className="text-center text-xs text-ink-muted sm:text-left">You can stop any time.</p>
+          {busy ? <span className="spinner" aria-hidden="true" /> : null}
+          {busy ? "Writing your first question…" : "Take the hot seat"}
+        </button>
+        <p className="launch-note">You can stop any time — nothing is scored until you finish.</p>
       </div>
     </form>
   );
@@ -631,7 +725,9 @@ function sourceOrder(a: InterviewSource, b: InterviewSource): number {
  *
  * `kind` drives the ARIA role, not the look: a checkbox that behaves like a
  * radio is exactly the confusion this screen has to avoid, and a screen reader
- * has no other way to know which of the two groups it's in.
+ * has no other way to know which of the two groups it's in. The CSS keys its
+ * selected state off `aria-checked`, so what's heard and what's seen can never
+ * disagree.
  */
 function Pick({
   selected,
@@ -647,136 +743,13 @@ function Pick({
   kind: "checkbox" | "radio";
 }) {
   return (
-    <button
-      type="button"
-      role={kind}
-      aria-checked={selected}
-      onClick={onClick}
-      className={cx(
-        "rounded-xl border p-3 text-left transition-colors",
-        selected
-          ? "border-ember bg-ember-soft"
-          : "border-line text-ink-soft hover:border-line-strong hover:bg-paper-sunken",
-      )}
-    >
-      <span className="flex items-center gap-2">
-        <Mark selected={selected} round={kind === "radio"} />
-        <span className={cx("text-sm", selected && "font-medium text-ink")}>{label}</span>
+    <button type="button" role={kind} aria-checked={selected} onClick={onClick} className="pick">
+      <span className="pick-top">
+        <span className={cx("pick-mark", kind === "radio" && "round")} aria-hidden="true" />
+        <span className="pick-l">{label}</span>
       </span>
-      <span className="mt-1.5 block text-xs leading-relaxed text-ink-muted">{blurb}</span>
+      <span className="pick-d">{blurb}</span>
     </button>
-  );
-}
-
-function Mark({ selected, round }: { selected: boolean; round: boolean }) {
-  return (
-    <span
-      aria-hidden
-      className={cx(
-        "flex size-4 shrink-0 items-center justify-center border transition-colors",
-        round ? "rounded-full" : "rounded",
-        selected ? "border-ember bg-ember" : "border-line-strong",
-      )}
-    >
-      {selected ? <span className={cx("size-1.5 bg-paper", round ? "rounded-full" : "rounded-xs")} /> : null}
-    </span>
-  );
-}
-
-/**
- * Easy → Extreme. Colour is the signal: green is warm-up, red is a promise the
- * questions will be brutal — not a flattering job title.
- */
-function DifficultyPicker({
-  value,
-  onChange,
-}: {
-  value: Difficulty;
-  onChange: (d: Difficulty) => void;
-}) {
-  const meta = DIFFICULTY_META[value];
-  return (
-    <div>
-      <div className="mb-2 flex items-baseline justify-between gap-3">
-        <span className="block text-sm font-medium">Difficulty</span>
-        <span
-          className="rounded-full px-2 py-0.5 font-mono text-[11px] font-medium tracking-wide"
-          style={{ backgroundColor: `${meta.color}1f`, color: meta.color }}
-        >
-          {meta.label}
-        </span>
-      </div>
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" role="radiogroup" aria-label="Difficulty">
-        {DIFFICULTIES.map((d) => {
-          const m = DIFFICULTY_META[d];
-          const selected = value === d;
-          return (
-            <button
-              key={d}
-              type="button"
-              role="radio"
-              aria-checked={selected}
-              onClick={() => onChange(d)}
-              className={cx(
-                "rounded-xl border px-3 py-2.5 text-left transition-colors",
-                selected
-                  ? "border-ember bg-ember-soft"
-                  : "border-line text-ink-soft hover:border-line-strong hover:bg-paper-sunken",
-              )}
-            >
-              <span className="flex items-center gap-2">
-                <span
-                  aria-hidden
-                  className="size-2.5 shrink-0 rounded-full"
-                  style={{ backgroundColor: m.color }}
-                />
-                <span className={cx("text-sm", selected && "font-medium text-ink")}>{m.label}</span>
-              </span>
-            </button>
-          );
-        })}
-      </div>
-      <p className="mt-1.5 text-xs text-ink-muted">{meta.blurb}</p>
-    </div>
-  );
-}
-
-function Toggle({
-  label,
-  hint,
-  checked,
-  onChange,
-}: {
-  label: string;
-  hint: string;
-  checked: boolean;
-  onChange: (v: boolean) => void;
-}) {
-  return (
-    <div className="flex items-start justify-between gap-4">
-      <div>
-        <span className="block text-sm font-medium">{label}</span>
-        <p className="mt-0.5 text-xs text-ink-muted">{hint}</p>
-      </div>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={checked}
-        aria-label={label}
-        onClick={() => onChange(!checked)}
-        className={cx(
-          "relative mt-0.5 h-6 w-11 shrink-0 rounded-full transition-colors",
-          checked ? "bg-ember" : "bg-line-strong",
-        )}
-      >
-        <span
-          className={cx(
-            "absolute top-1 size-4 rounded-full bg-paper-raised transition-[left]",
-            checked ? "left-6" : "left-1",
-          )}
-        />
-      </button>
-    </div>
   );
 }
 
@@ -788,7 +761,7 @@ function DocIcon() {
       viewBox="0 0 24 24"
       fill="none"
       aria-hidden
-      className="mx-auto text-ink-muted"
+      style={{ margin: "0 auto", color: "var(--color-ink-muted)" }}
     >
       <path
         d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Z"
@@ -796,7 +769,12 @@ function DocIcon() {
         strokeWidth="1.5"
         strokeLinejoin="round"
       />
-      <path d="M14 3v5h5M9 13h6M9 17h4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      <path
+        d="M14 3v5h5M9 13h6M9 17h4"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }

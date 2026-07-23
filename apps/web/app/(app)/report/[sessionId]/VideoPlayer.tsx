@@ -6,7 +6,12 @@ import { apiPost } from "@/lib/apiClient";
 /**
  * The tape: one answer's slice of the session recording.
  *
- * Starts as a poster and mints its URL on demand — a report with 40 turns must
+ * Closed, it's a single slim row — a report is a reading surface, and eight
+ * idle 16:9 voids would bury the feedback under black rectangles. Pressing it
+ * unfolds the deck: the picture on top, the transport in its own rail below it
+ * rather than floating over the frame.
+ *
+ * Starts as a row and mints its URL on demand — a report with 40 turns must
  * not fetch 40 presigned URLs and start 40 <video> elements downloading.
  *
  * Seeking is the hard part. MediaRecorder's webm has no Duration element and no
@@ -146,62 +151,93 @@ export function VideoPlayer({
   }
 
   const progress = duration > 0 ? (time / duration) * 100 : 0;
+  const meta =
+    `starts at ${fmt(offsetMs)}` +
+    (expiresInDays !== null ? ` · ${expiryPhrase(expiresInDays)}` : "");
+
+  // Closed: the whole thing is one row. The report stays a reading surface.
+  if (!open) {
+    return (
+      <div>
+        <p className="tr-label">Watch yourself answer</p>
+        <button
+          type="button"
+          className="tape"
+          onClick={onPress}
+          aria-label={`Play your answer to question ${turnNumber}`}
+        >
+          <span className="tape-play" aria-hidden="true">
+            ▶
+          </span>
+          <span className="tape-meta">
+            <span className="tape-t">Your answer, on camera</span>
+            <span className="tape-sub">{meta}</span>
+          </span>
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div>
       <p className="tr-label">Watch yourself answer</p>
-      <div className="vid" data-playing={playing}>
-        <div className="vid-glow" aria-hidden="true" />
+      <div className="deck" data-playing={playing}>
+        <div className="deck-screen">
+          {url ? (
+            // Clicking the picture is play/pause, like every player people know.
+            <video
+              ref={videoRef}
+              src={url}
+              playsInline
+              preload="metadata"
+              className="deck-el"
+              onClick={onPress}
+              onLoadedMetadata={seekToOffset}
+              onTimeUpdate={onTimeUpdate}
+              onDurationChange={onTimeUpdate}
+              onPlay={() => setPlaying(true)}
+              onPause={() => setPlaying(false)}
+              onEnded={() => setPlaying(false)}
+            />
+          ) : null}
+          {/* Center button only while there is nothing rolling: before the
+              first frame, after the end, on an error. A ❚❚ floating over the
+              candidate's own face was the old design's worst habit. */}
+          {!playing && (
+            <button
+              type="button"
+              className="deck-poster"
+              onClick={onPress}
+              disabled={loading}
+              aria-label={
+                error ? "Try loading the video again" : `Play your answer to question ${turnNumber}`
+              }
+            >
+              {loading ? <span className="spinner" aria-hidden="true" /> : "▶"}
+            </button>
+          )}
+        </div>
 
-        {url ? (
-          <video
-            ref={videoRef}
-            src={url}
-            playsInline
-            preload="metadata"
-            className="vid-el"
-            onLoadedMetadata={seekToOffset}
-            onTimeUpdate={onTimeUpdate}
-            onDurationChange={onTimeUpdate}
-            onPlay={() => setPlaying(true)}
-            onPause={() => setPlaying(false)}
-            onEnded={() => setPlaying(false)}
-          />
-        ) : (
-          <svg className="vsil" viewBox="0 0 200 120" aria-hidden="true">
-            <circle cx="100" cy="42" r="26" fill="currentColor" />
-            <path d="M38 120 C38 84 74 72 100 72 C126 72 162 84 162 120 Z" fill="currentColor" />
-          </svg>
-        )}
-
-        <span className="vcorner tl" aria-hidden="true" />
-        <span className="vcorner br" aria-hidden="true" />
-
-        {/* The button stays put on failure — pressing it again is the retry. */}
-        <button
-          type="button"
-          className="vid-play"
-          onClick={onPress}
-          disabled={loading}
-          aria-label={
-            error
-              ? "Try loading the video again"
-              : playing
-                ? "Pause"
-                : `Play your answer to question ${turnNumber}`
-          }
-        >
-          {loading ? <span className="spinner" aria-hidden="true" /> : playing ? "❚❚" : "▶"}
-        </button>
-
-        <div className="vid-bar">
-          <span className="vid-rec">
-            <span className="vid-dot" aria-hidden="true" />
-            rec
-          </span>
+        {/* The transport, in its own rail — never over the frame. */}
+        <div className="deck-ctl">
           <button
             type="button"
-            className="vid-track"
+            className="deck-btn"
+            onClick={onPress}
+            disabled={loading}
+            aria-label={playing ? "Pause" : "Play"}
+          >
+            {playing ? "❚❚" : "▶"}
+          </button>
+          <button type="button" className="deck-skip" onClick={() => seekBy(-5)}>
+            −5s
+          </button>
+          <button type="button" className="deck-skip" onClick={() => seekBy(5)}>
+            +5s
+          </button>
+          <button
+            type="button"
+            className="deck-track"
             onClick={scrub}
             onKeyDown={(e) => {
               if (e.key === "ArrowLeft") {
@@ -214,10 +250,14 @@ export function VideoPlayer({
             }}
             aria-label="Seek. Left and right arrows move five seconds."
           >
-            <span className="vid-prog" style={{ width: `${progress}%` }} />
+            <span className="deck-prog" style={{ width: `${progress}%` }} />
           </button>
-          <span className="vid-time">
+          <span className="deck-time">
             {fmt(time * 1000)} / {duration > 0 ? fmt(duration * 1000) : "—:—"}
+          </span>
+          <span className="deck-rec" aria-hidden="true">
+            <span className="deck-dot" />
+            rec
           </span>
         </div>
       </div>
@@ -227,8 +267,7 @@ export function VideoPlayer({
         </p>
       ) : null}
       <p className="mono-note" style={{ marginTop: 7 }}>
-        synced to the session tape · starts at {fmt(offsetMs)}
-        {expiresInDays !== null ? ` · ${expiryPhrase(expiresInDays)}` : ""}
+        synced to the session tape · {meta}
       </p>
     </div>
   );

@@ -89,7 +89,10 @@ export default async function DashboardPage() {
               <section className="trend rv" data-io>
                 <div className="trend-head">
                   <p className="kicker">Progress</p>
-                  <p className="trend-note">overall score · oldest → newest</p>
+                  {/* "tap" rather than "hover" on purpose: the touch user is
+                      the one who can't discover this, and a mouse user reads
+                      "tap" as "click" and hovers anyway. */}
+                  <p className="trend-note">overall score · oldest → newest · tap a point</p>
                 </div>
                 <Trend scores={stats.trend} />
               </section>

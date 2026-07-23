@@ -79,8 +79,7 @@ export function Replay({
    * catches arriving with the anchor already in the URL.
    */
   useEffect(() => {
-    const openTurn = (n: number) =>
-      setOpen((prev) => (prev.has(n) ? prev : new Set(prev).add(n)));
+    const openTurn = (n: number) => setOpen((prev) => (prev.has(n) ? prev : new Set(prev).add(n)));
 
     const fromHref = (href: string | null | undefined): number | null => {
       const m = /#turn-(\d+)$/.exec(href ?? "");
@@ -135,11 +134,7 @@ export function Replay({
                   {String(n).padStart(2, "0")}
                 </span>
                 <span className="turn-q">{t.question}</span>
-                <span
-                  className={
-                    "turn-type" + (t.question_type === "followup" ? " followup" : "")
-                  }
-                >
+                <span className={"turn-type" + (t.question_type === "followup" ? " followup" : "")}>
                   {TYPE_LABEL[t.question_type]}
                 </span>
                 <span className="chev" aria-hidden="true">
@@ -215,7 +210,10 @@ function Rubric({ scores }: { scores: AnswerScores }) {
                 <small>/10</small>
               </p>
               <div className="rub-m">
-                <div className="rub-f" style={{ width: `${Math.max(0, Math.min(100, v * 10))}%` }} />
+                <div
+                  className="rub-f"
+                  style={{ width: `${Math.max(0, Math.min(100, v * 10))}%` }}
+                />
               </div>
             </div>
           );
@@ -225,21 +223,36 @@ function Rubric({ scores }: { scores: AnswerScores }) {
   );
 }
 
+/**
+ * The coach's notes: numbered, scannable fixes rather than a bullet soup.
+ * Numbering matters — "do 01 first" is a plan, a bullet list is a shrug.
+ */
 function Improvements({ items }: { items: string[] }) {
   const list = items.filter(Boolean);
   if (!list.length) return null;
   return (
-    <div className="improve">
-      <p className="tr-label">How to improve this answer</p>
-      <ul>
+    <div className="coach">
+      <p className="coach-h">
+        <span>How to improve this answer</span>
+        <em>{list.length === 1 ? "1 fix" : `${list.length} fixes`}</em>
+      </p>
+      <ol className="coach-list">
         {list.map((tip, i) => (
-          <li key={i}>{tip}</li>
+          <li key={i}>
+            <b aria-hidden="true">{String(i + 1).padStart(2, "0")}</b>
+            <span>{tip}</span>
+          </li>
         ))}
-      </ul>
+      </ol>
     </div>
   );
 }
 
+/**
+ * Model answers as cards you can lift: a labelled angle, the take itself under
+ * an oversized quote mark, and a copy control — the whole point of a model
+ * answer is taking it away to practise against.
+ */
 function PossibleAnswers({ items }: { items: string[] }) {
   const list = items.filter(Boolean);
   if (!list.length) return null;
@@ -248,12 +261,37 @@ function PossibleAnswers({ items }: { items: string[] }) {
       <p className="tr-label">Possible answers</p>
       <div className="answers">
         {list.map((a, i) => (
-          <div className="ans" key={i}>
-            <p className="ans-tag">angle {String(i + 1).padStart(2, "0")}</p>
-            <p>“{a}”</p>
+          <div className="model" key={i}>
+            <div className="model-top">
+              <span className="model-tag">Angle {String(i + 1).padStart(2, "0")}</span>
+              <CopyTake text={a} />
+            </div>
+            <p className="model-body">{a}</p>
           </div>
         ))}
       </div>
     </div>
+  );
+}
+
+/** Clipboard with a receipt. Failure stays quiet — there is nothing to fix. */
+function CopyTake({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      className="underlink model-copy"
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(text);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1600);
+        } catch {
+          /* clipboard denied — the text is right there to select */
+        }
+      }}
+    >
+      {copied ? "copied ✓" : "copy"}
+    </button>
   );
 }
