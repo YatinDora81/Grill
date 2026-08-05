@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { AppTopbar } from "./AppTopbar";
+import { AppHeader, AppRail } from "./AppRail";
 import { currentUser, initialsOf } from "./currentUser";
 
 /**
@@ -15,26 +15,47 @@ export const metadata: Metadata = {
 };
 
 /**
- * The shell every signed-in page sits in: one warm room, grain over it, chrome
- * top and bottom. Pages supply their own key-light (the report's comes from the
- * other side of the page than the dashboard's), so it isn't rendered here.
+ * The shell every signed-in page sits in: one warm room, grain over it, a
+ * numbered rail down the left. Pages supply their own key-light (the report's
+ * comes from the other side of the page than the dashboard's), so it isn't
+ * rendered here.
+ *
+ * `AppRail` — the DESKTOP rail — is a SIBLING of `.app-root`, not a child, and
+ * reserves its space with padding rather than a column. `.app-root` is a flex
+ * column and three separate rules lean on it staying one —
+ * `.foot { margin-top: auto }` pins the footer on short pages,
+ * `.report-main { flex: 1 }` eats the free space above it, and
+ * `.report-main + .foot` restates the gap that `flex: 1` consumed. Seating the
+ * rail inside the shell would make the footer a third column.
+ *
+ * `AppHeader` — the phone/tablet chrome — goes the other way and is the shell's
+ * FIRST CHILD, where the old topbar sat. It's block-level, so it's simply the
+ * flex column's first row and none of those three rules notice it. It has to be
+ * inside: `.app-root { min-height: 100dvh }` counts only itself, so a header
+ * stacked above the shell added its own height to a box that already demanded a
+ * full viewport, and the footer ended up a header's height below the fold on
+ * every signed-in page.
  */
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await currentUser();
+  const initials = initialsOf(user?.name ?? null);
 
   return (
-    <div className="app-root">
-      <div className="grain" aria-hidden="true" />
-      <AppTopbar name={user?.name ?? null} initials={initialsOf(user?.name ?? null)} />
-      {children}
-      <footer className="foot">
-        <div className="wrap foot-in">
-          <span className="wordmark" style={{ fontSize: 17 }}>
-            grill<i>.</i>
-          </span>
-          <span className="foot-note">practice under heat</span>
-        </div>
-      </footer>
-    </div>
+    <>
+      <AppRail name={user?.name ?? null} initials={initials} />
+      <div className="app-root lg:pl-(--rail-w)">
+        <div className="grain" aria-hidden="true" />
+        <AppHeader initials={initials} />
+        {children}
+        <footer className="foot">
+          <div className="wrap foot-in">
+            <span className="wordmark" style={{ fontSize: 17 }}>
+              grill<i>.</i>
+            </span>
+            <span className="foot-note">practice under heat</span>
+          </div>
+        </footer>
+      </div>
+    </>
   );
 }

@@ -4,62 +4,64 @@ import { useState } from "react";
 
 /**
  * Score over time. One series, so: one hue, no legend — the card title names it.
- * The line draws itself once on load, the area fades in behind it, and the
- * latest point stays lit with its number showing, because that is the one that
- * says where you stand now.
+ * The line draws itself once on load, the latest point stays lit with its number
+ * showing, because that is the one that says where you stand now.
  *
  * Every other point gives up its number on hover: a guide line, a lit dot and
  * the score. Hover, not always-on labels — eight numbers stacked along a
- * 560-unit line collide, and the shape of the line is the point of the chart.
+ * 640-unit line collide, and the shape of the line is the point of the chart.
  *
  * The y-domain is pinned to the full 0–100 score range, never the data's own
  * min/max: an auto-domain would turn a 71→73 wobble into a triumphant climb.
+ *
+ * Straight segments, not the smoothed béziers this used to draw. A session is a
+ * discrete event; a curve implies the score was somewhere in between on days you
+ * didn't sit one, and the overshoot-free spline was still inventing a shape
+ * between two points that has no reading.
  */
-const W = 560;
-const H = 140;
-const PAD_X = 14;
+const W = 700;
+const H = 200;
+/** Plot box. The left gutter carries the score axis, the bottom strip the session labels. */
+const L = 44;
+const R = 686;
 const TOP = 18;
-const BOTTOM = 120;
+const BASE = 168;
 
-/** Smooth line through the points — midpoint cubic béziers, no overshoot. */
-function smoothPath(pts: [number, number][]): string {
-  let d = `M ${pts[0]![0]} ${pts[0]![1]}`;
-  for (let i = 1; i < pts.length; i++) {
-    const [x0, y0] = pts[i - 1]!;
-    const [x1, y1] = pts[i]!;
-    const mx = (x0 + x1) / 2;
-    d += ` C ${mx} ${y0}, ${mx} ${y1}, ${x1} ${y1}`;
-  }
-  return d;
-}
+/**
+ * Gridlines at the verdict band edges — the same 40 / 60 / 80 `scoreBand` splits
+ * on — rather than at round tenths. It makes a crossing mean something: the line
+ * clearing 60 is the run where the verdict stopped being "shaky".
+ */
+const GRID = [40, 60, 80];
+
+const yOf = (score: number) => BASE - (Math.max(0, Math.min(100, score)) / 100) * (BASE - TOP);
 
 /**
  * Keep a label inside the viewBox.
  *
- * Floored at 12 vertically so a perfect 100 — which sits at y=18 — doesn't put
- * its own ascenders outside the box and lose the top of the digits.
+ * Floored at 12 vertically so a perfect 100 — which sits at the top of the plot
+ * — doesn't put its own ascenders outside the box and lose the top of the digits.
  */
 const labelY = (y: number) => Math.max(12, y - 12);
-const labelX = (x: number) => Math.max(16, Math.min(W - 16, x));
+const labelX = (x: number) => Math.max(L, Math.min(R, x));
 
 export function Trend({ scores }: { scores: number[] }) {
   const [hover, setHover] = useState<number | null>(null);
 
-  const clamp = (v: number) => Math.max(0, Math.min(100, v));
   const pts: [number, number][] = scores.map((s, i) => [
-    PAD_X + (i * (W - PAD_X * 2)) / (Math.max(2, scores.length) - 1),
-    BOTTOM - (clamp(s) / 100) * (BOTTOM - TOP),
+    L + (i * (R - L)) / (Math.max(2, scores.length) - 1),
+    yOf(s),
   ]);
 
   // Rendered only when there are at least two points — one score is not a
   // trend. After the hooks, so the hook order never depends on the data.
   if (scores.length < 2) return null;
 
-  const line = smoothPath(pts);
+  const line = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${p[0]} ${p[1]}`).join(" ");
   const first = pts[0]!;
   const lastIndex = pts.length - 1;
   const last = pts[lastIndex]!;
-  const area = `${line} L ${last[0]} ${H - 6} L ${first[0]} ${H - 6} Z`;
+  const area = `${line} L ${last[0]} ${BASE} L ${first[0]} ${BASE} Z`;
 
   /**
    * Nearest point to the pointer, horizontally.
@@ -95,6 +97,10 @@ export function Trend({ scores }: { scores: number[] }) {
   const active = hover !== null && hover !== lastIndex ? hover : null;
   const activePt = active !== null ? pts[active]! : null;
 
+  // The midpoint tick is dropped below five sessions: at three or four points
+  // it lands close enough to "Session 1" to read as a second label for it.
+  const midLabel = scores.length >= 5 ? `Session ${Math.ceil(scores.length / 2)}` : null;
+
   return (
     <svg
       className="trend-svg"
@@ -115,24 +121,42 @@ export function Trend({ scores }: { scores: number[] }) {
       role="img"
       aria-label={`Score trend across ${scores.length} interviews, oldest to newest: ${scores.join(", ")}`}
     >
-      <defs>
-        <linearGradient id="trendGrad" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" className="g-stop-ember" />
-          <stop offset="70%" className="g-stop-hot" />
-          <stop offset="100%" className="g-stop-glow" />
-        </linearGradient>
-        <linearGradient id="trendFill" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" className="g-stop-ember-22" />
-          <stop offset="100%" className="g-stop-ember-0" />
-        </linearGradient>
-      </defs>
+      {/* Tinted toward the series hue rather than the border grey: a `line`
+          gridline over the card surface is about 1.3:1 and reads as nothing at
+          all, while it still sits well under the dots and the numbers. */}
+      {GRID.map((score) => (
+        <line
+          key={score}
+          x1={L}
+          x2={R}
+          y1={yOf(score)}
+          y2={yOf(score)}
+          strokeDasharray="3 6"
+          className="stroke-ember/25 [stroke-width:1]"
+        />
+      ))}
+      {GRID.map((score) => (
+        <text
+          key={score}
+          x={L - 12}
+          y={yOf(score) + 3.5}
+          textAnchor="end"
+          className="fill-ink-muted font-mono text-[9px] tracking-[0.08em]"
+        >
+          {score}
+        </text>
+      ))}
 
-      <path d={area} className="trend-area" />
+      <path d={area} className="fill-ember/10" />
       {/* pathLength="1" so one dash covers the line whatever its real length. */}
-      <path d={line} className="trend-line trend-draw" pathLength="1" />
+      <path
+        d={line}
+        className="trend-draw fill-none stroke-ember [stroke-linecap:round] [stroke-linejoin:round] [stroke-width:2]"
+        pathLength="1"
+      />
 
       {marked ? (
-        <line x1={marked[0]} x2={marked[0]} y1={TOP - 6} y2={BOTTOM} className="trend-guide" />
+        <line x1={marked[0]} x2={marked[0]} y1={TOP} y2={BASE} className="trend-guide" />
       ) : null}
 
       {/* `slice(0, -1)` already excludes the latest point, so keying these off
@@ -143,13 +167,22 @@ export function Trend({ scores }: { scores: number[] }) {
           key={i}
           cx={p[0]}
           cy={p[1]}
-          r={hover === i ? 3.4 : 2.6}
-          className={hover === i ? "trend-dot-hover" : "trend-dot"}
+          r={hover === i ? 4 : 3.2}
+          className={
+            hover === i
+              ? "fill-ember stroke-ember [stroke-width:1.5]"
+              : "fill-paper stroke-ink-soft [stroke-width:1.5]"
+          }
         />
       ))}
 
-      <circle cx={last[0]} cy={last[1]} r="3.4" className="trend-dot-last" />
-      <text x={last[0] - 6} y={labelY(last[1])} textAnchor="end" className="trend-val">
+      <circle cx={last[0]} cy={last[1]} r="4.2" className="fill-ember stroke-ember" />
+      <text
+        x={last[0] - 8}
+        y={labelY(last[1])}
+        textAnchor="end"
+        className="fill-ember font-mono text-[10px] font-semibold"
+      >
         {scores[lastIndex]}
       </text>
 
@@ -158,11 +191,36 @@ export function Trend({ scores }: { scores: number[] }) {
           x={labelX(activePt[0])}
           y={labelY(activePt[1])}
           textAnchor="middle"
-          className="trend-val"
+          className="fill-ember font-mono text-[10px] font-semibold"
         >
           {scores[active!]}
         </text>
       ) : null}
+
+      {/* The x axis is named in words, not in dates: "session 7" is how someone
+          counts their own practice, and the row below the chart already carries
+          the calendar. */}
+      <text x={L} y={H - 10} className="fill-ink-muted font-mono text-[9px] tracking-[0.08em]">
+        Session 1
+      </text>
+      {midLabel ? (
+        <text
+          x={(L + R) / 2}
+          y={H - 10}
+          textAnchor="middle"
+          className="fill-ink-muted font-mono text-[9px] tracking-[0.08em]"
+        >
+          {midLabel}
+        </text>
+      ) : null}
+      <text
+        x={R}
+        y={H - 10}
+        textAnchor="end"
+        className="fill-ink-muted font-mono text-[9px] tracking-[0.08em]"
+      >
+        Latest
+      </text>
     </svg>
   );
 }

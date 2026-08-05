@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { AnswerScores, QuestionFeedback, QuestionType } from "@repo/types";
 import { scoreTone } from "@/components/ui";
+import { Explain } from "@/components/Explain";
 import { PlayAnswer } from "./PlayAnswer";
 import { StarQuestion } from "./StarQuestion";
 import { VideoPlayer } from "./VideoPlayer";
@@ -115,9 +116,16 @@ export function Replay({
       return next;
     });
 
+  // No `.rv`/`data-io` on the section, unlike most of the report: this is a
+  // ReportNav jump target. `Reveal` unobserves after the first intersection, so a
+  // jump into a section that has never been on screen would land on faded, offset
+  // content — and on a report this long its threshold never fires for an element
+  // this tall, which would leave the whole replay at opacity 0 for good.
   return (
-    <section className="section rv" data-io>
-      <p className="kicker">The replay — all {turns.length} questions</p>
+    // No `.section` margin: the section head above this in page.tsx opens the
+    // block, and a second gap between the head and its own accordion would read
+    // as the rows belonging to nothing.
+    <section>
       <div style={{ marginTop: 8 }}>
         {turns.map((t) => {
           const isOpen = open.has(t.turn_index);
@@ -137,8 +145,17 @@ export function Replay({
                 <span className={"turn-type" + (t.question_type === "followup" ? " followup" : "")}>
                   {TYPE_LABEL[t.question_type]}
                 </span>
-                <span className="chev" aria-hidden="true">
-                  ›
+                {/* A square that says +/− rather than a rotating chevron: the
+                    row is one of a stack of squares, and the glyph states open
+                    or shut instead of implying a direction to travel in. */}
+                <span
+                  className={
+                    "grid size-6 flex-none place-items-center border text-[0.8rem] leading-none transition-colors " +
+                    (isOpen ? "border-ember/40 text-ember" : "border-line text-ink-muted")
+                  }
+                  aria-hidden="true"
+                >
+                  {isOpen ? "–" : "+"}
                 </span>
               </button>
 
@@ -219,6 +236,14 @@ function Rubric({ scores }: { scores: AnswerScores }) {
           );
         })}
       </div>
+      {/* Sibling of `.rubric`, not a child: that's a 5-column grid, so a note
+          inside it would become a sixth cell and break the row. */}
+      <Explain>
+        These five judge <b>this answer alone</b>, out of ten — not the session score at the top of
+        the page, which is out of a hundred. <b>Filler</b> runs the same way round as the rest: ten
+        means you spoke clean. The colour is on the 0–100 scale used everywhere else, so a 7/10 is
+        the same standing as a 70.
+      </Explain>
     </div>
   );
 }

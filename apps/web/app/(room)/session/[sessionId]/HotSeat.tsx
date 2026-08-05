@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 import type { AnswerResponse, EndResponse, QuestionType } from "@repo/types";
 import { apiPost, apiPostForm, ApiClientError } from "@/lib/apiClient";
+import { cx } from "@/components/ui";
 import { GrillToaster } from "@/components/toast";
 import { useSpeech } from "@/hooks/useSpeech";
 import { useRecorder } from "./useRecorder";
@@ -61,6 +62,102 @@ const TYPE_LABEL: Record<QuestionType, string> = {
  * strip degrades to a plain bar — an interview can run up to 100 questions.
  */
 const MAX_SEGMENTS = 24;
+
+/**
+ * The state banner.
+ *
+ * The room is a dark screen with a question on it, and nothing on it says which
+ * of several very different things is happening: the interviewer is still
+ * reading the question, the mic is waiting on a permission prompt, the recorder
+ * is live, or the answer is off being scored. Silence reads as "broken" — people
+ * stop mid-answer to check. One line, above the question, in words.
+ *
+ * It lives outside `.room-main`, so it costs the scrolling area ~28px once and
+ * never moves. Deliberately one line: the mic button has to stay above the fold
+ * on a 640px-tall laptop.
+ */
+const SEAT_BANNER = "flex-none border-b border-line bg-paper-raised/60";
+const SEAT_BANNER_IN =
+  "mx-auto flex max-w-[880px] items-center gap-2.5 px-[18px] py-1.5 font-mono text-[10.5px] tracking-[0.16em] text-ink uppercase sm:gap-3 sm:px-6 sm:py-2";
+
+type SeatTone = "live" | "calm" | "warn";
+
+/** Ember is reserved for "actually recording"; nothing else may borrow it. */
+const SEAT_DOT: Record<SeatTone, string> = {
+  live: "bg-ember animate-pulse-rec",
+  calm: "bg-mixed",
+  warn: "bg-weak",
+};
+
+interface SeatLine {
+  text: string;
+  sub: string;
+  tone: SeatTone;
+}
+
+/**
+ * What the room is doing right now, in the order that outranks.
+ *
+ * Every branch has to be true for the state it renders in — a banner reading
+ * "Listening" while the recorder is idle tells the candidate their answer is
+ * being captured when nothing is being captured at all, which is the one lie
+ * this must never tell. So the pre-tap state says it is waiting for the tap,
+ * and only `state === "recording"` gets to say "listening".
+ */
+function seatLine(s: {
+  busy: boolean;
+  mode: "voice" | "text";
+  rec: ReturnType<typeof useRecorder>;
+  speaking: boolean;
+}): SeatLine {
+  if (s.busy) {
+    return { text: "Got it — scoring that answer", sub: "writing the next question", tone: "calm" };
+  }
+  if (s.mode === "text") {
+    return { text: "Typing this answer", sub: "typed answers are scored on content only", tone: "calm" };
+  }
+  if (!s.rec.supported) {
+    return { text: "This browser can't record audio", sub: "type your answer instead", tone: "warn" };
+  }
+  switch (s.rec.state) {
+    case "denied":
+      return { text: "Microphone blocked", sub: "allow it in your browser, or type this one", tone: "warn" };
+    case "requesting":
+      return { text: "Waiting for the microphone", sub: "allow access when your browser asks", tone: "calm" };
+    case "recording":
+      return {
+        text: "Listening — speak whenever you're ready",
+        sub: "tap the stop button when you've finished the answer",
+        tone: "live",
+      };
+    case "stopped":
+      // Only the cap sets `capped`, and the cap is a full answer, not a lost
+      // one — say which of the two just happened.
+      return s.rec.capped
+        ? { text: "That's the time limit", sub: "sending what you recorded", tone: "calm" }
+        : { text: "That take is in", sub: "sending it now", tone: "calm" };
+    default:
+      return s.speaking
+        ? { text: "Reading the question out loud", sub: "the mic starts when you tap", tone: "calm" }
+        : { text: "Ready when you are", sub: "tap the mic, then just talk", tone: "calm" };
+  }
+}
+
+function SeatState({ line }: { line: SeatLine }) {
+  return (
+    // Polite, never assertive: this narrates state, and it must not cut across
+    // a screen reader that is still reading the question out.
+    <div className={SEAT_BANNER} aria-live="polite">
+      <div className={SEAT_BANNER_IN}>
+        <span aria-hidden="true" className={cx("size-2 flex-none rounded-full", SEAT_DOT[line.tone])} />
+        <span className="min-w-0 truncate">{line.text}</span>
+        <em className="truncate not-italic tracking-[0.1em] text-ink-muted max-sm:hidden">
+          · {line.sub}
+        </em>
+      </div>
+    </div>
+  );
+}
 
 export function HotSeat(props: Props) {
   const router = useRouter();
@@ -285,11 +382,6 @@ export function HotSeat(props: Props) {
     <div className="room-root">
       <div className="grain" aria-hidden="true" />
       <GrillToaster />
-      {/* Purely a preview. Unmounting it no longer touches the camera — the
-          stream belongs to useSessionVideo, and the recording outlives this. */}
-      {pipOpen && video.stream && (
-        <SelfView stream={video.stream} onClose={() => setPipOpen(false)} />
-      )}
 
       {/* Room chrome: what this is, how far in you are, and a way out. */}
       <header className="room-top">
@@ -317,24 +409,37 @@ export function HotSeat(props: Props) {
         </div>
       </header>
 
+      <SeatState line={seatLine({ busy, mode, rec, speaking: speech.speaking })} />
+
       <main className="room-main">
         <div className="room-in">
           {/* Auto margins centre the block without making the top unreachable
               when a long question overflows a short viewport. */}
           <div className="room-center">
             <div className="q-head">
-              {/* While the answer is scored, the eyebrow reports what's
-                  happening — the question below it is stale until the next one
-                  arrives. */}
-              {busy ? (
-                <span className="q-wait animate-pulse">Writing the next question…</span>
-              ) : (
-                <span className="q-type" data-kind={questionType}>
-                  {TYPE_LABEL[questionType]}
-                </span>
-              )}
+              {/* The eyebrow used to swap to "Writing the next question…" while
+                  busy. The banner above now says exactly that, in the same
+                  words, forty pixels higher — two lines saying one thing. The
+                  banner keeps it (it is on screen in every state, so it never
+                  jumps), and the eyebrow goes back to only ever naming the kind
+                  of question, which stays true while the stale one is dimmed. */}
+              <span className="q-type" data-kind={questionType}>
+                {TYPE_LABEL[questionType]}
+              </span>
               {!busy && <Interviewer speech={speech} question={question} />}
             </div>
+
+            {/* A follow-up is the one question type whose PROVENANCE matters:
+                it exists because of the answer just given, and people who don't
+                know that read it as the interviewer repeating itself. Amber,
+                not ember — ember means "recording" in this room and nothing
+                else may borrow it. */}
+            {questionType === "followup" && (
+              <p className="mt-3 inline-flex items-center gap-2 border border-mixed/35 px-3 py-1.5 font-mono text-[10px] tracking-[0.14em] text-mixed uppercase">
+                <span aria-hidden="true">↺</span>
+                This one came from what you just said
+              </p>
+            )}
 
             {/* The question sits under the key-light — the one lit object in
                 the room. While sending, it dims and softens: the light is off
@@ -387,10 +492,26 @@ export function HotSeat(props: Props) {
                   disabled={busy || rec.state === "recording"}
                   className="underlink"
                 >
-                  {mode === "voice" ? "Type it instead" : "Answer out loud instead"}
+                  {mode === "voice" ? "Type this one instead" : "Go back to speaking"}
                 </button>
               </div>
             </div>
+
+            {/* The self view can be dragged, resized and snapped, and every one
+                of those affordances is invisible until you happen to grab the
+                right pixel — SelfView's own comment says corner-dragging is
+                undiscoverable, which is why the S/M/L presets exist at all.
+                Only worth the lines while the box is actually on screen. */}
+            {pipOpen && video.stream && (
+              <p className="mt-6 max-w-[62ch] font-mono text-[10px] leading-[1.9] tracking-[0.14em] text-ink-muted uppercase">
+                Your camera floats free — <b className="font-medium text-ink-soft">drag the bar
+                to move it</b>, drag its corner to resize, or use <Key>S</Key>
+                <Key>M</Key>
+                <Key>L</Key>. Double-click the bar to snap it to a corner.
+              </p>
+            )}
+
+            {mode === "voice" && rec.supported && <LiveDelivery rec={rec} max={props.maxSeconds} />}
           </div>
         </div>
       </main>
@@ -408,6 +529,95 @@ export function HotSeat(props: Props) {
           <p>This interview is being recorded so you can watch it back. Deleted after 100 days.</p>
         ) : null}
       </footer>
+
+      {/* Purely a preview. Unmounting it no longer touches the camera — the
+          stream belongs to useSessionVideo, and the recording outlives this.
+
+          Mounted LAST on purpose. It is `fixed z-50`, so DOM order costs it
+          nothing visually, and it carries six tab stops of its own (the group,
+          S/M/L, minimise, close). In front of the room that put all six between
+          the candidate and the button that submits their answer. */}
+      {pipOpen && video.stream && (
+        <SelfView
+          stream={video.stream}
+          onClose={() => setPipOpen(false)}
+          // The mic belongs to `useRecorder`, not to the camera stream — the
+          // self view has no way to know whether anything is being heard, so
+          // the level is handed down rather than measured there.
+          micOn={rec.state === "recording"}
+          level={rec.level}
+          recording={video.state === "recording"}
+        />
+      )}
+    </div>
+  );
+}
+
+/** A keycap, for the camera hint. Square, like every other border in the room. */
+function Key({ children }: { children: React.ReactNode }) {
+  return (
+    <kbd className="mx-0.5 border border-line px-1 py-px font-mono text-[9.5px] text-ink-soft">
+      {children}
+    </kbd>
+  );
+}
+
+/**
+ * Live delivery numbers — shut by default, and that is the whole point.
+ *
+ * Watching your own pace and volume while you talk makes people perform the
+ * meter instead of answering the question, which is the same failure mode that
+ * took the live transcript off this screen. The full delivery breakdown is in
+ * the report, measured from the audio, and it is better there. This exists only
+ * so that someone who suspects the mic is dead can check a number rather than
+ * trust a bar.
+ *
+ * Only what is genuinely measured client-side is in here: pace, fillers and
+ * tone all need the transcript, which is produced server-side after the take is
+ * sent, so quoting them live would mean inventing them.
+ */
+function LiveDelivery({ rec, max }: { rec: ReturnType<typeof useRecorder>; max: number }) {
+  const recording = rec.state === "recording";
+  const dash = "—";
+  return (
+    <details className="group mt-9 max-w-[560px] border-t border-line">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-4 py-3.5 font-mono text-[10.5px] tracking-[0.16em] text-ink-muted uppercase transition-colors hover:text-ink [&::-webkit-details-marker]:hidden">
+        Show how I&apos;m sounding right now
+        {/* Two glyphs toggled by the `open` state rather than one `::after`
+            with generated content: the disclosure sign is the only thing
+            saying which way this drawer moves, and utility-generated content
+            is one Tailwind-scanner quirk away from rendering as nothing. */}
+        <span
+          aria-hidden="true"
+          className="grid size-5 flex-none place-items-center border border-line text-[12px] leading-none text-ink-soft group-open:border-ember/40 group-open:text-ember"
+        >
+          <span className="group-open:hidden">+</span>
+          <span className="hidden group-open:block">–</span>
+        </span>
+      </summary>
+      <div className="pb-6">
+        <p className="mb-4 border border-dashed border-mixed/35 px-3 py-2.5 font-mono text-[10px] leading-relaxed tracking-[0.12em] text-mixed uppercase">
+          Heads up — watching these while you talk usually makes people worse, not better.
+          They&apos;re all in the report afterwards.
+        </p>
+        <div className="grid grid-cols-3 border border-line">
+          <Metric k="Input level" v={recording ? String(Math.round(rec.level * 100)) : dash} unit="%" />
+          <Metric k="This answer" v={recording ? fmtTime(rec.seconds) : dash} />
+          <Metric k="Time left" v={recording ? fmtTime(Math.max(0, max - rec.seconds)) : dash} />
+        </div>
+      </div>
+    </details>
+  );
+}
+
+function Metric({ k, v, unit }: { k: string; v: string; unit?: string }) {
+  return (
+    <div className="border-l border-line px-4 py-3.5 first:border-l-0">
+      <span className="font-mono text-[9.5px] tracking-[0.16em] text-ink-muted uppercase">{k}</span>
+      <p className="mt-1 font-mono text-[18px] font-semibold tabular-nums">
+        {v}
+        {unit && v !== "—" && <i className="ml-0.5 text-[9.5px] not-italic text-ink-muted">{unit}</i>}
+      </p>
     </div>
   );
 }
@@ -535,7 +745,21 @@ function VoicePanel({
 
   return (
     <div className="mic-col">
-      {/* Live input level — the real mic signal, so a dead mic is obvious. */}
+      {/*
+       * Live input level — the real mic signal, so a dead mic is obvious.
+       *
+       * Green, never ember. This screen deliberately shows you nothing of what
+       * you are saying (see LiveDelivery), so the meter is the ONLY proof left
+       * that you are being heard — which makes it worth reading at a glance and
+       * worth not confusing with anything else. Ember means "this is being
+       * recorded" in every other part of the room (the REC chip, the take dot,
+       * the stop button); a red meter beside them reads as a second recording
+       * light rather than as "the mic can hear you".
+       *
+       * Painted inline rather than by class because `.lvl-bar[data-hot]` in
+       * globals.css carries an ember gradient, and that file is not this
+       * component's to change.
+       */}
       <div className="lvl" aria-hidden="true">
         {Array.from({ length: 28 }).map((_, i) => {
           // Centre bars react most, so it reads as a voice, not a bar chart.
@@ -545,7 +769,12 @@ function VoicePanel({
             // No height transition while live: the level updates every frame,
             // so an ease never finishes and the bars crawl toward a level that
             // has already moved on. The analyser's smoothing does the work.
-            <span key={i} className="lvl-bar" data-hot={recording} style={{ height: h }} />
+            <span
+              key={i}
+              className="lvl-bar"
+              data-hot={recording}
+              style={{ height: h, background: recording ? "var(--color-strong)" : undefined }}
+            />
           );
         })}
       </div>
@@ -578,13 +807,11 @@ function VoicePanel({
           >
             <MicIcon />
           </button>
-          <p className="mic-note">
-            {busy
-              ? "Sending…"
-              : rec.state === "requesting"
-                ? "Waiting for the mic…"
-                : "Tap to answer"}
-          </p>
+          {/* This used to swap to "Sending…" and "Waiting for the mic…". The
+              banner says both of those already, in the same words and in the
+              same states — so this goes back to only ever naming what the
+              button does, which stays true while it sits there disabled. */}
+          <p className="mic-note">Tap to answer</p>
         </>
       )}
     </div>
@@ -606,7 +833,17 @@ function TextPanel({
 }) {
   return (
     <div>
+      {/* Says what the trade is BEFORE the answer is written, not after: a
+          typed answer is scored on content alone, and finding that out from
+          the report is finding it out too late. */}
+      <label
+        htmlFor="typed-answer"
+        className="mb-2 block font-mono text-[10px] tracking-[0.16em] text-ink-muted uppercase"
+      >
+        Typed answer — this one won&apos;t be scored on delivery
+      </label>
       <textarea
+        id="typed-answer"
         autoFocus
         rows={7}
         value={text}

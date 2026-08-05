@@ -1,6 +1,21 @@
 @import "tailwindcss";
 
 /**
+ * Explain mode, as a variant rather than a provider.
+ *
+ * The plain-English notes have to be reachable from server components — the
+ * dashboard, the report and the profile are all server-rendered, and making them
+ * client components just to read a boolean would be a bad trade. So the state
+ * lives in one class on <body> and every note is written `hidden explain:block`.
+ *
+ * Two consequences worth keeping: the note stays in the DOM in both states, so a
+ * screen reader reaches it either way; and nothing re-renders when the mode
+ * flips, so `Reveal`'s one-shot IntersectionObserver never sees content appear
+ * after it stopped watching.
+ */
+@custom-variant explain (&:where(.explain *));
+
+/**
  * Grill design tokens.
  *
  * The whole product is one warm dark room — near-black brown, cream ink, lit by
@@ -12,40 +27,100 @@
  * pressure.
  */
 @theme {
-  /* Surfaces — `paper` is historical; it means "the base surface". */
-  --color-paper: #16120e;
-  --color-paper-raised: #221c15;
-  --color-paper-sunken: #1b1610;
-  --color-ink: #f3ecde;
-  --color-ink-soft: #b6ac99;
-  --color-ink-muted: #7b7160;
-  --color-line: #2c2823;
-  --color-line-strong: #3e3934;
+  /*
+   * Surfaces — `paper` is historical; it means "the base surface".
+   *
+   * Sampled from the redesign reference renders, not eyeballed: the page is a
+   * near-neutral black, the raised card is five points lighter, and the only
+   * warmth left in the greys is in the hairline. The previous warm-brown set
+   * (#16120e / #221c15) read as a lit room; this reads as a darkroom with one
+   * red light in it, which is what the reference is going for.
+   */
+  --color-paper: #0e0e0e;
+  --color-paper-raised: #131313;
+  --color-paper-sunken: #0a0a0a;
+  --color-ink: #e9e6df;
+  --color-ink-soft: #9b978e;
+  --color-ink-muted: #75736c;
+  --color-line: #262521;
+  --color-line-strong: #3a3833;
 
-  /* Heat */
-  --color-ember: #f2642f;
-  --color-ember-hot: #ff7a45;
-  --color-ember-glow: #f6a64e;
-  --color-ember-soft: #301c12;
+  /*
+   * Heat. `ember` is now a true red rather than an orange — at #0e0e0e the old
+   * #f2642f sat too close to the amber used for a middling verdict, and the two
+   * competed. Kept under the `ember` name so no call site has to change.
+   */
+  --color-ember: #ff4633;
+  --color-ember-hot: #ff6a5a;
+  --color-ember-glow: #ff8a72;
+  --color-ember-soft: #2a1512;
 
-  /* The room. Now identical to the base surface — kept so session code reads
-     in its own vocabulary. */
-  --color-room: #16120e;
-  --color-room-raised: #221c15;
-  --color-room-line: #2c2823;
-  --color-room-ink: #f3ecde;
-  --color-room-muted: #b6ac99;
+  /* The room. Identical to the base surface — kept so session code reads in its
+     own vocabulary. */
+  --color-room: #0e0e0e;
+  --color-room-raised: #131313;
+  --color-room-line: #262521;
+  --color-room-ink: #e9e6df;
+  --color-room-muted: #9b978e;
 
-  /* Verdict scale — also used by score meters. Lifted for legibility on dark. */
-  --color-strong: #4ade80;
-  --color-mixed: #f6a64e;
-  --color-weak: #f87171;
+  /* Verdict scale — also used by score meters. Desaturated against the previous
+     set so a passing score reads as considered rather than as a success toast,
+     and so none of the three can be mistaken for `ember`. */
+  --color-strong: #8fbf6b;
+  --color-mixed: #d9a441;
+  --color-weak: #e05c4f;
 
-  --font-display: var(--font-bricolage), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-archivo), ui-sans-serif, system-ui, sans-serif;
   --font-sans: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 
-  --radius-card: 14px;
+  /*
+   * Square. The reference has no rounded corner anywhere — cards, buttons,
+   * chips, the score band and the avatar are all hard-edged, and that squared
+   * geometry is doing as much of the work as the palette is.
+   *
+   * Kept as a token set to `0` rather than deleted, because ~40 call sites read
+   * `rounded-card`; they all collapse to square from this one line, and a future
+   * change of mind is one line back.
+   */
+  --radius-card: 0px;
+
+  /* Animations the redesign needs as utilities. Keyframes are defined with the
+     rest of the `grill-`-prefixed set in `@layer utilities` below; these tokens
+     are what turn them into `animate-sheen` / `animate-eq`. */
+  --animate-sheen: grill-sheen 1.7s linear infinite;
+  --animate-eq: grill-eq 0.85s ease-in-out infinite;
+
+  /* The rail's width, referenced by both the rail itself and the padding the
+     shell reserves for it. One value so the two can never disagree. */
+  --rail-w: 15rem;
+
+  /*
+   * Height of the sticky chrome above the content, and 0 once the rail takes
+   * over.
+   *
+   * Below `lg` the rail collapses into AppRail's header — a ~65px brand row over
+   * a ~41px section scroller. At `lg` and up that header is `lg:hidden` and the
+   * rail is `fixed` down the left, so nothing sticky sits above the content and
+   * every offset derived from this must collapse to zero.
+   *
+   * Three things read it and would otherwise drift apart: ReportNav's sticky
+   * `top` (without it the section nav pins to the same y as the header and is
+   * painted straight over), `.turn`'s anchor margin, and the `#section` targets
+   * on the report. The number that used to be baked into each of them was
+   * calibrated against the deleted AppTopbar, which was 61px.
+   */
+  --app-header-h: 106px;
+  /* ReportNav's own height, which stacks under the header on the report page. */
+  --report-nav-h: 44px;
+}
+
+/* 64rem is Tailwind's `lg`, which is what `lg:hidden` on the header and
+   `lg:flex` on the rail key off. The two must flip on the same line. */
+@media (min-width: 64rem) {
+  :root {
+    --app-header-h: 0px;
+  }
 }
 
 @layer base {
@@ -59,8 +134,10 @@
     font-family: var(--font-sans);
   }
 
-  /* Bricolage is a grotesque, not a serif — it needs weight and tightening to
-     read as display. Lives in `base` so components can still override weight. */
+  /* Archivo is a grotesque, not a serif — it needs weight and tightening to
+     read as display. Lives in `base` so components can still override weight.
+     The `-0.01em` is the floor for mixed-case body-ish display text; the heavy
+     uppercase headlines below all restate a tighter value of their own. */
   .font-display {
     font-weight: 500;
     letter-spacing: -0.01em;
@@ -76,22 +153,36 @@
     color: var(--color-paper);
   }
 
+  /* No `border-radius` here, deliberately. It used to force a 4px radius so the
+     outline would round off against square controls; now that the whole product
+     is square the outline already fits, and re-declaring a radius on focus would
+     square off the handful of things that are still genuinely circular (the
+     record button's ring, a status dot inside a focusable row) the moment they
+     took focus. Letting `outline` follow each element's own shape is the fix. */
   :focus-visible {
     outline: 2px solid var(--color-ember);
     outline-offset: 2px;
-    border-radius: 4px;
   }
 }
 
 @layer utilities {
   /* The key-light behind the question. Decorative: pointer-events-none, and it
-     must sit under content. */
+     must sit under content.
+
+     The stops were three re-typed literals of the old orange palette
+     (242,100,47 / 246,166,78), so they kept painting an orange bloom after
+     `ember` went red — the one place in the product where the two hues were
+     visible side by side. Now mixed from the tokens.
+
+     22% → 12%, because the strength was calibrated against the old warm-brown
+     base. The same alpha over #0e0e0e reads roughly twice as hot, and the
+     reference hot seat has barely a suggestion of light behind the question. */
   .ember-glow {
     background: radial-gradient(
       58% 60% at 50% 0%,
-      rgba(242, 100, 47, 0.22),
-      rgba(246, 166, 78, 0.05) 46%,
-      rgba(0, 0, 0, 0) 72%
+      color-mix(in srgb, var(--color-ember) 12%, transparent),
+      color-mix(in srgb, var(--color-ember-glow) 4%, transparent) 46%,
+      transparent 72%
     );
   }
 
@@ -162,11 +253,38 @@
     animation: grill-word-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
   }
 
+  /* A light sweeping across a surface that is still being assembled — the build
+     screen's progress bar and the skeleton of the report it's writing. Motion
+     rather than a spinner, because it says "being built" instead of "waiting". */
+  @keyframes grill-sheen {
+    from {
+      transform: translateX(-100%);
+    }
+    to {
+      transform: translateX(100%);
+    }
+  }
+
+  /* Mic-level bars. Only used as an idle "the mic is on" shimmer — once a real
+     level is available the heights are set inline and the animation is dropped,
+     because a decorative loop over live data reads as noise. */
+  @keyframes grill-eq {
+    0%,
+    100% {
+      height: 25%;
+    }
+    50% {
+      height: 100%;
+    }
+  }
+
   @media (prefers-reduced-motion: reduce) {
     .animate-pulse-rec,
     .animate-ring,
     .animate-rise,
-    .animate-word {
+    .animate-word,
+    .animate-sheen,
+    .animate-eq {
       animation: none;
     }
   }
@@ -239,9 +357,8 @@
     background: var(--color-ember);
     color: var(--color-paper);
   }
-  /* No `border-radius` here: the root `:focus-visible` above already sets one,
-     and repeating it out of the layer would square off every `rounded-full`
-     Tailwind control in the signed-in app the moment it took focus. */
+  /* Offset only — the shape of the ring is left to the element, same reasoning
+     as the root `:focus-visible` above. */
   :where(.grill-root, .app-root) :focus-visible {
     outline: 2px solid var(--color-ember);
     outline-offset: 3px;
@@ -345,70 +462,95 @@
 
 /* ── buttons ────────────────────────────────────────────────────────────── */
 
+/*
+ * Mono, uppercase, wide-tracked, and square — the reference sets every control
+ * this way, and it is what keeps a button reading as a switch on a machine
+ * rather than as a web link. `min-height` rather than symmetric padding so the
+ * slab keeps its height whatever the label does.
+ *
+ * The base paints nothing; the variants below do. `.btn` on its own is never a
+ * finished control.
+ */
 .btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 12px 22px;
+  gap: 0.7rem;
+  min-height: 52px;
+  padding: 1rem 1.9rem;
   border: 1px solid transparent;
-  border-radius: 10px;
-  font-family: var(--font-sans);
-  font-size: 15px;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
   font-weight: 600;
-  letter-spacing: 0.01em;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
   cursor: pointer;
   transition:
-    transform 0.18s ease,
-    background-color 0.18s ease,
-    border-color 0.18s ease,
-    box-shadow 0.18s ease,
-    color 0.18s ease;
+    transform 0.15s ease,
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    color 0.2s ease;
+}
+.btn:active {
+  transform: scale(0.98);
 }
 .btn-sm {
-  padding: 9px 16px;
-  font-size: 14px;
+  min-height: 40px;
+  padding: 0.6rem 1.1rem;
+  font-size: 0.7rem;
 }
 .btn-lg {
-  padding: 15px 28px;
-  font-size: 16px;
+  min-height: 58px;
+  padding: 1.15rem 2.1rem;
+  font-size: 0.86rem;
 }
 .btn-block {
   width: 100%;
 }
 /* Signed-in surfaces run a tighter button than the marketing page; the report,
    tighter still. Modifiers are restated inside each scope because a bare
-   `.btn-sm` would otherwise lose to `.app-root .btn` on specificity. */
+   `.btn-sm` would otherwise lose to `.app-root .btn` on specificity.
+   Only the metrics change here — the mono/uppercase/tracking treatment is the
+   button's identity and must survive every scope. */
 .app-root .btn {
-  padding: 11px 20px;
-  font-size: 14.5px;
-  letter-spacing: normal;
+  min-height: 48px;
+  padding: 0.9rem 1.6rem;
+  font-size: 0.78rem;
 }
 .app-root .btn-sm {
-  padding: 8px 14px;
-  font-size: 13.5px;
+  min-height: 38px;
+  padding: 0.55rem 1rem;
+  font-size: 0.68rem;
 }
 .report-main .btn {
-  padding: 10px 18px;
-  font-size: 14px;
+  min-height: 44px;
+  padding: 0.8rem 1.4rem;
+  font-size: 0.74rem;
 }
 .report-main .btn-xs {
-  padding: 6px 12px;
-  border-radius: 8px;
-  font-size: 12px;
+  min-height: 32px;
+  padding: 0.4rem 0.85rem;
+  font-size: 0.62rem;
 }
 
+/*
+ * Bone, not ember — and this is the one that surprises people.
+ *
+ * The accent is reserved for heat: live state, the unfinished session's edge,
+ * the marker on a score band. A filled ember button competes with all of it, and
+ * on a near-black page the brightest thing available is the ink itself. So the
+ * primary action is a bone slab that turns red under the cursor: the heat is
+ * what the press promises, not what the button already is.
+ */
 .btn-primary {
-  background: var(--color-ember);
+  border-color: var(--color-ink);
+  background: var(--color-ink);
   color: var(--color-paper);
 }
 .btn-primary:hover {
-  background: var(--color-ember-hot);
-  transform: translateY(-1px);
-  box-shadow: 0 8px 32px -8px color-mix(in srgb, var(--color-ember) 55%, transparent);
-}
-.btn-primary:active {
-  transform: translateY(0);
+  border-color: var(--color-ember);
+  background: var(--color-ember);
+  color: var(--color-paper);
 }
 .btn-secondary {
   border-color: var(--color-line-strong);
@@ -416,8 +558,8 @@
   color: var(--color-ink);
 }
 .btn-secondary:hover {
-  border-color: var(--color-ink-muted);
-  background: var(--color-paper-raised);
+  border-color: var(--color-ember);
+  color: var(--color-ember);
 }
 .btn-ghost {
   padding-inline: 12px;
@@ -470,6 +612,9 @@
   font-weight: 800;
   line-height: 1;
   letter-spacing: -0.02em;
+  /* Declared here, not at each call site: the rail said GRILL. and the
+     footer directly under it said grill. */
+  text-transform: uppercase;
 }
 .grill-root .wordmark {
   font-size: 26px;
@@ -523,9 +668,11 @@
   background-clip: text;
   -webkit-text-fill-color: transparent;
   color: transparent;
-  font-style: italic;
+  /* Upright, not italic. The gradient is the heat; slanting the word as well
+     was the old idiom and there is no italic left anywhere in the design. */
+  font-style: normal;
   font-weight: 800;
-  letter-spacing: -0.03em;
+  letter-spacing: -0.02em;
   filter: drop-shadow(0 0 26px color-mix(in srgb, var(--color-ember) 34%, transparent));
   animation: g-flame 5.5s ease-in-out infinite alternate;
 }
@@ -587,7 +734,6 @@
   gap: 9px;
   padding: 7px 14px 7px 11px;
   border: 1px solid var(--color-line);
-  border-radius: 999px;
   background: color-mix(in srgb, var(--color-paper-raised) 72%, transparent);
   font-family: var(--font-mono);
   font-size: 11.5px;
@@ -595,13 +741,24 @@
   text-transform: uppercase;
   color: var(--color-ink-soft);
 }
+/*
+ * The headline idiom, stated once here and repeated by every `.h1` variant
+ * below: heavy, uppercase, tracked in, set on a leading tight enough that two
+ * lines read as one block of text rather than two sentences.
+ *
+ * `-0.02em` rather than the `-0.035em` this carried while it was mixed-case.
+ * Uppercase has no descenders and no x-height contrast to absorb tightening —
+ * past about -0.025em the caps start colliding, which is exactly what the old
+ * value did the moment `text-transform` went on.
+ */
 .grill-root .h1 {
   margin-top: 28px;
   font-family: var(--font-display);
   font-size: clamp(3rem, 8.6vw, 7.1rem);
   font-weight: 800;
-  line-height: 0.96;
-  letter-spacing: -0.035em;
+  line-height: 0.95;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
 }
 .hero-row {
   display: flex;
@@ -674,7 +831,6 @@
   flex: 1 1 0;
   max-width: 5px;
   min-height: 6px;
-  border-radius: 3px 3px 1px 1px;
   background: linear-gradient(
     180deg,
     var(--color-ember-glow),
@@ -706,7 +862,6 @@
 .tick-label {
   padding: 4px 9px;
   border: 1px solid var(--color-line);
-  border-radius: 6px;
   background: var(--color-paper);
   font-family: var(--font-mono);
   font-size: 10.5px;
@@ -838,14 +993,20 @@
 .h2 {
   margin-top: 16px;
   font-family: var(--font-display);
-  font-size: clamp(2rem, 4.4vw, 3.2rem);
+  font-size: clamp(2.1rem, 4.6vw, 3.4rem);
   font-weight: 800;
-  line-height: 1.02;
-  letter-spacing: -0.03em;
+  line-height: 0.98;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
 }
+/* The accent word carries heat, not a change of voice. It used to be italic;
+   there is no italic anywhere in the reference, so the ember does all the work
+   on its own — and at 800 uppercase a slanted word would just look like a
+   rendering bug. Ember rather than ember-glow: glow is a highlight tint and
+   loses its edge against a headline this heavy. */
 .h2 em {
-  font-style: italic;
-  color: var(--color-ember-glow);
+  font-style: normal;
+  color: var(--color-ember);
 }
 
 /* how it goes — a ledger, not cards */
@@ -886,9 +1047,11 @@
 }
 .step-t {
   font-family: var(--font-display);
-  font-size: 22px;
-  font-weight: 700;
-  letter-spacing: -0.015em;
+  font-size: 21px;
+  font-weight: 800;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
 }
 .step-d {
   max-width: 52ch;
@@ -899,7 +1062,6 @@
 .step-tag {
   padding: 5px 10px;
   border: 1px solid var(--color-line);
-  border-radius: 999px;
   font-family: var(--font-mono);
   font-size: 11px;
   letter-spacing: 0.12em;
@@ -973,7 +1135,6 @@
 }
 .grill-root .chip {
   padding: 5px 10px;
-  border-radius: 999px;
   font-family: var(--font-mono);
   font-size: 10.5px;
   letter-spacing: 0.1em;
@@ -1018,17 +1179,14 @@
   overflow: hidden;
   height: 5px;
   border: 1px solid var(--color-line);
-  border-radius: 5px;
   background: var(--color-paper-sunken);
 }
 .grill-root .meter {
   height: 4px;
   margin-top: 8px;
-  border-radius: 4px;
 }
 .meter-fill {
   height: 100%;
-  border-radius: inherit;
   background: linear-gradient(90deg, var(--color-ember), var(--color-ember-glow));
   transform-origin: left;
   animation: g-fill 1s cubic-bezier(0.2, 0.7, 0.2, 1) both;
@@ -1094,9 +1252,11 @@
 .cell-t {
   margin-top: 14px;
   font-family: var(--font-display);
-  font-size: 17.5px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
+  font-size: 16.5px;
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -0.015em;
+  text-transform: uppercase;
 }
 .cell-d {
   margin-top: 7px;
@@ -1180,9 +1340,12 @@
   align-items: center;
   justify-content: center;
   padding: 20px;
-  /* A scrim, not a surface: near-black at 72%, so the room reads as dimmed
-     rather than recoloured. */
-  background: rgba(12, 9, 6, 0.72);
+  /* A scrim, not a surface: the base surface at 82%, so the room reads as
+     dimmed rather than recoloured. It used to be a re-typed warm near-black
+     (12, 9, 6) picked to sit under the brown paper; against a neutral #0e0e0e
+     that literal tinted the dimmed room amber. Mixing from `paper` means the
+     scrim can never drift from the surface it is dimming again. */
+  background: color-mix(in srgb, var(--color-paper) 82%, transparent);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   animation: g-ov-in 0.3s ease both;
@@ -1263,7 +1426,6 @@
   width: 32px;
   height: 32px;
   border: 1px solid var(--color-line);
-  border-radius: 8px;
   background: none;
   font-size: 15px;
   line-height: 1;
@@ -1293,8 +1455,9 @@
   font-family: var(--font-display);
   font-size: clamp(1.85rem, 5vw, 2.25rem);
   font-weight: 800;
-  line-height: 1.02;
-  letter-spacing: -0.03em;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
 }
 .modal-sub {
   margin-top: 9px;
@@ -1337,7 +1500,6 @@
   width: 100%;
   padding: 12px 14px;
   border: 1px solid var(--color-line-strong);
-  border-radius: 10px;
   background: var(--color-paper-sunken);
   font-family: var(--font-sans);
   /* 16px, deliberately: iOS Safari force-zooms the page on focusing any field
@@ -1358,8 +1520,10 @@
 .input::placeholder {
   color: var(--color-ink-muted);
 }
-/* 25%, not 60%: the design's hover border is #4d463f, one step up from
-   line-strong — a 60% mix lands at #635b4e, visibly brighter than intended. */
+/* 25%, not 60%: hover is meant to be one step up from `line-strong`, not a
+   different border. A 60% mix lands most of the way to `ink-muted` and reads as
+   focus, which the ember ring below is already saying. Re-checked against the
+   neutral tokens — the 25% mix still lands a single visible step up. */
 .input:hover {
   border-color: color-mix(in srgb, var(--color-ink-muted) 25%, var(--color-line-strong));
 }
@@ -1378,7 +1542,6 @@
   right: 7px;
   padding: 6px 8px;
   border: none;
-  border-radius: 6px;
   background: none;
   font-family: var(--font-mono);
   font-size: 10.5px;
@@ -1396,12 +1559,10 @@
   overflow: hidden;
   height: 3px;
   margin-top: 8px;
-  border-radius: 3px;
   background: var(--color-line);
 }
 .pw-meter-fill {
   height: 100%;
-  border-radius: 3px;
   background: var(--color-ember);
   transition:
     width 0.3s cubic-bezier(0.2, 0.7, 0.2, 1),
@@ -1416,7 +1577,6 @@
   gap: 9px;
   padding: 10px 13px;
   border: 1px solid color-mix(in srgb, var(--color-weak) 35%, transparent);
-  border-radius: 9px;
   background: color-mix(in srgb, var(--color-weak) 7%, transparent);
   font-family: var(--font-mono);
   font-size: 12px;
@@ -1518,7 +1678,6 @@
 }
 .topnav a {
   padding: 7px 12px;
-  border-radius: 8px;
   font-size: 13.5px;
   color: var(--color-ink-soft);
   transition:
@@ -1546,7 +1705,6 @@
   width: 32px;
   height: 32px;
   border: 1px solid color-mix(in srgb, var(--color-ember) 40%, transparent);
-  border-radius: 50%;
   background: var(--color-ember-soft);
   font-family: var(--font-mono);
   font-size: 11px;
@@ -1601,16 +1759,25 @@
   gap: 20px;
   padding-top: clamp(36px, 6vh, 60px);
 }
+/*
+ * The signed-in headline. Bigger than it was — in the reference this is the
+ * loudest thing on the dashboard by some distance, and at the old top of
+ * 2.9rem the stat strip underneath was competing with it.
+ */
 .app-root .h1 {
   font-family: var(--font-display);
-  font-size: clamp(2rem, 4.4vw, 2.9rem);
+  font-size: clamp(2.2rem, 5vw, 3.5rem);
   font-weight: 800;
-  line-height: 1.02;
-  letter-spacing: -0.03em;
+  line-height: 0.95;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
 }
+/* Same call as `.h2 em`: the accent word is ember and upright. Ember rather
+   than ember-glow because glow is a tint for small type and washes out at
+   headline weight. */
 .app-root .h1 i {
-  font-style: italic;
-  color: var(--color-ember-glow);
+  font-style: normal;
+  color: var(--color-ember);
 }
 .page-sub {
   margin-top: 8px;
@@ -1654,9 +1821,11 @@
 .resume-t {
   margin-top: 8px;
   font-family: var(--font-display);
-  font-size: 19px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -0.015em;
+  text-transform: uppercase;
 }
 .resume-d {
   margin-top: 3px;
@@ -1728,9 +1897,11 @@
 }
 .empty h2 {
   font-family: var(--font-display);
-  font-size: 22px;
-  font-weight: 700;
-  letter-spacing: -0.015em;
+  font-size: 21px;
+  font-weight: 800;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
 }
 .empty p {
   max-width: 52ch;
@@ -1824,9 +1995,11 @@
   stroke: color-mix(in srgb, var(--color-ember-glow) 22%, transparent);
   stroke-width: 5;
 }
-/* Tinted toward the series hue rather than the border grey: at #3e3934 on
-   #221c15 this was about 1.5:1 and read as nothing happening at all. It still
-   sits well under the dots and the numbers, which is the order that matters. */
+/* Tinted toward the series hue rather than the border grey. A `line-strong`
+   guide on the card surface is about 1.5:1 and reads as nothing happening at
+   all; the reference draws these gridlines faintly red for the same reason. It
+   still sits well under the dots and the numbers, which is the order that
+   matters. */
 .trend-guide {
   stroke: color-mix(in srgb, var(--color-ember-glow) 30%, transparent);
   stroke-width: 1;
@@ -1882,7 +2055,6 @@
 .row-role {
   padding: 3px 8px;
   border: 1px solid var(--color-line);
-  border-radius: 999px;
   font-family: var(--font-mono);
   font-size: 10.5px;
   letter-spacing: 0.08em;
@@ -1906,7 +2078,6 @@
 .app-root .chip {
   padding: 4px 9px;
   border: 1px solid var(--color-line);
-  border-radius: 999px;
   font-family: var(--font-mono);
   font-size: 10px;
   letter-spacing: 0.12em;
@@ -2019,14 +2190,19 @@
   text-transform: uppercase;
   color: var(--color-ink-muted);
 }
+/* `max-width` in ch, not px, so the measure tracks the type size — the report
+   title is meant to break onto two or three lines whatever the viewport. 17ch
+   of caps is a touch narrower than 17ch of mixed case, which is the right way
+   for it to drift now that the text is uppercase. */
 .verdict {
   max-width: 17ch;
   margin-top: 12px;
   font-family: var(--font-display);
-  font-size: clamp(1.9rem, 4.6vw, 3rem);
+  font-size: clamp(2rem, 4.8vw, 3.2rem);
   font-weight: 800;
-  line-height: 1.04;
-  letter-spacing: -0.03em;
+  line-height: 0.98;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
 }
 
 /* the seared ring */
@@ -2095,7 +2271,6 @@
   margin-top: 26px;
   padding: 12px 16px;
   border: 1px dashed var(--color-line-strong);
-  border-radius: 12px;
 }
 .vs-label {
   font-family: var(--font-mono);
@@ -2209,7 +2384,6 @@ a.vs-label:hover {
   height: 8px;
   margin-top: 26px;
   border: 1px solid var(--color-line);
-  border-radius: 6px;
   background: var(--color-paper-sunken);
 }
 .band-zone {
@@ -2217,7 +2391,6 @@ a.vs-label:hover {
   top: -1px;
   bottom: -1px;
   border: 1px solid color-mix(in srgb, var(--color-strong) 30%, transparent);
-  border-radius: 6px;
   background: color-mix(in srgb, var(--color-strong) 14%, transparent);
 }
 .band-zone-label {
@@ -2237,7 +2410,6 @@ a.vs-label:hover {
   top: -8px;
   bottom: -8px;
   width: 2px;
-  border-radius: 2px;
   background: var(--color-ember-glow);
   box-shadow: 0 0 10px color-mix(in srgb, var(--color-ember-glow) 60%, transparent);
 }
@@ -2288,12 +2460,16 @@ a.vs-label:hover {
   font-size: 15px;
   font-weight: 600;
 }
+/* Upright, not italic. Every quote in this product is a verbatim transcript of
+   something the candidate said, and the rule down the left already says so —
+   the italic was a second, weaker signal that cost legibility on the longest
+   passages in the report. It also went with the old mixed-case display voice,
+   which the redesign dropped. Same call at `.hl-quote`, `.transcript`, `.ans p`. */
 .quote {
   margin-top: 8px;
   padding: 10px 14px;
   border-left: 2px solid var(--color-line-strong);
   font-size: 14px;
-  font-style: italic;
   color: var(--color-ink-soft);
 }
 .quote-strong {
@@ -2308,7 +2484,6 @@ a.vs-label:hover {
   margin-top: 10px;
   padding: 10px 14px;
   border: 1px solid color-mix(in srgb, var(--color-ember) 25%, transparent);
-  border-radius: 10px;
   background: var(--color-ember-soft);
   font-size: 13.5px;
   color: var(--color-ember-hot);
@@ -2365,7 +2540,6 @@ a.vs-label:hover {
 .hl-quote {
   margin-top: 12px;
   font-size: 14px;
-  font-style: italic;
   line-height: 1.55;
   color: var(--color-ink);
 }
@@ -2402,16 +2576,28 @@ a.vs-label:hover {
   color: var(--color-ember);
 }
 
+/* A section ReportNav can jump to, or that a `#hash` can land on directly.
+   Same offset as `.turn` below and for the same reason — it clears the shell
+   header (below `lg`) and the sticky section nav. Written as a class rather than
+   `scroll-mt-*` at each call site so the four report sections and the replay's
+   turns can never drift apart; the utility form also can't be shared, since a
+   Tailwind arbitrary value can't hold a readable `calc`. */
+.nav-target {
+  scroll-margin-top: calc(var(--app-header-h) + var(--report-nav-h) + 16px);
+}
+
 /* the replay — one accordion per turn */
 .turn {
   overflow: hidden;
   margin-top: 10px;
   border: 1px solid var(--color-line);
-  border-radius: 12px;
   background: var(--color-paper-raised);
-  /* `#turn-N` anchors from the best/worst cards land here, and the topbar is
-     sticky at z-index 30 — without this the turn scrolls in underneath it. */
-  scroll-margin-top: 76px;
+  /* `#turn-N` anchors from the best/worst cards land here, and two things above
+     are sticky — without this the turn scrolls in underneath them. The 76px this
+     replaces was calibrated against the 61px AppTopbar, which no longer exists;
+     the tokens collapse to just ReportNav's height at `lg`, where the rail is
+     fixed to the left and nothing sticky sits above the content. */
+  scroll-margin-top: calc(var(--app-header-h) + var(--report-nav-h) + 16px);
 }
 .turn-head {
   display: grid;
@@ -2452,7 +2638,6 @@ a.vs-label:hover {
 .turn-type {
   padding: 3px 8px;
   border: 1px solid var(--color-line);
-  border-radius: 999px;
   font-family: var(--font-mono);
   font-size: 9.5px;
   letter-spacing: 0.12em;
@@ -2501,7 +2686,6 @@ a.vs-label:hover {
   padding: 6px 12px;
   border-left: 2px solid var(--color-line-strong);
   font-size: 13.5px;
-  font-style: italic;
   color: var(--color-ink-soft);
 }
 .rubric {
@@ -2536,7 +2720,6 @@ a.vs-label:hover {
   height: 3px;
   margin-top: 5px;
   border: 1px solid var(--color-line);
-  border-radius: 3px;
   background: var(--color-paper-sunken);
 }
 .rub-f {
@@ -2546,7 +2729,6 @@ a.vs-label:hover {
 .improve {
   padding: 12px 14px;
   border: 1px solid var(--color-line);
-  border-radius: 10px;
   background: var(--color-paper-sunken);
 }
 .improve ul {
@@ -2575,7 +2757,6 @@ a.vs-label:hover {
 .ans {
   padding: 9px 12px 10px;
   border-left: 2px solid color-mix(in srgb, var(--color-ember-glow) 50%, transparent);
-  border-radius: 0 8px 8px 0;
   background: color-mix(in srgb, var(--color-ember-glow) 4%, transparent);
 }
 .ans-tag {
@@ -2588,7 +2769,6 @@ a.vs-label:hover {
 .ans p {
   margin-top: 3px;
   font-size: 13px;
-  font-style: italic;
   line-height: 1.55;
   color: var(--color-ink-soft);
 }
@@ -2600,9 +2780,15 @@ a.vs-label:hover {
   margin-top: 8px;
   aspect-ratio: 16 / 9;
   border: 1px solid var(--color-line);
-  border-radius: 10px;
-  /* A lens vignette, not a surface: literal on purpose. */
-  background: radial-gradient(80% 90% at 50% 30%, #241c14, #0d0a07 78%);
+  /* A lens vignette, not a surface. The two literals it replaces (#241c14 to
+     #0d0a07) were the warm-brown paper set with the saturation left in; on the
+     neutral palette they read as a sepia filter over every recorded answer.
+     Raised → sunken gives the same falloff and now tracks the tokens. */
+  background: radial-gradient(
+    80% 90% at 50% 30%,
+    var(--color-paper-raised),
+    var(--color-paper-sunken) 78%
+  );
 }
 .vid-glow {
   position: absolute;
@@ -2644,14 +2830,12 @@ a.vs-label:hover {
   left: 10px;
   border-right: none;
   border-bottom: none;
-  border-radius: 3px 0 0 0;
 }
 .vcorner.br {
   right: 10px;
   bottom: 42px;
   border-top: none;
   border-left: none;
-  border-radius: 0 0 3px 0;
 }
 .vid-play {
   position: absolute;
@@ -2664,7 +2848,6 @@ a.vs-label:hover {
   width: 54px;
   height: 54px;
   border: none;
-  border-radius: 50%;
   background: var(--color-ember);
   font-size: 16px;
   color: var(--color-paper);
@@ -2698,7 +2881,14 @@ a.vs-label:hover {
   align-items: center;
   gap: 10px;
   padding: 9px 12px;
-  background: linear-gradient(0deg, rgba(10, 8, 6, 0.85), transparent);
+  /* Legibility scrim under the transport controls, so mono labels stay readable
+     over an arbitrary video frame. Was a re-typed warm near-black; now the
+     sunken surface at the same alpha, which is neutral against the new base. */
+  background: linear-gradient(
+    0deg,
+    color-mix(in srgb, var(--color-paper-sunken) 85%, transparent),
+    transparent
+  );
 }
 .vid-rec {
   display: inline-flex;
@@ -2734,7 +2924,6 @@ a.vs-label:hover {
   height: 3px;
   padding: 0;
   border: none;
-  border-radius: 3px;
   background: color-mix(in srgb, var(--color-ink) 15%, transparent);
   cursor: pointer;
 }
@@ -2744,7 +2933,6 @@ a.vs-label:hover {
   display: block;
   width: 0;
   height: 100%;
-  border-radius: 3px;
   background: linear-gradient(90deg, var(--color-ember), var(--color-ember-glow));
 }
 .vid-time {
@@ -2772,7 +2960,6 @@ a.vs-label:hover {
 .star {
   padding: 6px 10px;
   border: 1px solid var(--color-line);
-  border-radius: 8px;
   background: none;
   font-size: 13px;
   color: var(--color-ink-muted);
@@ -2810,10 +2997,15 @@ a.vs-label:hover {
 
 /* `stop-color` is set here rather than as a `stopColor` presentation attribute
    on the <stop>: presentation attributes are not a portable place to put
-   `var()`, and these stops have to come from the theme tokens. `#ffdca8` is the
-   white-hot core of the burner coil — an optical highlight, not a palette entry. */
+   `var()`, and these stops have to come from the theme tokens.
+
+   The core is the white-hot centre of the burner coil, and it used to be a
+   literal `#ffdca8` — a cream-amber picked to sit one step above the old amber
+   `ember-glow`. It is the top of a four-stop ramp whose other three are now red,
+   so left alone it put a yellow flare in the middle of a red coil. Blowing out
+   `ember-glow` toward white keeps the ramp in one hue and can't drift from it. */
 .g-stop-core {
-  stop-color: #ffdca8;
+  stop-color: color-mix(in srgb, var(--color-ember-glow) 40%, white);
 }
 .g-stop-glow {
   stop-color: var(--color-ember-glow);
@@ -2917,7 +3109,6 @@ a.vs-label:hover {
   width: 64px;
   height: 64px;
   border: 1px solid color-mix(in srgb, var(--color-ember) 45%, transparent);
-  border-radius: 50%;
   background: var(--color-ember-soft);
   font-family: var(--font-display);
   font-size: 22px;
@@ -2930,8 +3121,9 @@ a.vs-label:hover {
   font-family: var(--font-display);
   font-size: clamp(1.4rem, 3.4vw, 1.75rem);
   font-weight: 800;
-  line-height: 1.05;
+  line-height: 1;
   letter-spacing: -0.02em;
+  text-transform: uppercase;
 }
 .id-mail {
   margin-top: 5px;
@@ -3056,9 +3248,14 @@ a.vs-label:hover {
   background: transparent;
   font-family: var(--font-display);
   font-size: clamp(1.6rem, 4.4vw, 2.3rem);
-  font-weight: 700;
-  letter-spacing: -0.025em;
-  line-height: 1.15;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+  /* Uppercase, like every other display heading — this reads as the brief's
+     title, so it has to sit in the same voice as the page headline above it.
+     `text-transform` is presentation only: the value posted to the API is
+     whatever the user actually typed, in their own casing. */
+  text-transform: uppercase;
   color: var(--color-ink);
 }
 .brief-name::placeholder {
@@ -3110,9 +3307,11 @@ a.vs-label:hover {
 }
 .bstep-t {
   font-family: var(--font-display);
-  font-size: 16.5px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
+  font-size: 15.5px;
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -0.015em;
+  text-transform: uppercase;
 }
 .bstep-d {
   margin-top: 2px;
@@ -3130,7 +3329,6 @@ a.vs-label:hover {
   margin-top: 18px;
   padding: 38px 24px;
   border: 2px dashed var(--color-line-strong);
-  border-radius: 12px;
   background: var(--color-paper-sunken);
   text-align: center;
   cursor: pointer;
@@ -3299,7 +3497,6 @@ a.vs-label:hover {
 .pick {
   padding: 12px 14px;
   border: 1px solid var(--color-line);
-  border-radius: 12px;
   background: transparent;
   text-align: left;
   cursor: pointer;
@@ -3328,13 +3525,9 @@ a.vs-label:hover {
   width: 15px;
   height: 15px;
   border: 1px solid var(--color-line-strong);
-  border-radius: 4px;
   transition:
     border-color 0.18s ease,
     background-color 0.18s ease;
-}
-.pick-mark.round {
-  border-radius: 50%;
 }
 .pick[aria-checked="true"] .pick-mark {
   border-color: var(--color-ember);
@@ -3344,11 +3537,7 @@ a.vs-label:hover {
   content: "";
   width: 5px;
   height: 5px;
-  border-radius: 1px;
   background: transparent;
-}
-.pick-mark.round::after {
-  border-radius: 50%;
 }
 .pick[aria-checked="true"] .pick-mark::after {
   background: var(--color-paper);
@@ -3374,12 +3563,10 @@ a.vs-label:hover {
   gap: 2px;
   padding: 3px;
   border: 1px solid var(--color-line);
-  border-radius: 10px;
 }
 .seg button {
   padding: 7px 12px;
   border: 0;
-  border-radius: 7px;
   background: none;
   font-family: var(--font-mono);
   font-size: 11px;
@@ -3405,7 +3592,6 @@ a.vs-label:hover {
   gap: 8px;
   padding: 5px 10px;
   border: 1px solid var(--color-line);
-  border-radius: 999px;
   background: var(--color-paper-sunken);
   font-family: var(--font-mono);
   font-size: 11px;
@@ -3465,7 +3651,6 @@ a.vs-label:hover {
   height: 24px;
   margin-top: 2px;
   border: 0;
-  border-radius: 999px;
   background: var(--color-line-strong);
   cursor: pointer;
   transition: background-color 0.2s ease;
@@ -3477,7 +3662,6 @@ a.vs-label:hover {
   left: 4px;
   width: 16px;
   height: 16px;
-  border-radius: 50%;
   background: var(--color-ink);
   transition:
     left 0.2s cubic-bezier(0.2, 0.7, 0.2, 1),
@@ -3510,7 +3694,6 @@ a.vs-label:hover {
   gap: 9px;
   padding: 11px 13px;
   border: 1px solid var(--color-line);
-  border-radius: 12px;
   background: transparent;
   font-size: 13.5px;
   color: var(--color-ink-soft);
@@ -3539,7 +3722,6 @@ a.vs-label:hover {
 }
 .heat-chip {
   padding: 4px 10px;
-  border-radius: 999px;
   background: color-mix(in srgb, var(--heat) 13%, transparent);
   font-family: var(--font-mono);
   font-size: 10.5px;
@@ -3590,7 +3772,6 @@ a.vs-label:hover {
 }
 .range::-webkit-slider-runnable-track {
   height: 4px;
-  border-radius: 4px;
   background: linear-gradient(
     90deg,
     var(--color-ember) 0 var(--fill, 0%),
@@ -3603,7 +3784,6 @@ a.vs-label:hover {
   height: 18px;
   margin-top: -7px;
   border: 3px solid var(--color-paper);
-  border-radius: 50%;
   background: var(--color-ember);
   box-shadow: 0 0 16px -2px color-mix(in srgb, var(--color-ember) 60%, transparent);
   transition: transform 0.15s ease;
@@ -3613,19 +3793,16 @@ a.vs-label:hover {
 }
 .range::-moz-range-track {
   height: 4px;
-  border-radius: 4px;
   background: var(--color-line-strong);
 }
 .range::-moz-range-progress {
   height: 4px;
-  border-radius: 4px;
   background: var(--color-ember);
 }
 .range::-moz-range-thumb {
   width: 12px;
   height: 12px;
   border: 3px solid var(--color-paper);
-  border-radius: 50%;
   background: var(--color-ember);
   box-shadow: 0 0 16px -2px color-mix(in srgb, var(--color-ember) 60%, transparent);
 }
@@ -3785,7 +3962,6 @@ a.vs-label:hover {
 }
 .seg-i {
   flex: 1;
-  border-radius: 3px;
   background: var(--color-line);
   transition: background-color 0.45s ease;
 }
@@ -3798,12 +3974,10 @@ a.vs-label:hover {
 .bar-track {
   overflow: hidden;
   height: 5px;
-  border-radius: 3px;
   background: var(--color-line);
 }
 .bar-fill {
   height: 100%;
-  border-radius: 3px;
   background: linear-gradient(90deg, var(--color-ember), var(--color-ember-glow));
   transition: width 0.5s cubic-bezier(0.2, 0.7, 0.2, 1);
 }
@@ -3958,19 +4132,27 @@ a.vs-label:hover {
   pointer-events: none;
   user-select: none;
 }
+/*
+ * The question is the loudest headline in the product, not a paragraph on a
+ * card — in the reference it fills the left half of the room in heavy caps and
+ * every other control is quiet next to it. Weight goes 500 → 800 and the
+ * leading collapses from 1.4 to 1.08: at four lines of caps a 1.4 leading reads
+ * as four separate sentences rather than one question.
+ */
 .q-text {
   position: relative;
   z-index: 1;
   font-family: var(--font-display);
-  font-size: 23px;
-  font-weight: 500;
-  line-height: 1.4;
-  letter-spacing: -0.01em;
+  font-size: 26px;
+  font-weight: 800;
+  line-height: 1.08;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
 }
 @media (min-width: 640px) and (min-height: 820px) {
   .q-text {
-    font-size: 29px;
-    line-height: 1.35;
+    font-size: 36px;
+    line-height: 1.05;
   }
 }
 
@@ -3998,7 +4180,6 @@ a.vs-label:hover {
 }
 .lvl-bar {
   width: 4px;
-  border-radius: 4px;
   background: var(--color-line);
 }
 /* No height transition while live: the level updates every frame, so an ease
@@ -4022,7 +4203,6 @@ a.vs-label:hover {
   width: 80px;
   height: 80px;
   border: 2px solid var(--color-ember);
-  border-radius: 50%;
   background: transparent;
   color: var(--color-ember);
   cursor: pointer;
@@ -4051,7 +4231,6 @@ a.vs-label:hover {
   width: 80px;
   height: 80px;
   border: 0;
-  border-radius: 50%;
   background: var(--color-ember);
   color: var(--color-paper);
   cursor: pointer;
@@ -4072,7 +4251,6 @@ a.vs-label:hover {
 .stop-sq {
   width: 22px;
   height: 22px;
-  border-radius: 4px;
   background: var(--color-paper);
 }
 /* The ring expands rather than fades — it reads as output level, not loading. */
@@ -4080,7 +4258,6 @@ a.vs-label:hover {
   position: absolute;
   inset: -7px;
   border: 2px solid var(--color-ember);
-  border-radius: 50%;
   pointer-events: none;
 }
 .take-time {
@@ -4184,10 +4361,11 @@ a.vs-label:hover {
 }
 .done-h {
   font-family: var(--font-display);
-  font-size: clamp(2rem, 6vw, 2.7rem);
+  font-size: clamp(2.1rem, 6.4vw, 3rem);
   font-weight: 800;
-  line-height: 1.02;
-  letter-spacing: -0.03em;
+  line-height: 0.98;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
 }
 .done-sub {
   max-width: 46ch;
@@ -4276,7 +4454,6 @@ a.vs-label:hover {
   padding: 11px 13px;
   text-align: left;
   border: 1px dashed var(--color-line-strong);
-  border-radius: 12px;
   background: var(--color-paper-sunken);
   cursor: pointer;
   transition:
@@ -4295,7 +4472,6 @@ a.vs-label:hover {
   width: 34px;
   height: 34px;
   padding-left: 2px;
-  border-radius: 50%;
   background: var(--color-ember);
   color: var(--color-paper);
   font-size: 11px;
@@ -4330,7 +4506,6 @@ a.vs-label:hover {
   margin-top: 8px;
   overflow: hidden;
   border: 1px solid var(--color-line);
-  border-radius: 12px;
   background: var(--color-paper-raised);
 }
 .deck-screen {
@@ -4360,7 +4535,6 @@ a.vs-label:hover {
   width: 46px;
   height: 46px;
   padding-left: 2px;
-  border-radius: 50%;
   transform: translate(-50%, -50%);
   background: var(--color-ember);
   color: var(--color-paper);
@@ -4398,7 +4572,6 @@ a.vs-label:hover {
   height: 30px;
   padding-left: 1px;
   border: 1px solid var(--color-ember);
-  border-radius: 50%;
   color: var(--color-ember);
   font-size: 10px;
   transition:
@@ -4434,7 +4607,6 @@ a.vs-label:hover {
   right: 0;
   left: 0;
   height: 4px;
-  border-radius: 3px;
   background: var(--color-line-strong);
   transform: translateY(-50%);
 }
@@ -4443,7 +4615,6 @@ a.vs-label:hover {
   top: 50%;
   left: 0;
   height: 4px;
-  border-radius: 3px;
   background: var(--color-ember);
   transform: translateY(-50%);
   transition: width 0.12s linear;
@@ -4485,7 +4656,6 @@ a.vs-label:hover {
 .coach {
   padding: 13px 15px 14px;
   border: 1px solid var(--color-line);
-  border-radius: 12px;
   background: var(--color-paper-sunken);
 }
 .coach-h {
@@ -4544,7 +4714,6 @@ a.vs-label:hover {
   position: relative;
   padding: 11px 13px 13px;
   border: 1px solid var(--color-line);
-  border-radius: 12px;
   background: var(--color-paper-raised);
   transition: border-color 0.16s ease;
 }

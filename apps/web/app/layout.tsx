@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Bricolage_Grotesque, Geist, Geist_Mono } from "next/font/google";
+import { Archivo, Geist, Geist_Mono } from "next/font/google";
 import { config } from "@/lib/env";
 import {
   SITE_DESCRIPTION,
@@ -8,6 +8,7 @@ import {
   SITE_TAGLINE,
 } from "@/lib/siteMeta";
 import { KeepAlive } from "@/components/KeepAlive";
+import { EXPLAIN_CLASS, EXPLAIN_KEY } from "@/components/explainMode";
 import "./globals.css";
 
 const geist = Geist({
@@ -16,9 +17,16 @@ const geist = Geist({
   display: "swap",
 });
 
-const bricolage = Bricolage_Grotesque({
+/**
+ * The display face. Archivo, not Bricolage: the redesign sets every headline in
+ * heavy uppercase at a tight measure, and Bricolage's wide, friendly caps fight
+ * that — Archivo was drawn for exactly this kind of condensed editorial setting
+ * and holds its colour at 800 weight.
+ */
+const archivo = Archivo({
   subsets: ["latin"],
-  variable: "--font-bricolage",
+  weight: ["600", "700", "800"],
+  variable: "--font-archivo",
   display: "swap",
 });
 
@@ -81,9 +89,9 @@ export const viewport: Viewport = {
   // instead of leaving letterbox bars, with safe-area insets doing the padding.
   viewportFit: "cover",
   // Must equal --color-paper in globals.css, not merely be dark: mobile browsers
-  // paint their chrome with this, and a neutral black against the warm paper
-  // shows as a seam right where `viewportFit: cover` was meant to remove one.
-  themeColor: "#16120e",
+  // paint their chrome with this, and any drift shows as a seam right where
+  // `viewportFit: cover` was meant to remove one.
+  themeColor: "#0e0e0e",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -93,9 +101,26 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       // `color-scheme: dark` so scrollbars, autofill and native controls come up
       // dark too — without it they punch light holes in the room.
       style={{ colorScheme: "dark" }}
-      className={`${geist.variable} ${bricolage.variable} ${geistMono.variable}`}
+      className={`${geist.variable} ${archivo.variable} ${geistMono.variable}`}
     >
-      <body>
+      <body suppressHydrationWarning>
+        {/* Explain mode is a class on <body>, restored before first paint.
+            Deferring it to a React effect would render every plain-English note
+            hidden and then pop the whole set in one frame later, which reads as
+            a bug on the exact screen whose job is to reduce confusion.
+            `suppressHydrationWarning` is on <body> for this: the server cannot
+            know the reader's stored preference, so the class legitimately
+            differs between the HTML and the first client render. */}
+        <script
+          dangerouslySetInnerHTML={{
+            // Interpolated from the shared constants rather than typed out, so
+            // renaming either one can't leave this script quietly reading a key
+            // nothing writes.
+            __html:
+              `try{if(localStorage.getItem(${JSON.stringify(EXPLAIN_KEY)})==="1")` +
+              `document.body.classList.add(${JSON.stringify(EXPLAIN_CLASS)})}catch(e){}`,
+          }}
+        />
         {/* Root layout, so every page pings — including the room, where a cold
             start between answers would land on the report build. */}
         <KeepAlive />

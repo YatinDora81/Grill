@@ -41,7 +41,7 @@ export function DeleteInterviewButton({ sessionId }: { sessionId: string }) {
 
       {open ? (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 px-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-paper/80 px-4 backdrop-blur-sm"
           role="presentation"
           onClick={() => {
             if (!busy) setOpen(false);
@@ -51,10 +51,13 @@ export function DeleteInterviewButton({ sessionId }: { sessionId: string }) {
             role="dialog"
             aria-modal="true"
             aria-labelledby="delete-interview-title"
-            className="w-full max-w-md rounded-2xl border border-line bg-paper p-6 shadow-lg"
+            className="w-full max-w-md border border-line-strong bg-paper-raised p-6"
             onClick={(e) => e.stopPropagation()}
           >
-            <h2 id="delete-interview-title" className="font-display text-2xl tracking-tight">
+            <h2
+              id="delete-interview-title"
+              className="font-display text-[1.5rem] leading-none font-extrabold tracking-[-0.02em] uppercase"
+            >
               Delete this interview?
             </h2>
             <p className="mt-2 text-sm leading-relaxed text-ink-soft">

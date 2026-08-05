@@ -16,8 +16,11 @@ type Speech = ReturnType<typeof useSpeech>;
 export function Interviewer({ speech, question }: { speech: Speech; question: string }) {
   if (!speech.supported) return null;
 
+  // Square, like every other control in the redesign. No border: these sit
+  // beside the question eyebrow, and two outlined boxes up there compete with
+  // the follow-up chip directly below them.
   const btn =
-    "flex size-8 items-center justify-center rounded-full text-room-muted transition-colors hover:bg-room-raised hover:text-room-ink disabled:opacity-40 disabled:hover:bg-transparent";
+    "flex size-8 items-center justify-center text-room-muted transition-colors hover:bg-room-raised hover:text-room-ink disabled:opacity-40 disabled:hover:bg-transparent";
 
   return (
     <div className="flex items-center gap-1">

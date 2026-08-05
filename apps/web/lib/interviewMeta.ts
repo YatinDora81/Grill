@@ -82,7 +82,15 @@ export function perAnswerCapSeconds(numQuestions: number): number | null {
  */
 export interface DifficultyMeta {
   label: string;
-  /** Hex, straight from the room palette. */
+  /**
+   * A CSS colour, read straight into an inline `style` on an element inside the
+   * app shell — so it resolves the same tokens everything else does rather than
+   * re-typing the verdict scale and drifting from it.
+   *
+   * `medium` has no token of its own because the scale has no rung between
+   * `strong` and `mixed`; it is mixed from the two either side rather than
+   * inventing a fifth off-palette colour.
+   */
   color: string;
   /** What the candidate is being measured against at this level. */
   blurb: string;
@@ -93,25 +101,25 @@ export interface DifficultyMeta {
 export const DIFFICULTY_META: Record<Difficulty, DifficultyMeta> = {
   easy: {
     label: "Easy",
-    color: "#4ade80",
+    color: "var(--color-strong)",
     blurb: "Fundamentals and clear explanations. Warm-up pace.",
     pitch: "Keep questions approachable — core concepts, straightforward scenarios, room to think out loud.",
   },
   medium: {
     label: "Medium",
-    color: "#a3e635",
+    color: "color-mix(in srgb, var(--color-strong) 45%, var(--color-mixed))",
     blurb: "You own features end to end and can defend the how.",
     pitch: "Solid working-level depth — real decisions, trade-offs, and concrete examples from practice.",
   },
   hard: {
     label: "Hard",
-    color: "#f6a64e",
+    color: "var(--color-mixed)",
     blurb: "Trade-offs, failure, and the calls you got wrong.",
     pitch: "Push hard on judgement, failure modes, and ambiguity — answers need sharp reasoning, not slogans.",
   },
   extreme: {
     label: "Extreme",
-    color: "#f87171",
+    color: "var(--color-weak)",
     blurb: "Systems, blast radius, and answering for outcomes under pressure.",
     pitch: "Brutal but fair — staff/principal depth, uncomfortable edge cases, and no soft landings.",
   },

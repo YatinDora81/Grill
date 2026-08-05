@@ -101,8 +101,12 @@ export function ProfileForm({ user }: { user: User }) {
     <div className="profile-grid rv" data-io>
       <GrillToaster />
 
-      <section className="card card-hairline" aria-label="Your details">
-        <p className="kicker">Details</p>
+      {/* Plain `.card`, and a muted mono label instead of the ember `.kicker`.
+          `.card-hairline` paints a 2px ember gradient across the top edge, and
+          the redesign spends its one gradient on the resume bar; ember on a
+          form heading would rank "Details" alongside the live-recording dot. */}
+      <section className="card" aria-label="Your details">
+        <p className="font-mono text-[11px] tracking-[0.18em] uppercase text-ink-muted">Details</p>
         <form onSubmit={saveName} className="mform">
           <div>
             <div className="field-row">
@@ -151,8 +155,8 @@ export function ProfileForm({ user }: { user: User }) {
         </form>
       </section>
 
-      <section className="card card-hairline" aria-label="Your password">
-        <p className="kicker">Password</p>
+      <section className="card" aria-label="Your password">
+        <p className="font-mono text-[11px] tracking-[0.18em] uppercase text-ink-muted">Password</p>
         <form onSubmit={savePassword} className="mform">
           <div>
             <div className="field-row">
