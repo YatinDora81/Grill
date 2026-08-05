@@ -20,8 +20,42 @@ model User {
 
   sessions Session[]
   starred  StarredQuestion[]
+  passwordResetTokens PasswordResetToken[]
 
   @@map("users")
+}
+
+/// A live "forgot password" link, as a row.
+///
+/// Only the SHA-256 of the raw token is stored. The raw 32 random bytes exist
+/// exactly once, in the email; a database leak therefore hands over hashes, not
+/// working reset links, and there is nothing here to replay.
+///
+/// Single-use and short-lived: `usedAt` is stamped by an atomic UPDATE (see
+/// repo.consumePasswordResetToken), so two submissions of the same link cannot
+/// both reset the password.
+model PasswordResetToken {
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @map("user_id") @db.Uuid
+
+  /// sha256 hex of the raw token. Unique so a collision is a write error rather
+  /// than two accounts sharing one link, and because lookup is by this column —
+  /// the raw token is never stored and never queried.
+  tokenHash String @unique @map("token_hash") @db.Char(64)
+
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz(6)
+  /// Set the moment the token is spent. Null is the only redeemable state.
+  usedAt    DateTime? @map("used_at") @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  /// Cascade: a deleted account must not leave live reset links behind that
+  /// would resurrect credentials for a user that no longer exists.
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// A successful reset invalidates every other outstanding token for the user,
+  /// which is a sweep over this column.
+  @@index([userId])
+  @@map("password_reset_tokens")
 }
 
 enum SourceType {

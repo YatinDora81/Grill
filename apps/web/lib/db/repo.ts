@@ -731,3 +731,75 @@ export async function listRecentAnswerScores(userId: string, take = 120): Promis
     return [s];
   });
 }
+
+// ── Password reset tokens ─────────────────────────────────────────
+/**
+ * The one group of queries in this file that is NOT user-scoped, and it is not a
+ * mistake: a reset happens before there is any session, so the token IS the
+ * credential being presented. Filtering by userId would mean already knowing who
+ * the caller is, which is precisely what the token is there to establish.
+ *
+ * What replaces HARD RULE #11 here: only the sha256 of the raw token is ever
+ * stored or looked up, tokens expire, and they are single-use.
+ */
+
+/** Stores the digest only — the caller keeps the raw token for the email. */
+export function createPasswordResetToken(input: {
+  userId: string;
+  tokenHash: string;
+  expiresAt: Date;
+}): Promise<{ id: string }> {
+  return prisma.passwordResetToken.create({
+    data: input,
+    select: { id: true },
+  });
+}
+
+/**
+ * Look up a reset token by its digest.
+ *
+ * Never by the raw token: nothing raw is in the table, so there is nothing to
+ * match against — and that is the property a database leak relies on.
+ *
+ * Expiry and used-ness are returned rather than filtered so the caller decides;
+ * every rejection reason ends in the same generic error either way.
+ */
+export function findPasswordResetToken(
+  tokenHash: string,
+): Promise<{ id: string; userId: string; expiresAt: Date; usedAt: Date | null } | null> {
+  return prisma.passwordResetToken.findUnique({
+    where: { tokenHash },
+    select: { id: true, userId: true, expiresAt: true, usedAt: true },
+  });
+}
+
+/**
+ * Atomically marks the token used. Returns false if another caller already did.
+ *
+ * `updateMany` compiles to a single `UPDATE ... WHERE id = ? AND used_at IS NULL`,
+ * which Postgres executes atomically: concurrent callers serialise on the row and
+ * only one gets count === 1. A read-then-write is the bug this function exists to
+ * prevent — two submissions of the same link (a double click, or an email
+ * scanner following it first) would both see `usedAt: null`, both pass, and the
+ * "single use" guarantee would be decoration.
+ */
+export async function consumePasswordResetToken(id: string): Promise<boolean> {
+  const { count } = await prisma.passwordResetToken.updateMany({
+    where: { id, usedAt: null },
+    data: { usedAt: new Date() },
+  });
+  return count === 1;
+}
+
+/**
+ * Belt-and-braces after a successful reset: kills every other outstanding token.
+ *
+ * Someone who asked for three links and used the newest must not be left with two
+ * that still work — most reset abuse starts with an old link found in a mailbox.
+ */
+export async function invalidateUserResetTokens(userId: string): Promise<void> {
+  await prisma.passwordResetToken.updateMany({
+    where: { userId, usedAt: null },
+    data: { usedAt: new Date() },
+  });
+}

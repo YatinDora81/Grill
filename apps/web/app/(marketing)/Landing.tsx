@@ -191,7 +191,7 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
     const n = params.get("next");
     if (n && isInternalPath(n)) nextRef.current = n;
     const m = params.get("auth");
-    if (m === "login" || m === "signup") setAuth(m);
+    if (m === "login" || m === "signup" || m === "forgot") setAuth(m);
   }, [signedIn]);
 
   // Reveal-on-scroll. Unobserved once it fires: this is choreography, not state,

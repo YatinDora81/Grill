@@ -14,6 +14,20 @@ export const loginSchema = z.object({
   password: z.string().min(1).max(200),
 });
 
+export const forgotPasswordSchema = z.object({
+  email: z.string().trim().toLowerCase().email().max(200),
+});
+
+export const resetPasswordSchema = z.object({
+  // 32 random bytes, base64url — the shape passwordResetService mints. Bounded
+  // by alphabet and length so a truncated link, or a probe carrying a quote or
+  // a path segment, is refused here instead of being hashed and looked up. The
+  // range rather than an exact 43 leaves room to lengthen the token later
+  // without stranding the links already sitting in inboxes.
+  token: z.string().trim().min(32).max(200).regex(/^[A-Za-z0-9_-]+$/),
+  password: z.string().min(config.auth.passwordMinLength).max(200),
+});
+
 export const updateProfileSchema = z.object({
   name: z.string().trim().min(1).max(80).nullable(),
 });

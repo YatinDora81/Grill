@@ -65,6 +65,16 @@ if (!process.env.GITHUB_TOKEN) {
     "[env] GITHUB_TOKEN is empty — GitHub repo imports will use the anonymous 60 req/hour limit.",
   );
 }
+if (!process.env.SMTP_EMAIL || !process.env.SMTP_PASSWORD) {
+  // Soft-optional, like Groq and GitHub — booting without mail is how local dev
+  // works. Worth warning loudly anyway: /api/auth/forgot-password answers 200
+  // whether or not it managed to send (it must, or the response leaks which
+  // addresses are registered), so an unconfigured production deployment has a
+  // password reset flow that looks perfectly healthy and delivers nothing.
+  console.warn(
+    "[env] SMTP_EMAIL/SMTP_PASSWORD are empty — password reset emails will not be sent.",
+  );
+}
 
 export const config = {
   gemini: {
@@ -89,6 +99,24 @@ export const config = {
     cookieName: process.env.AUTH_COOKIE_NAME || "grill_session",
     cookieMaxAgeS: num("AUTH_COOKIE_MAXAGE_S", 1_209_600),
     passwordMinLength: num("PASSWORD_MIN_LENGTH", 8),
+  },
+  mail: {
+    /** The Gmail account reset mail is sent from; also the From address. */
+    user: process.env.SMTP_EMAIL || "",
+    /**
+     * MUST be a Google App Password (myaccount.google.com/apppasswords), not the
+     * account password — Google rejects the account password over SMTP outright,
+     * and an App Password can be revoked on its own without touching the account.
+     */
+    password: process.env.SMTP_PASSWORD || "",
+    senderName: process.env.SENDER_NAME || "Grill",
+    /**
+     * How long a reset link stays valid. An hour survives a slow mail queue and
+     * a user who reads the mail on their phone and finishes on a laptop, while
+     * still being short enough that a link left sitting in an inbox is usually
+     * dead by the time anyone else reads it.
+     */
+    resetTokenTtlMinutes: num("PASSWORD_RESET_TTL_MINUTES", 60),
   },
   cron: {
     // Vercel signs cron invocations with this as a bearer token. Soft-optional
@@ -160,6 +188,10 @@ export const config = {
         this.storage.accessKeyId &&
         this.storage.secretAccessKey,
     );
+  },
+  /** Both halves or nothing: an account with no password can't authenticate. */
+  get mailConfigured(): boolean {
+    return Boolean(this.mail.user && this.mail.password);
   },
   get databaseConfigured(): boolean {
     return Boolean(process.env.DATABASE_URL);
