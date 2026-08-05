@@ -13,9 +13,11 @@ import {
  * siteMeta.ts feeds the <title>, the meta description and this image, and a
  * static asset would be the one copy nobody remembers to re-export.
  *
- * Deliberately no webfont: Bricolage would have to be fetched over the network
- * at build time, and a flaky font CDN failing the whole build is a worse trade
- * than a card set in the default sans. Colours are globals.css verbatim.
+ * Deliberately no webfont: Archivo would have to be fetched over the network at
+ * build time, and a flaky font CDN failing the whole build is a worse trade than
+ * a card set in the default sans. Colours are globals.css verbatim: satori
+ * cannot read CSS variables, so the tokens have to be re-typed here. Keep them
+ * in step with the @theme block by hand.
  */
 
 // Both re-exported from siteMeta so the dimensions a page declares in
@@ -24,10 +26,10 @@ export const alt = OG_IMAGE_ALT;
 export const size = OG_IMAGE_SIZE;
 export const contentType = "image/png";
 
-const PAPER = "#16120e";
-const INK = "#f3ecde";
-const INK_SOFT = "#b6ac99";
-const EMBER = "#f2642f";
+const PAPER = "#0e0e0e";
+const INK = "#e9e6df";
+const INK_SOFT = "#9b978e";
+const EMBER = "#ff4633";
 
 export default async function OpengraphImage() {
   return new ImageResponse(
@@ -43,7 +45,7 @@ export default async function OpengraphImage() {
           padding: "0 90px",
           // The ember bloom the room uses, flattened to a radial so satori can
           // render it — it has no blur filter.
-          backgroundImage: `radial-gradient(circle at 12% 108%, rgba(242,100,47,0.30) 0%, rgba(242,100,47,0) 55%)`,
+          backgroundImage: `radial-gradient(circle at 12% 108%, rgba(255,70,51,0.28) 0%, rgba(255,70,51,0) 55%)`,
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
@@ -51,7 +53,6 @@ export default async function OpengraphImage() {
             style={{
               width: 18,
               height: 18,
-              borderRadius: 999,
               backgroundColor: EMBER,
             }}
           />
@@ -70,11 +71,12 @@ export default async function OpengraphImage() {
         <div
           style={{
             marginTop: 40,
-            fontSize: 78,
-            lineHeight: 1.05,
-            letterSpacing: "-0.035em",
+            fontSize: 74,
+            lineHeight: 1,
+            letterSpacing: "-0.03em",
+            textTransform: "uppercase",
             color: INK,
-            fontWeight: 600,
+            fontWeight: 800,
             maxWidth: 940,
           }}
         >
@@ -98,7 +100,6 @@ export default async function OpengraphImage() {
             marginTop: 56,
             width: 132,
             height: 6,
-            borderRadius: 999,
             backgroundColor: EMBER,
           }}
         />
