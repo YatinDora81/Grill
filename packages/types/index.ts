@@ -313,6 +313,24 @@ export interface DashboardStats {
   best_score: number | null;
   last_score: number | null;
   trend: number[];
+  /** Oldest scored report — the other end of "you climbed from here to here". */
+  first_score: number | null;
+  /** Reports scored in the last seven days. */
+  sessions_this_week: number;
+  /**
+   * Filler words per answered question in the newest scored session.
+   * Null when that report's delivery_metrics is missing or malformed, or when
+   * the session has no answered turns to divide by — an em dash beats a guess.
+   */
+  fillers_per_answer: number | null;
+  /** The same figure for the oldest scored session, so the number can say which way it moved. */
+  fillers_per_answer_first: number | null;
+  /**
+   * One sentence naming the weakest rubric dimension across recent answers.
+   * Null until there are enough scored sessions to call it a pattern rather
+   * than a bad day.
+   */
+  top_pattern: string | null;
 }
 
 export interface RecentSession {

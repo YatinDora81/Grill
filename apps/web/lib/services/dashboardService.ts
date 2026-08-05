@@ -1,14 +1,79 @@
 import "server-only";
-import type { DashboardData, RecentSession } from "@repo/types";
+import type { AnswerScores, DashboardData, DeliveryMetrics, RecentSession } from "@repo/types";
 import { notFound } from "@/lib/errors";
 import * as repo from "@/lib/db/repo";
 import { toUserDTO } from "@/lib/auth";
+
+const WEEK_MS = 7 * 864e5;
+
+/** The rubric, in the order `AnswerScores` declares it. */
+const DIMENSIONS = ["relevance", "correctness", "structure", "depth", "filler"] as const;
+type Dimension = (typeof DIMENSIONS)[number];
+
+/**
+ * One honest sentence per rubric dimension — the dashboard's readout.
+ *
+ * Deliberately not an LLM call. The dashboard is force-dynamic and this runs on
+ * every page view, and the project runs on free-tier quota; a template naming a
+ * dimension we genuinely measured beats a generated sentence we can't afford.
+ *
+ * `filler` runs the same direction as every other dimension — 10 is crisp, 1 is
+ * rambling — so it lands here for the same reason the others do: it is the
+ * LOWEST average. It needs no inversion; flipping it would name the wrong habit.
+ */
+const PATTERN: Record<Dimension, string> = {
+  relevance:
+    "The thing costing you the most is relevance — you answer a near-miss of the question rather than the question itself.",
+  correctness:
+    "The thing costing you the most is correctness — the substance is where you lose points, not the delivery.",
+  structure:
+    "The thing costing you the most is structure — your answers arrive as one long block instead of a shape an interviewer can follow.",
+  depth:
+    "The thing costing you the most is depth — you stop at the headline and leave the specifics that would prove it on the table.",
+  filler:
+    "The thing costing you the most is filler — the point is in there, but the ums and likes are burying it.",
+};
+
+/**
+ * Below this there is no pattern, only a bad day. A weakness that shows up once
+ * might be the question; one that shows up across sessions is the candidate.
+ */
+const PATTERN_MIN_SESSIONS = 3;
+
+/** The lowest-scoring rubric dimension across recent answers, as a sentence. */
+function derivePattern(scores: AnswerScores[], sessionCount: number): string | null {
+  if (sessionCount < PATTERN_MIN_SESSIONS || scores.length === 0) return null;
+
+  let worst: Dimension | null = null;
+  let worstMean = Infinity;
+  for (const d of DIMENSIONS) {
+    const mean = scores.reduce((sum, s) => sum + s[d], 0) / scores.length;
+    if (mean < worstMean) {
+      worstMean = mean;
+      worst = d;
+    }
+  }
+  return worst === null ? null : PATTERN[worst];
+}
+
+/**
+ * `filler_count` off a report's delivery_metrics.
+ *
+ * JSON column: nothing about its shape is guaranteed here, and a report written
+ * before the field existed is a real case. Returning null makes the caller show
+ * an em dash instead of inventing a figure.
+ */
+function fillerCount(raw: unknown): number | null {
+  if (!raw || typeof raw !== "object") return null;
+  const n = (raw as Partial<DeliveryMetrics>).filler_count;
+  return typeof n === "number" && Number.isFinite(n) ? n : null;
+}
 
 /** Assemble the user's dashboard data (all queries scoped to userId). */
 export async function getDashboardData(userId: string): Promise<DashboardData> {
   const [user, reports, sessions] = await Promise.all([
     repo.getUserById(userId),
-    repo.listUserReports(userId),
+    repo.listUserReportsWithDelivery(userId),
     repo.listUserSessions(userId, 10),
   ]);
   if (!user) throw notFound("User not found.", "unknown_user");
@@ -17,6 +82,41 @@ export async function getDashboardData(userId: string): Promise<DashboardData> {
   const avg = scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null;
   const best = scores.length ? Math.max(...scores) : null;
   const last = scores.length ? scores[scores.length - 1]! : null;
+  const first = scores.length ? scores[0]! : null;
+
+  // Reports are ordered by SESSION date ascending (see the repo function), and
+  // these are real Date objects from Prisma — comparing them numerically is safe
+  // in a way parsing a date *string* would not be. The session's date is the
+  // right one here too: "in the last 7 days" has to mean interviews the user
+  // actually sat that week, not builds that happened to finish in it.
+  const weekAgo = Date.now() - WEEK_MS;
+  const sessionsThisWeek = reports.filter((r) => r.session.createdAt.getTime() >= weekAgo).length;
+
+  const newest = reports[reports.length - 1] ?? null;
+  const oldest = reports[0] ?? null;
+
+  // Exactly two sessions get a turn count — the newest and the oldest — which is
+  // all the "now vs. when you started" number needs. Deduped so a user with one
+  // report pays for one count, not two.
+  const countable = [...new Set([newest?.sessionId, oldest?.sessionId].filter(Boolean))] as string[];
+  const [counts, rubric] = await Promise.all([
+    Promise.all(countable.map((id) => repo.countAnsweredTurns(userId, id))),
+    // Skipped entirely below the threshold: the sentence would be suppressed
+    // anyway, so a new user never pays for this read.
+    reports.length >= PATTERN_MIN_SESSIONS
+      ? repo.listRecentAnswerScores(userId)
+      : Promise.resolve([] as AnswerScores[]),
+  ]);
+  const answered = new Map(countable.map((id, i) => [id, counts[i]!]));
+
+  /** Session-total fillers ÷ answers given. Null unless both halves are real. */
+  const perAnswer = (report: (typeof reports)[number] | null): number | null => {
+    if (!report) return null;
+    const fillers = fillerCount(report.deliveryMetrics);
+    const turns = answered.get(report.sessionId) ?? 0;
+    if (fillers === null || turns === 0) return null;
+    return Math.round((fillers / turns) * 10) / 10;
+  };
 
   const recent: RecentSession[] = sessions.map((s) => ({
     session_id: s.id,
@@ -35,6 +135,11 @@ export async function getDashboardData(userId: string): Promise<DashboardData> {
       best_score: best,
       last_score: last,
       trend: scores.slice(-12),
+      first_score: first,
+      sessions_this_week: sessionsThisWeek,
+      fillers_per_answer: perAnswer(newest),
+      fillers_per_answer_first: perAnswer(oldest),
+      top_pattern: derivePattern(rubric, reports.length),
     },
     recent,
   };

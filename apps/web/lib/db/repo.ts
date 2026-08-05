@@ -644,10 +644,90 @@ export function listUserSessions(userId: string, take = 10) {
   });
 }
 
+/** Scores and dates, oldest first — what a page needs to say "how you're doing". */
 export function listUserReports(userId: string) {
   return prisma.report.findMany({
     where: { session: { userId, ...aliveSession } },
     orderBy: { createdAt: "asc" },
     select: { overallScore: true, createdAt: true },
+  });
+}
+
+/**
+ * The same list plus what the dashboard's per-answer filler figure reads.
+ *
+ * Its own function rather than a wider `listUserReports`: delivery_metrics is a
+ * whole JSON blob per report, and /profile reads nothing but the score — it
+ * would be paying to transfer every session's metrics to render an average.
+ *
+ * Ordered by SESSION date, not report date. Report building is an async queue
+ * with leases and retries, so a session sat on Monday whose first build failed
+ * and was swept up on Wednesday gets a report row created after Tuesday's
+ * session. Everything the dashboard says directionally reads this order —
+ * "climbed from X to Y", "since your first session", the sparkline, and the
+ * last-7-days count — so ordering by build time would tell a user they improved
+ * backwards. `Session.createdAt` is also the only date the UI ever shows against
+ * a session, so this keeps the prose and the list agreeing.
+ */
+export function listUserReportsWithDelivery(userId: string) {
+  return prisma.report.findMany({
+    where: { session: { userId, ...aliveSession } },
+    orderBy: { session: { createdAt: "asc" } },
+    select: {
+      overallScore: true,
+      sessionId: true,
+      deliveryMetrics: true,
+      session: { select: { createdAt: true } },
+    },
+  });
+}
+
+/**
+ * How many turns in this session were actually answered — the denominator for
+ * anything the report states as a session total.
+ *
+ * Filtered through the session rather than by `sessionId` alone so a stray id
+ * can never count someone else's interview, or a soft-deleted one.
+ */
+export function countAnsweredTurns(userId: string, sessionId: string) {
+  return prisma.turn.count({
+    where: {
+      sessionId,
+      transcript: { not: null },
+      // An empty transcript is not an answer. deliveryService counts fillers
+      // only for turns with text, so counting the empty ones here would inflate
+      // the denominator alone and report fewer fillers per answer than there were.
+      NOT: { transcript: "" },
+      session: { userId, ...aliveSession },
+    },
+  });
+}
+
+/** The five rubric keys, so a half-written score can be rejected as a whole. */
+const RUBRIC_KEYS = ["relevance", "correctness", "structure", "depth", "filler"] as const;
+
+/**
+ * The rubric off this user's recent answered turns and nothing else.
+ *
+ * Same read as `listWeakTurns` without the transcript or the question: the
+ * dashboard only averages the five numbers, and the dashboard is force-dynamic,
+ * so it re-runs this on every view.
+ */
+export async function listRecentAnswerScores(userId: string, take = 120): Promise<AnswerScores[]> {
+  const turns = await prisma.turn.findMany({
+    where: { session: { userId, ...aliveSession }, transcript: { not: null } },
+    orderBy: { createdAt: "desc" },
+    take,
+    select: { answerScores: true },
+  });
+
+  // answer_scores is an opaque JSON column, so nothing about its shape is
+  // guaranteed at this boundary — an unscored or half-written turn drops out
+  // rather than poisoning the average with NaN. Every key is checked, not just
+  // the first: the caller averages all five independently.
+  return turns.flatMap((t) => {
+    const s = t.answerScores as unknown as AnswerScores | null;
+    if (!s || RUBRIC_KEYS.some((k) => typeof s[k] !== "number")) return [];
+    return [s];
   });
 }
