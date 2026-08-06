@@ -136,6 +136,11 @@ export function AuthModal({
         if (!list.length) return;
         const first = list[0]!;
         const last = list[list.length - 1]!;
+        if (!dialogRef.current.contains(document.activeElement)) {
+          e.preventDefault();
+          (e.shiftKey ? last : first).focus();
+          return;
+        }
         if (e.shiftKey && document.activeElement === first) {
           e.preventDefault();
           last.focus();
@@ -219,6 +224,7 @@ export function AuthModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="auth-title"
+        tabIndex={-1}
         ref={dialogRef}
       >
         <div className="modal-top">
