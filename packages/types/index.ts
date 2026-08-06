@@ -309,13 +309,11 @@ export interface User {
 // ── Dashboard ─────────────────────────────────────────────────────
 export interface DashboardStats {
   completed: number;
-  avg_score: number | null;
-  best_score: number | null;
   last_score: number | null;
   trend: number[];
   /** Oldest scored report — the other end of "you climbed from here to here". */
   first_score: number | null;
-  /** Reports scored in the last seven days. */
+  /** Sessions SAT in the last seven days that have since been scored. */
   sessions_this_week: number;
   /**
    * Filler words per answered question in the newest scored session.
@@ -341,6 +339,7 @@ export interface RecentSession {
   role: string | null;
   score: number | null;
   status: SessionStatus;
+  progress: { answered: number; total: number | null; last_activity: string } | null;
 }
 
 export interface DashboardData {

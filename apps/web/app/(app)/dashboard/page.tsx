@@ -197,6 +197,27 @@ function fmtDay(iso: string): string {
   return `${month} ${Number(iso.slice(8, 10))}`;
 }
 
+const MINUTE_MS = 60_000;
+const HOUR_MS = 36e5;
+const DAY_MS = 864e5;
+
+/**
+ * How long ago, in words. A calendar date is the right register for a finished
+ * interview and the wrong one for a session someone walked out of an hour ago.
+ */
+function fmtAgo(iso: string): string {
+  const ms = Date.now() - Date.parse(iso);
+  if (!Number.isFinite(ms)) return "";
+  if (ms < MINUTE_MS) return "moments ago";
+  const [n, unit]: [number, string] =
+    ms < HOUR_MS
+      ? [Math.floor(ms / MINUTE_MS), "minute"]
+      : ms < DAY_MS
+        ? [Math.floor(ms / HOUR_MS), "hour"]
+        : [Math.floor(ms / DAY_MS), "day"];
+  return `${n} ${unit}${n === 1 ? "" : "s"} ago`;
+}
+
 /**
  * What to call a session in a list.
  *
@@ -216,9 +237,15 @@ function sessionTitle(s: RecentSession): string {
  * with a 140px hit target in the corner is a worse target than the strip.
  */
 function ResumeBar({ session: s }: { session: RecentSession }) {
+  const p = s.progress;
   const detail = [
     s.name?.trim() && s.role?.trim() ? s.role.trim() : null,
-    `started ${fmtDay(s.date)}`,
+    p === null
+      ? null
+      : p.total === null
+        ? `${p.answered} answered`
+        : `${p.answered} of ${p.total} answered`,
+    p === null ? `started ${fmtDay(s.date)}` : fmtAgo(p.last_activity),
     "not scored until you finish",
   ]
     .filter(Boolean)
@@ -309,7 +336,7 @@ function Kpis({ stats }: { stats: DashboardStats }) {
             ) : (
               <>
                 <span className={cx(KPI_DELTA, climb > 0 ? "text-strong" : "text-weak")}>
-                  {climb > 0 ? "▲" : "▼"} {Math.abs(climb)} points
+                  {climb > 0 ? "▲ up" : "▼ down"} {Math.abs(climb)} points
                 </span>{" "}
                 since your first session.
               </>

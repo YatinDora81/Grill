@@ -249,7 +249,7 @@ export function SelfView({
       /* corrupt entry — fall through to the defaults */
     }
     setMinimised(storedMinimised);
-    setBox(fit(bottomRight(w, storedMinimised), storedMinimised));
+    setBox(fitGrown(bottomRight(w, storedMinimised), storedMinimised));
   }, []);
 
   useEffect(() => {
@@ -303,7 +303,7 @@ export function SelfView({
   useEffect(() => attach(), [attach]);
 
   const drag = useRef<{ dx: number; dy: number } | null>(null);
-  const resize = useRef<{ x0: number; w0: number } | null>(null);
+  const resize = useRef<{ x0: number; w0: number; right0: number } | null>(null);
 
   const onPointerDown = useCallback(
     (e: React.PointerEvent) => {
@@ -311,7 +311,7 @@ export function SelfView({
       const el = e.currentTarget as HTMLElement;
       el.setPointerCapture(e.pointerId);
       if ((e.target as HTMLElement).dataset.handle === "resize") {
-        resize.current = { x0: e.clientX, w0: box.w };
+        resize.current = { x0: e.clientX, w0: box.w, right0: box.x + box.w };
       } else {
         drag.current = { dx: e.clientX - box.x, dy: e.clientY - box.y };
       }
@@ -325,10 +325,16 @@ export function SelfView({
         const { dx, dy } = drag.current;
         setBox((b) => (b ? fit({ ...b, x: e.clientX - dx, y: e.clientY - dy }, minimised) : b));
       } else if (resize.current) {
-        // Drag left to grow: the box lives in the bottom-right by default, so
-        // pulling away from the corner reading as "bigger" is what people expect.
-        const { x0, w0 } = resize.current;
-        setBox((b) => (b ? fitGrown({ ...b, w: w0 + (x0 - e.clientX) }, minimised) : b));
+        // Drag left to grow: the grip owns the bottom-left corner, so pulling
+        // away from it reading as "bigger" is what people expect. The edge
+        // opposite the grip is anchored to where it was on pointer-down, so the
+        // grip tracks the pointer from wherever the box has been parked.
+        const { x0, w0, right0 } = resize.current;
+        setBox((b) => {
+          if (!b) return b;
+          const sized = fit({ ...b, w: w0 + (x0 - e.clientX) }, minimised);
+          return fitGrown({ ...sized, x: right0 - sized.w }, minimised);
+        });
       }
     },
     [minimised],

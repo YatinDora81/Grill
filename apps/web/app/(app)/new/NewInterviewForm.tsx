@@ -336,10 +336,10 @@ export function NewInterviewForm() {
   function goNext() {
     // Same suppression as `ownBlock`, and it has to be here too: without it Next
     // becomes clickable and then routes the user back to the step they're already
-    // on, which renders as a dead button that only produces an error.
+    // on, which renders as a dead button.
     const blocked = checks.find((c) => c.failed && c.step <= step && !deferred(c));
     if (blocked) {
-      setError(blocked.message);
+      if (blocked.step !== step) setError(blocked.message);
       moveToStep(blocked.step);
       return;
     }
@@ -436,7 +436,7 @@ export function NewInterviewForm() {
     // strings — routing to the step that owns whichever field failed.
     const blocked = checks.find((c) => c.failed);
     if (blocked) {
-      setError(blocked.message);
+      if (blocked.step !== step) setError(blocked.message);
       moveToStep(blocked.step);
       return;
     }
@@ -851,13 +851,13 @@ export function NewInterviewForm() {
 
             <div className="mt-9">
               <div className="field-row">
-                <span className="label">What it draws on</span>
+                <span id="wiz-draws-on" className="label">What it draws on</span>
                 <span className="hint">mix as many as you want</span>
               </div>
               <p className="mb-3 text-[12.5px] leading-relaxed text-ink-muted">
                 These combine into one conversation — ticking two doesn&rsquo;t mean two interviews.
               </p>
-              <div className={PICKS}>
+              <div className={PICKS} role="group" aria-labelledby="wiz-draws-on">
                 {SOURCES.map((s) => (
                   <Pick
                     key={s}
@@ -876,7 +876,7 @@ export function NewInterviewForm() {
                 These bring their own shape, so they run on their own — picking one clears the mix
                 above, and clicking it again gives the mix back.
               </p>
-              <div className={PICKS}>
+              <div className={PICKS} role="radiogroup" aria-label="Interview mode">
                 {MODES.map((m) => (
                   <Pick
                     key={m}

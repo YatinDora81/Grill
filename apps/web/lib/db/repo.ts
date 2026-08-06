@@ -640,7 +640,14 @@ export function listUserSessions(userId: string, take = 10) {
     where: { userId, ...aliveSession },
     orderBy: { createdAt: "desc" },
     take,
-    include: { report: { select: { overallScore: true } } },
+    select: {
+      id: true,
+      createdAt: true,
+      name: true,
+      role: true,
+      status: true,
+      report: { select: { overallScore: true } },
+    },
   });
 }
 
@@ -682,6 +689,11 @@ export function listUserReportsWithDelivery(userId: string) {
   });
 }
 
+// An empty transcript is not an answer. deliveryService counts fillers
+// only for turns with text, so counting the empty ones here would inflate
+// the denominator alone and report fewer fillers per answer than there were.
+const answeredTurn = { transcript: { not: null }, NOT: { transcript: "" } };
+
 /**
  * How many turns in this session were actually answered — the denominator for
  * anything the report states as a session total.
@@ -693,12 +705,21 @@ export function countAnsweredTurns(userId: string, sessionId: string) {
   return prisma.turn.count({
     where: {
       sessionId,
-      transcript: { not: null },
-      // An empty transcript is not an answer. deliveryService counts fillers
-      // only for turns with text, so counting the empty ones here would inflate
-      // the denominator alone and report fewer fillers per answer than there were.
-      NOT: { transcript: "" },
+      ...answeredTurn,
       session: { userId, ...aliveSession },
+    },
+  });
+}
+
+/** Where an unfinished interview was left: its config, its answered turns, and
+ *  the newest turn's timestamp. */
+export function getSessionProgress(userId: string, sessionId: string) {
+  return prisma.session.findFirst({
+    where: { id: sessionId, userId, ...aliveSession },
+    select: {
+      config: true,
+      _count: { select: { turns: { where: answeredTurn } } },
+      turns: { orderBy: { createdAt: "desc" }, take: 1, select: { createdAt: true } },
     },
   });
 }

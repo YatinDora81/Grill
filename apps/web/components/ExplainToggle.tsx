@@ -3,10 +3,6 @@
 import { useEffect, useState } from "react";
 import { EXPLAIN_CLASS, EXPLAIN_EVENT, EXPLAIN_KEY } from "./explainMode";
 
-// Re-exported so existing importers keep working; the definitions live next door
-// because the root layout needs them too and is a server component.
-export { EXPLAIN_CLASS, EXPLAIN_EVENT, EXPLAIN_KEY };
-
 /**
  * The one control that flips explain mode for the whole app.
  *
@@ -18,16 +14,13 @@ export { EXPLAIN_CLASS, EXPLAIN_EVENT, EXPLAIN_KEY };
  * `aria-pressed` rather than a checkbox: this is a toggle button that changes
  * the page you are already on, not a form field that will be submitted.
  */
-
-
-
-
 export function ExplainToggle({ className }: { className?: string }) {
   /**
-   * Starts false and is corrected in the mount effect rather than read during
-   * render. Reading localStorage while rendering would disagree with the server's
-   * HTML for anyone who had it on, which is a hydration error — the class on
-   * <body> is already correct by then, so this only syncs the button's own label.
+   * Drives `aria-pressed` and nothing else. Starts false and is corrected in the
+   * mount effect rather than read during render, because reading localStorage
+   * while rendering would disagree with the server's HTML for anyone who had it
+   * on. Everything visible is keyed off the same `explain:` variant the notes
+   * use, so the switch is already in the right position at first paint.
    */
   const [on, setOn] = useState(false);
 
@@ -66,26 +59,16 @@ export function ExplainToggle({ className }: { className?: string }) {
          cascade is decided by stylesheet order, and Tailwind emits `.w-auto`
          BEFORE `.w-full`. Every caller states its own width instead, so nothing
          is ever overridden and the emitted order stops mattering. */
-      className={`flex items-center gap-2.5 border px-3 py-2.5 text-left font-mono text-[0.6rem] tracking-[0.14em] uppercase transition-colors ${
-        on
-          ? "border-ember/45 text-ink"
-          : "border-line text-ink-muted hover:border-line-strong hover:text-ink"
-      } ${className ?? ""}`}
+      className={`flex items-center gap-2.5 border border-line px-3 py-2.5 text-left font-mono text-[0.6rem] tracking-[0.14em] text-ink-muted uppercase transition-colors hover:border-line-strong hover:text-ink explain:border-ember/45 explain:text-ink ${className ?? ""}`}
     >
       {/* Square track, square knob. A pill switch was the one rounded thing left
           in a rail where nothing else has a corner, and it read as borrowed from
           another product. */}
       <span
-        className={`relative h-3.5 w-6.5 flex-none border ${
-          on ? "border-ember" : "border-line-strong"
-        }`}
+        className="relative h-3.5 w-6.5 flex-none border border-line-strong explain:border-ember"
         aria-hidden="true"
       >
-        <span
-          className={`absolute top-0.5 left-0.5 size-2 transition-transform ${
-            on ? "translate-x-3 bg-ember" : "bg-ink-muted"
-          }`}
-        />
+        <span className="absolute top-0.5 left-0.5 size-2 bg-ink-muted transition-transform explain:translate-x-3 explain:bg-ember" />
       </span>
       Explain mode
     </button>

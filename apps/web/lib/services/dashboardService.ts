@@ -1,5 +1,11 @@
 import "server-only";
-import type { AnswerScores, DashboardData, DeliveryMetrics, RecentSession } from "@repo/types";
+import type {
+  AnswerScores,
+  DashboardData,
+  DeliveryMetrics,
+  InterviewConfig,
+  RecentSession,
+} from "@repo/types";
 import { notFound } from "@/lib/errors";
 import * as repo from "@/lib/db/repo";
 import { toUserDTO } from "@/lib/auth";
@@ -69,6 +75,14 @@ function fillerCount(raw: unknown): number | null {
   return typeof n === "number" && Number.isFinite(n) ? n : null;
 }
 
+/** `num_questions` off a session's stored config. Null, never a guess, when the
+ *  JSON doesn't carry one. */
+function plannedQuestions(raw: unknown): number | null {
+  if (!raw || typeof raw !== "object") return null;
+  const n = (raw as Partial<InterviewConfig>).num_questions;
+  return typeof n === "number" && Number.isInteger(n) && n > 0 ? n : null;
+}
+
 /** Assemble the user's dashboard data (all queries scoped to userId). */
 export async function getDashboardData(userId: string): Promise<DashboardData> {
   const [user, reports, sessions] = await Promise.all([
@@ -79,8 +93,6 @@ export async function getDashboardData(userId: string): Promise<DashboardData> {
   if (!user) throw notFound("User not found.", "unknown_user");
 
   const scores = reports.map((r) => r.overallScore);
-  const avg = scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null;
-  const best = scores.length ? Math.max(...scores) : null;
   const last = scores.length ? scores[scores.length - 1]! : null;
   const first = scores.length ? scores[0]! : null;
 
@@ -99,13 +111,17 @@ export async function getDashboardData(userId: string): Promise<DashboardData> {
   // all the "now vs. when you started" number needs. Deduped so a user with one
   // report pays for one count, not two.
   const countable = [...new Set([newest?.sessionId, oldest?.sessionId].filter(Boolean))] as string[];
-  const [counts, rubric] = await Promise.all([
+
+  const unfinished = sessions.find((s) => s.status === "in_progress") ?? null;
+
+  const [counts, rubric, progress] = await Promise.all([
     Promise.all(countable.map((id) => repo.countAnsweredTurns(userId, id))),
     // Skipped entirely below the threshold: the sentence would be suppressed
     // anyway, so a new user never pays for this read.
     reports.length >= PATTERN_MIN_SESSIONS
       ? repo.listRecentAnswerScores(userId)
       : Promise.resolve([] as AnswerScores[]),
+    unfinished ? repo.getSessionProgress(userId, unfinished.id) : Promise.resolve(null),
   ]);
   const answered = new Map(countable.map((id, i) => [id, counts[i]!]));
 
@@ -125,16 +141,22 @@ export async function getDashboardData(userId: string): Promise<DashboardData> {
     role: s.role,
     score: s.report?.overallScore ?? null,
     status: s.status,
+    progress:
+      progress && s.id === unfinished?.id
+        ? {
+            answered: progress._count.turns,
+            total: plannedQuestions(progress.config),
+            last_activity: (progress.turns[0]?.createdAt ?? s.createdAt).toISOString(),
+          }
+        : null,
   }));
 
   return {
     user: toUserDTO(user),
     stats: {
       completed: reports.length,
-      avg_score: avg,
-      best_score: best,
       last_score: last,
-      trend: scores.slice(-12),
+      trend: scores,
       first_score: first,
       sessions_this_week: sessionsThisWeek,
       fillers_per_answer: perAnswer(newest),
