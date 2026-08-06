@@ -65,7 +65,7 @@ export function ScoreBand({ score, className }: { score: number; className?: str
       </div>
       {/* Same tracks as the strip above, so each label sits under its own band. */}
       <div
-        className="mt-1.5 grid text-center font-mono text-[0.53rem] tracking-[0.12em] text-ink-muted uppercase"
+        className="mt-1.5 grid text-center font-mono text-[0.53rem] tracking-[0.07em] whitespace-nowrap text-ink-muted uppercase"
         style={{ gridTemplateColumns: TRACKS }}
         aria-hidden="true"
       >

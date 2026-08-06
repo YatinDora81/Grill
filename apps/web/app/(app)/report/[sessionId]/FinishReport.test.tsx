@@ -56,7 +56,7 @@ const FAILED_BUILD: StatusBody = {
 };
 const STILL_BUILDING: StatusBody = {
   session_id: "s1",
-  status: "scoring",
+  status: "generating_report",
   ready: false,
   error_reason: null,
 };
@@ -141,7 +141,7 @@ test(
 test(
   "a ready report refreshes the page onto it rather than announcing it here",
   async () => {
-    statusBody = { session_id: "s1", status: "ready", ready: true, error_reason: null };
+    statusBody = { session_id: "s1", status: "completed", ready: true, error_reason: null };
     render(<FinishReport sessionId="s1" />);
 
     // This screen never renders the report itself — the server component above

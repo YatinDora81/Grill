@@ -37,11 +37,11 @@ const tone = (v: number) => TONE_CLASS[scoreTone(v)];
 const DAY_MS = 86_400_000;
 
 /**
- * How many next steps make it onto the page. The list has no ranking of any kind
- * behind it — no impact, no effort, no score gain, just the order the coach wrote
- * them in — so this is a reading-length cap and nothing more. Anything past it is
- * not shown anywhere else on the report, which is why the section says out loud
- * how many were dropped.
+ * How many next steps make it onto the page. The coach is asked to rank them by
+ * how much each would raise the score, biggest gain first, so this keeps the top
+ * of that ranking rather than an arbitrary slice. Anything past it is not shown
+ * anywhere else on the report, which is why the section says out loud how many
+ * were dropped.
  */
 const FIX_LIMIT = 3;
 
@@ -236,7 +236,7 @@ export default async function ReportPage({
               <p className="font-mono text-[0.6rem] tracking-[0.24em] uppercase text-ember">
                 Report — {title}
               </p>
-              <h1 className="verdict">{report.verdict}</h1>
+              <h1 className={cx("verdict", verdictTier(report.verdict))}>{report.verdict}</h1>
             </div>
             <p className="font-mono text-[0.64rem] leading-[2] tracking-[0.12em] uppercase text-ink-muted sm:text-right">
               {meta.map((line) => (
@@ -368,7 +368,7 @@ export default async function ReportPage({
             to bottom exactly once, and the actions are what the reader came for. */}
         {fixes.length > 0 && (
           <section className="section nav-target" id="fixes" aria-label="Fix these">
-            <SectionHead title="Fix these things" note="in the order the coach wrote them" />
+            <SectionHead title="Fix these things" note="ranked · biggest gain first" />
             {/* One hairline lattice rather than separate cards: the container
                 draws the top and left edges, each cell the right and bottom, so
                 every column shares one border at every breakpoint and nothing
@@ -402,14 +402,14 @@ export default async function ReportPage({
             {/* Says what was cut instead of implying these are all of them. */}
             {report.next_steps.length > fixes.length ? (
               <p className="mono-note" style={{ marginTop: 14 }}>
-                first {fixes.length} of {report.next_steps.length} · the rest were trimmed for
-                length
+                top {fixes.length} of {report.next_steps.length} · the rest ranked lower
               </p>
             ) : null}
             <Explain>
-              Written for this run by the same coach that scored it, in the order it wrote them.
-              That order is not a ranking — the first one is not the biggest win, it is just the one
-              it typed first.
+              Written for this run by the same coach that scored it, and ranked by how much it
+              thinks each one would raise your score — so <b>01</b> is the biggest win, not just the
+              first thing it typed. The ranking is its judgement, not a measurement: there is no
+              points figure behind it.
             </Explain>
           </section>
         )}
@@ -552,6 +552,15 @@ export default async function ReportPage({
  * provenance — "measured from the recording", "straight from your own
  * recording" — which is the claim this product lives or dies on.
  */
+const VERDICT_MID_FROM = 56;
+const VERDICT_LONG_FROM = 112;
+
+function verdictTier(verdict: string): string {
+  if (verdict.length >= VERDICT_LONG_FROM) return "verdict-long";
+  if (verdict.length >= VERDICT_MID_FROM) return "verdict-mid";
+  return "";
+}
+
 function SectionHead({ title, note }: { title: string; note: string }) {
   return (
     <div className="flex flex-wrap items-baseline justify-between gap-x-5 gap-y-1 border-b border-line pb-2.5">
@@ -580,7 +589,12 @@ function splitFix(step: string): { title: string; body: string } {
   // types them as possibly-undefined, and a fix card with an empty title reads
   // as a rendering bug, so falling through to plain body text is the safer miss.
   const [, title, body] = m ?? [];
-  return title && body ? { title, body } : { title: "", body: text };
+  if (!title || !body) return { title: "", body: text };
+  const lastWord = title.split(/\s+/).pop() ?? "";
+  if (lastWord.includes(".") || (lastWord.length <= 2 && !/^[A-Z]/.test(body))) {
+    return { title: "", body: text };
+  }
+  return { title, body };
 }
 
 /**

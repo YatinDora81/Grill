@@ -123,6 +123,7 @@ export function FinishReport({ sessionId }: { sessionId: string }) {
   const [attempt, setAttempt] = useState(0);
   const startedAt = useRef(Date.now());
   const [now, setNow] = useState(() => Date.now());
+  const failed = useRef(false);
 
   /**
    * Tell the rail which step is really on screen. The build screen and the
@@ -148,6 +149,7 @@ export function FinishReport({ sessionId }: { sessionId: string }) {
     } catch (err) {
       // `report_in_progress` is the happy path here, not a failure.
       if (err instanceof ApiClientError && err.code === "report_in_progress") return;
+      failed.current = true;
       setError(err instanceof ApiClientError ? err.message : "Couldn't start the report.");
     }
   }, [sessionId]);
@@ -155,11 +157,12 @@ export function FinishReport({ sessionId }: { sessionId: string }) {
   useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
+    failed.current = false;
 
     void kick();
 
     const poll = async () => {
-      if (cancelled) return;
+      if (cancelled || failed.current) return;
       try {
         const s = await apiGet<ReportStatusResponse>(`/api/report/${sessionId}/status`);
         if (cancelled) return;
@@ -244,7 +247,7 @@ export function FinishReport({ sessionId }: { sessionId: string }) {
       {/* `items-end` so the figure sits on the headline's baseline block and both
           land on the rule the track then hangs off. */}
       <header className="mt-5 grid gap-x-10 gap-y-6 border-b border-line pb-6 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
-        <div className="min-w-0">
+        <div className="min-w-0" role="status" aria-live="polite">
           {/* Not `.kicker`: that class draws a trailing rule, and this eyebrow sits
               directly above a headline that already has one under it. */}
           <p className="flex items-center gap-2.5 font-mono text-[0.62rem] tracking-[0.2em] uppercase text-ember">
@@ -276,7 +279,7 @@ export function FinishReport({ sessionId }: { sessionId: string }) {
             <p className="mt-2 font-mono text-[0.63rem] tracking-[0.16em] uppercase text-ink-muted">
               {clock(elapsed)} on this page
             </p>
-            <p className="mt-1 font-mono text-[0.6rem] tracking-[0.14em] uppercase text-ink-muted/70">
+            <p className="mt-1 font-mono text-[0.6rem] tracking-[0.14em] uppercase text-ink-soft">
               {overrun ? "longer than usual" : "usually about 30 seconds"}
             </p>
           </div>
@@ -455,7 +458,7 @@ function ReportSkeleton() {
       </div>
 
       {/* verdict panel + the three category meters */}
-      <div className="mb-4 grid gap-4 sm:grid-cols-2">
+      <div className="mb-4 grid gap-4 md:grid-cols-2">
         <div className="grid content-start gap-3 border border-line p-4">
           <span className={cx(SKEL, "h-2 w-[42%]")} />
           <span className={cx(SKEL, "h-11 w-[54%]")} />
@@ -481,15 +484,15 @@ function ReportSkeleton() {
       </div>
 
       {/* the three fixes */}
-      <div className="mb-4 grid gap-3 sm:grid-cols-3">
+      <div className="mb-4 grid gap-3 md:grid-cols-3">
         {["01", "02", "03"].map((k) => (
           <div key={k} className={cx(SKEL, "h-24")} />
         ))}
       </div>
 
       {/* how you sounded — one tile per delivery measure */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-        {["pace", "pause", "filler", "pitchvar", "energy"].map((k) => (
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+        {["pace", "pause", "filler", "pitchvar", "energy", "meanpitch"].map((k) => (
           <div key={k} className={cx(SKEL, "h-16")} />
         ))}
       </div>

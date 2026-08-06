@@ -11,13 +11,21 @@ import { cx } from "@/components/ui";
  * scroll and hope. This gives the page a table of contents that also tells you
  * where you currently are.
  *
- * IntersectionObserver rather than a scroll listener: a scroll handler fires on
- * every frame and has to measure every section each time, which is real jank on
- * a long report. The observer only wakes when a boundary is actually crossed.
+ * IntersectionObserver rather than a scroll-and-measure loop: a handler that
+ * re-measures every section on every frame is real jank on a long report. The
+ * observer only wakes when a boundary is actually crossed.
  *
  * `rootMargin` pulls the trigger line down to just under the sticky nav, so a
  * section is marked current when it reaches the nav rather than when it touches
  * the very top of the viewport.
+ *
+ * The one scroll listener left reads three numbers and measures no sections. It
+ * exists because the LAST section can be too short to ever reach that trigger
+ * line: at max scroll it sits below the line with the section above it still
+ * straddling it, so no boundary is crossed, the observer never fires again, and
+ * the nav stays lit on the previous section while the reader looks at this one.
+ * At the bottom of the document the last section is by definition the one in
+ * view, which is the only thing this listener says.
  */
 
 export interface Section {
@@ -43,6 +51,13 @@ export interface Section {
 function chromeTop(nav: HTMLElement | null): number {
   const header = document.querySelector<HTMLElement>("[data-app-header]");
   return (header?.offsetHeight ?? 0) + (nav?.offsetHeight ?? 44);
+}
+
+function atBottom(): boolean {
+  return (
+    window.scrollY > 0 &&
+    Math.ceil(window.innerHeight + window.scrollY) >= document.documentElement.scrollHeight - 2
+  );
 }
 
 const LINK_BASE =
@@ -86,28 +101,50 @@ export function ReportNav({ sections }: { sections: Section[] }) {
      * pick the topmost section that is currently intersecting.
      */
     const visible = new Map<string, boolean>();
+    const last = sections[sections.length - 1];
+    let bottom = false;
+
+    const resolve = () => {
+      if (bottom && last) {
+        setCurrent(last.id);
+        return;
+      }
+      const firstVisible = sections.find((s) => visible.get(s.id));
+      if (firstVisible) {
+        setCurrent(firstVisible.id);
+        return;
+      }
+      /**
+       * Nothing intersecting means we're inside one tall section whose top and
+       * bottom are both off-screen. Fall back to the last section that has
+       * scrolled past the trigger line.
+       */
+      const passed = nodes.filter((n) => n.getBoundingClientRect().top < chrome).pop();
+      if (passed) setCurrent(passed.id);
+    };
 
     const io = new IntersectionObserver(
       (entries) => {
         for (const e of entries) visible.set(e.target.id, e.isIntersecting);
-        const firstVisible = sections.find((s) => visible.get(s.id));
-        if (firstVisible) {
-          setCurrent(firstVisible.id);
-          return;
-        }
-        /**
-         * Nothing intersecting means we're inside one tall section whose top and
-         * bottom are both off-screen. Fall back to the last section that has
-         * scrolled past the trigger line.
-         */
-        const passed = nodes.filter((n) => n.getBoundingClientRect().top < chrome).pop();
-        if (passed) setCurrent(passed.id);
+        resolve();
       },
       { rootMargin: `-${chrome}px 0px -70% 0px`, threshold: 0 },
     );
 
+    const onScroll = () => {
+      const now = atBottom();
+      if (now === bottom) return;
+      bottom = now;
+      resolve();
+    };
+
     nodes.forEach((n) => io.observe(n));
-    return () => io.disconnect();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+    return () => {
+      io.disconnect();
+      window.removeEventListener("scroll", onScroll);
+    };
   }, [sections, chrome]);
 
   /**

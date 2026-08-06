@@ -2204,6 +2204,18 @@
   letter-spacing: -0.02em;
   text-transform: uppercase;
 }
+.verdict-mid {
+  max-width: 30ch;
+  font-size: clamp(1.5rem, 3vw, 2.1rem);
+  line-height: 1.04;
+  letter-spacing: -0.015em;
+}
+.verdict-long {
+  max-width: 46ch;
+  font-size: clamp(1.1rem, 1.9vw, 1.45rem);
+  line-height: 1.22;
+  letter-spacing: -0.005em;
+}
 
 /* the seared ring */
 .ring-wrap {

@@ -87,7 +87,10 @@ ${deliveryBlock(delivery)}
 Write the final report. The verdict must be one honest sentence. For every answered
 turn, include coaching in question_feedback: 1–3 possible_answers (strong example
 answers or angles — not a transcript of theirs), and 1–4 improvements (concrete
-things to change or add in THEIR answer). Return JSON:
+things to change or add in THEIR answer). Rank next_steps by how much each one
+would raise THIS candidate's score if they did it — biggest gain first, so the
+first step is the single highest-value thing they can change. Do not state or
+estimate point values anywhere. Return JSON:
 {
   "overall_score": number,                       // 0-100
   "verdict": string,                             // one honest sentence
@@ -96,7 +99,7 @@ things to change or add in THEIR answer). Return JSON:
   "weaknesses": [ { "point": string, "example": string, "fix": string } ],
   "best_answer":  { "turn_index": number, "quote": string, "why": string },
   "worst_answer": { "turn_index": number, "quote": string, "why": string },
-  "next_steps": [ string ],
+  "next_steps": [ string ],                      // ranked: biggest score gain first
   "question_feedback": [
     {
       "turn_index": number,
