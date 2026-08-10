@@ -89,8 +89,12 @@ interface Check {
    smeared inline, the way components/ui.tsx hoists BUTTON_BASE. */
 const STEPBTN =
   "flex flex-1 items-center gap-2.5 border-r border-line px-3 py-3.5 text-left font-mono text-[10px] tracking-[0.14em] uppercase transition-colors last:border-r-0 sm:px-4";
-const STEPBTN_ON = "bg-paper-raised text-ink";
-const STEPBTN_OFF = "text-ink-muted hover:bg-paper-raised hover:text-ink-soft";
+/* `--surface-hover` for every picked-or-pointed-at fill in the wizard, and
+   `bg-paper-raised` left alone for the panels below. They are the same value
+   in the dark room and have to part company on the sheet: a chosen row takes
+   ON ink, while a static panel still lifts off the page. */
+const STEPBTN_ON = "bg-(--surface-hover) text-ink";
+const STEPBTN_OFF = "text-ink-muted hover:bg-(--surface-hover) hover:text-ink-soft";
 /* A number in a box, not a bullet. The only circles left in the product are the
    ones where a circle IS the thing — a status dot, a point on the trend line. */
 const STEPNUM = "grid size-6 shrink-0 place-items-center border font-mono text-[10px] leading-none";
@@ -105,7 +109,7 @@ const DIAL = "flex border border-line";
 const DIALB =
   "flex-1 border-r border-line px-2 py-3 text-center font-mono text-[11px] tracking-[0.12em] uppercase transition-colors last:border-r-0";
 const DIALB_ON = "bg-ink font-semibold text-paper";
-const DIALB_OFF = "text-ink-soft hover:bg-paper-raised hover:text-ink";
+const DIALB_OFF = "text-ink-soft hover:bg-(--surface-hover) hover:text-ink";
 
 /* Options as a bordered stack, not a grid of cards: one column of rows reads as
    a list of mutually-comparable choices, which is what both pickers are. The
@@ -113,8 +117,8 @@ const DIALB_OFF = "text-ink-soft hover:bg-paper-raised hover:text-ink";
    nothing in the stack shifts by a pixel when the choice moves. */
 const PICKS = "border border-line";
 const PICK =
-  "grid w-full grid-cols-[auto_1fr] items-start gap-x-4 border-b border-line px-4 py-4 text-left transition-colors last:border-b-0 hover:bg-paper-raised sm:grid-cols-[auto_1fr_auto] sm:px-5";
-const PICK_ON = "bg-paper-raised shadow-[inset_3px_0_0_var(--color-ember)]";
+  "grid w-full grid-cols-[auto_1fr] items-start gap-x-4 border-b border-line px-4 py-4 text-left transition-colors last:border-b-0 hover:bg-(--surface-hover) sm:grid-cols-[auto_1fr_auto] sm:px-5";
+const PICK_ON = "bg-(--surface-hover) shadow-[inset_3px_0_0_var(--color-ember)]";
 const PICK_BOX =
   "mt-0.5 grid size-[18px] shrink-0 place-items-center border text-[10px] leading-none";
 const PICK_BOX_ON = "border-ember bg-ember text-paper";
@@ -1068,7 +1072,13 @@ export function NewInterviewForm() {
         {/* A blocker left on an earlier step, with the way back to it. Almost
             always the shape picked on step 2 asking for material from step 1. */}
         {priorBlock && (
-          <div className="mt-7 flex flex-wrap items-center gap-x-4 gap-y-3 border border-dashed border-ember/40 bg-ember/5 px-4 py-3.5">
+          <div
+            /* `--wash-heat` rather than `bg-ember/5`: the strength of an ember
+               tint has to travel with the ember, which is a lamp on dark and a
+               spot plate on light. One token keeps this banner and the status
+               chips it echoes from drifting apart. */
+            className="mt-7 flex flex-wrap items-center gap-x-4 gap-y-3 border border-dashed border-ember/40 bg-(--wash-heat) px-4 py-3.5"
+          >
             <p className="text-[12.5px] leading-relaxed text-ink-soft">{priorBlock.message}</p>
             <button
               type="button"

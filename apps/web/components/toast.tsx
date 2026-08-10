@@ -7,7 +7,17 @@ import { Toaster, type ToastOptions } from "react-hot-toast";
  * on this surface that reads as a hole in the page.
  *
  * Values come from the theme's CSS variables rather than hex literals so the
- * toast can never drift from the rest of the room.
+ * toast can never drift from the rest of the room. `var()` in an inline style
+ * resolves against whatever scope the toast is mounted in, and all three mount
+ * sites want that: the hot seat's copy sits under `.room-root` and stays dark
+ * in both themes, while the report's and the profile's follow the page onto the
+ * sheet.
+ *
+ * The shadow is a whole shadow VALUE rather than a colour because light needs
+ * different geometry as well as a different alpha — two tight warm layers
+ * instead of one deep black one. On cream the toast is a near-white card on a
+ * near-white ground and that lift is the only thing separating them, where on
+ * black the border alone would do.
  */
 const SURFACE: ToastOptions["style"] = {
   background: "var(--color-paper-raised)",
@@ -17,7 +27,7 @@ const SURFACE: ToastOptions["style"] = {
   fontSize: "14px",
   maxWidth: "420px",
   padding: "10px 14px",
-  boxShadow: "0 22px 60px -32px rgba(0, 0, 0, 0.85)",
+  boxShadow: "var(--shadow-toast)",
 };
 
 export function GrillToaster() {

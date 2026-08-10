@@ -379,6 +379,16 @@ export function HotSeat(props: Props) {
     // never scrolls as a page. Anything that doesn't fit scrolls inside
     // `.room-main`, so the header and the mic button stay put — a control that
     // slides away mid-answer is worse than a short scroll.
+    //
+    // The class name is also light mode's pin: this subtree keeps the dark
+    // tokens whichever theme the reader picked. A cream page reflected off the
+    // monitor lands on the candidate's face and drags the webcam's exposure and
+    // white balance, and the sheet the light theme prints on came out of a
+    // darkroom in the first place — the interview is the exposure, the report is
+    // the print. The pin block in globals.css selects on nothing but this name,
+    // so renaming or unwrapping it turns the hot seat cream. It restates the
+    // BASE tokens too (`text-ink`, `border-line`, `bg-paper-raised/60`), not
+    // just the `room-*` five, which is why nothing below had to be rewritten.
     <div className="room-root">
       <div className="grain" aria-hidden="true" />
       <GrillToaster />
@@ -956,6 +966,12 @@ function ThankYou({ sessionId, saving }: { sessionId: string; saving: Promise<vo
   }, [saving, router]);
 
   return (
+    // Deliberately not `.room-root`: this is a full-page centred pane rather
+    // than the fixed viewport chrome, and the interview is over by the time it
+    // paints. The consequence worth knowing before touching the theme is that
+    // it therefore sits OUTSIDE light mode's room pin — unlike everything in the
+    // hot seat above, this screen follows the reader's theme, so anything
+    // decorative on it has to work on paper as well as in the dark.
     <div className="done">
       <div className="grain" aria-hidden="true" />
       <div className="done-glow" aria-hidden="true" />

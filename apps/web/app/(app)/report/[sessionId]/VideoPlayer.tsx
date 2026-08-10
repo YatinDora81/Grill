@@ -261,8 +261,13 @@ export function VideoPlayer({
           </span>
         </div>
       </div>
+      {/* The colour is a class, not the inline style it used to be. An inline
+          declaration sits at the top of the cascade, so no scoped rule could
+          ever correct the player's only error message; and a utility could not
+          take its place either, because `.mono-note` is unlayered bespoke CSS
+          and beats anything Tailwind compiles into `@layer utilities`. */}
       {error ? (
-        <p className="mono-note" role="alert" style={{ marginTop: 7, color: "var(--color-weak)" }}>
+        <p className="mono-note mono-note-error" role="alert" style={{ marginTop: 7 }}>
           {error} press play to try again
         </p>
       ) : null}

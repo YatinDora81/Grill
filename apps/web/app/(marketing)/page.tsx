@@ -14,6 +14,9 @@ export const metadata: Metadata = {
     url: "/",
     title: SITE_TAGLINE,
     description: SITE_DESCRIPTION,
+    // Dark in both themes on purpose, and left alone by the light-mode port —
+    // the argument is written out at the top of `app/opengraph-image.tsx`,
+    // where the hexes it protects actually live.
     images: [OG_IMAGE],
   },
 };

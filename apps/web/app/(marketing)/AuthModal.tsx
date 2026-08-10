@@ -372,18 +372,16 @@ export function AuthModal({
                     </span>
                   ) : (
                     /* Next to the Password label because that is the only
-                       place anyone looks for it. Ember and underline are set
-                       inline rather than by `.link-ember`, which resets `font`
-                       to inherit and would blow this 10.5px mono row up to
-                       body size. */
+                       place anyone looks for it. Still not `.link-ember`, which
+                       resets `font` to inherit and would blow this 10.5px mono
+                       row up to body size — but no longer inline either. The
+                       ember, the underline and its offset moved into
+                       `.hint-link`: an inline style sits at the top of the
+                       cascade, so this was the one accent in the dialog that no
+                       scoped theme rule could ever have reached. */
                     <button
                       type="button"
-                      className="hint linklike"
-                      style={{
-                        color: "var(--color-ember)",
-                        textDecoration: "underline",
-                        textUnderlineOffset: "3px",
-                      }}
+                      className="hint linklike hint-link"
                       onClick={() => switchMode("forgot")}
                     >
                       forgot password?

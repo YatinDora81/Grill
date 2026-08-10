@@ -9,6 +9,15 @@ import {
 } from "@/lib/siteMeta";
 import { KeepAlive } from "@/components/KeepAlive";
 import { EXPLAIN_CLASS, EXPLAIN_KEY } from "@/components/explainMode";
+import {
+  DARK_PAPER,
+  DEFAULT_PREF,
+  LIGHT_PAPER,
+  LIGHT_QUERY,
+  THEME_ATTR,
+  THEME_KEY,
+  THEME_PREF_ATTR,
+} from "@/components/theme";
 import "./globals.css";
 
 const geist = Geist({
@@ -90,19 +99,79 @@ export const viewport: Viewport = {
   viewportFit: "cover",
   // Must equal --color-paper in globals.css, not merely be dark: mobile browsers
   // paint their chrome with this, and any drift shows as a seam right where
-  // `viewportFit: cover` was meant to remove one.
-  themeColor: "#0e0e0e",
+  // `viewportFit: cover` was meant to remove one. Imported rather than retyped
+  // so that check has one place to happen.
+  //
+  // Still the DARK hex now that a light theme exists, and deliberately not the
+  // media-scoped array form. `viewport` is a build-time export evaluated with no
+  // request, no cookies and no localStorage, so it cannot see the reader's
+  // preference; the array form would answer to the OS instead, which is the
+  // wrong authority when the app's own default is dark regardless of it. This is
+  // the no-JS answer, and the pre-paint script below reconciles the tag to
+  // LIGHT_PAPER whenever the preference resolves light.
+  themeColor: DARK_PAPER,
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html
       lang="en"
-      // `color-scheme: dark` so scrollbars, autofill and native controls come up
-      // dark too — without it they punch light holes in the room.
-      style={{ colorScheme: "dark" }}
+      // `color-scheme: dark` used to be an inline style here. It now lives in
+      // `:root { color-scheme: dark }` in globals.css, because an inline style
+      // sits at the top of the cascade where no stylesheet rule can reach it:
+      // the UA would have gone on painting scrollbar gutters, <select> popups,
+      // spellcheck underlines, `:-webkit-autofill` fills and the overscroll area
+      // dark on light — black holes punched through a cream page. The bare
+      // `:root` rule reproduces this exactly, including for a reader with
+      // JavaScript off who never receives an attribute at all.
+      //
+      // The script below writes `data-theme` and `data-theme-pref` up here,
+      // which the server cannot know. The `suppressHydrationWarning` on <body>
+      // does not cover it: that flag is one element deep and does not inherit
+      // upward, so the two guard different mutations and both are needed.
+      suppressHydrationWarning
       className={`${geist.variable} ${archivo.variable} ${geistMono.variable}`}
     >
+      <head>
+        {/* The theme, restored before first paint — and in <head> rather than at
+            the top of <body> where the explain script sits. That one can wait
+            because it writes `document.body.classList` and needs <body> to
+            exist; this one has to beat the first pixel, and Next streams the RSC
+            payload, so body content can be parsed and painted before a script
+            placed after <body> ever runs. `document.documentElement` exists as
+            soon as the parser sees <html>.
+
+            The flash this prevents runs the opposite way to the usual one: dark
+            is the CSS default and the server always renders dark, so a
+            dark-preferring reader can never flash at all. The reader at risk is
+            the one who chose light, and one frame of the black room is the more
+            startling direction, not the less. */}
+        <script
+          dangerouslySetInnerHTML={{
+            // Interpolated from the shared constants rather than typed out, for
+            // the same reason the explain script is: renaming any one of them
+            // can't leave this hand-minified string quietly reading a key
+            // nothing writes.
+            //
+            // Both attributes are written even for dark, never only for light,
+            // so any future `[data-theme]`-keyed rule can be authored in both
+            // directions. `try{}catch(e){}` because private mode throws on
+            // `localStorage` and `matchMedia` is absent in some embedded UAs;
+            // either way it falls through to dark, which is what the stylesheet
+            // already paints. And the `theme-color` reconcile is
+            // order-independent on purpose: if Next's tag was emitted first we
+            // mutate it, and if ours lands first it wins the first-match lookup.
+            __html:
+              `try{var p=localStorage.getItem(${JSON.stringify(THEME_KEY)});` +
+              `var t=p==="light"?"light":p==="system"&&window.matchMedia&&matchMedia(${JSON.stringify(LIGHT_QUERY)}).matches?"light":"dark";` +
+              `var d=document.documentElement;d.setAttribute(${JSON.stringify(THEME_ATTR)},t);` +
+              `d.setAttribute(${JSON.stringify(THEME_PREF_ATTR)},p||${JSON.stringify(DEFAULT_PREF)});` +
+              `var m=document.querySelector('meta[name="theme-color"]');` +
+              `if(!m){m=document.createElement("meta");m.name="theme-color";document.head.appendChild(m)}` +
+              `m.setAttribute("content",t==="light"?${JSON.stringify(LIGHT_PAPER)}:${JSON.stringify(DARK_PAPER)})}catch(e){}`,
+          }}
+        />
+      </head>
       <body suppressHydrationWarning>
         {/* Explain mode is a class on <body>, restored before first paint.
             Deferring it to a React effect would render every plain-English note

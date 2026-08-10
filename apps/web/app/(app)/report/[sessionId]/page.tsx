@@ -255,11 +255,21 @@ export default async function ReportPage({
           <div className="mt-7 grid border border-line md:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]">
             {/* The one gradient on the page. Heat behind the number the reader
                 came for, kept to a wash — a flat ember panel would read as an
-                alert rather than a score. */}
+                alert rather than a score.
+
+                Its strength is a token rather than the 9% that used to be typed
+                here, and it had to become one: an inline style sits at the top
+                of the cascade, so no scoped rule can reach in and correct it.
+                9% of a printed ember over a near-white card is precisely the
+                alert panel this comment exists to avoid, which is why the light
+                value is 5%. The terminator goes through `--keylight-fade` for
+                the reason all six fade-outs in the product do — `transparent`
+                is alpha-zero BLACK, invisible over black and a grey cast dragged
+                through the middle of the same fade over cream. */}
             <div
               className="border-b border-line p-6 sm:p-8 md:border-r md:border-b-0"
               style={{
-                background: `radial-gradient(90% 90% at 30% 20%, color-mix(in srgb, var(--color-ember) 9%, transparent), transparent 60%), var(--color-paper-raised)`,
+                background: `radial-gradient(90% 90% at 30% 20%, var(--verdict-wash), var(--keylight-fade) 60%), var(--color-paper-raised)`,
               }}
             >
               <p className="font-mono text-[0.58rem] tracking-[0.22em] uppercase text-ink-muted">
@@ -640,11 +650,17 @@ function Highlight({
       </div>
       {/* The rule down the left is the tone: it carries the strong/weak read
           that the card's own top border used to, now that the two cards share
-          one box instead of being separate panels. */}
+          one box instead of being separate panels.
+
+          A token rather than a `/50` alpha modifier because the strength is not
+          the same in both modes: a translucent rule on a bright ground reads
+          weaker than the same rule on a dark one, so on paper it is laid down
+          at 70%. Same pair as `.quote-strong` / `.quote-weak`, which is the
+          point of routing all four through one token each. */}
       <p
         className={cx(
           "hl-quote border-l-2 pl-4",
-          variant === "strong" ? "border-strong/50" : "border-weak/50",
+          variant === "strong" ? "border-(--edge-verdict-strong)" : "border-(--edge-verdict-weak)",
         )}
       >
         “{h.quote}”

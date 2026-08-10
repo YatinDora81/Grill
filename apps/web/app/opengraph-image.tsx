@@ -17,7 +17,17 @@ import {
  * build time, and a flaky font CDN failing the whole build is a worse trade than
  * a card set in the default sans. Colours are globals.css verbatim: satori
  * cannot read CSS variables, so the tokens have to be re-typed here. Keep them
- * in step with the @theme block by hand.
+ * in step with the DARK values in the @theme block by hand — never with the
+ * `[data-theme="light"]` block below it.
+ *
+ * THIS CARD IS DARK IN BOTH THEMES, and is excluded from the light-mode audit
+ * along with app/icon.svg and app/apple-icon.png. Not an oversight, three
+ * reasons: there is no reader at render time — the consumers are Slack, iMessage
+ * and X unfurlers fetching with no cookies, no client JS and no colour-scheme
+ * hint; one image serves everyone and is cached per URL, so a theme-aware render
+ * would freeze to whichever theme warmed the cache; and satori cannot read a
+ * custom property at all, which is why these hexes are re-typed in the first
+ * place. A sweep that "fixes" the literals below ships a cream OG card.
  */
 
 // Both re-exported from siteMeta so the dimensions a page declares in

@@ -176,9 +176,15 @@ export function ReportNav({ sections }: { sections: Section[] }) {
          sticky, and matching z-index wouldn't have saved this one: `.wrap` is
          `position: relative; z-index: 2`, so this nav's z-30 is trapped inside a
          stacking context that competes at 2, while the header's is a root-level
-         z-20. Below `lg` the nav was painted over completely. */
+         z-20. Below `lg` the nav was painted over completely.
+
+         The veil is a token rather than `bg-paper/90` because blur preserves
+         luminance: it smears what is behind it rather than removing it, so on a
+         pale page the report's own headings ghost through 90% of the stock as
+         legible shape instead of as texture. `--veil-nav` runs it at 95% there.
+         Still derived from `--color-paper`, so it stays the page's own colour. */
       className={cx(
-        "sticky top-(--app-header-h) z-30 flex gap-6 overflow-x-auto border-b border-line bg-paper/90 backdrop-blur-md sm:gap-10",
+        "sticky top-(--app-header-h) z-30 flex gap-6 overflow-x-auto border-b border-line bg-(--veil-nav) backdrop-blur-md sm:gap-10",
         NAV_SCROLLBAR,
       )}
     >

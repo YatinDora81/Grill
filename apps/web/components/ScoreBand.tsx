@@ -22,11 +22,19 @@ import { BAND_LABEL, cx, scoreBand, type ScoreBandName } from "@/components/ui";
  *
  * Derived from the same thresholds `scoreBand` uses. If those move, these move
  * with them, so the two can never drift apart again.
+ *
+ * The first three fills are tokens rather than the alpha modifiers they used to
+ * be (`bg-ink-muted/20`, `/40`, `bg-strong/55`), because the four segments have
+ * to climb monotonically in luminance and stacked alphas over a pale ground do
+ * not — on light they resolve to solid inks instead. Dark declares the same
+ * mixes those modifiers emitted, so the strip is unchanged there. The last band
+ * needs no token: it is the verdict colour at full strength, which inverts on
+ * its own.
  */
 const BANDS: { name: ScoreBandName; upTo: number; fill: string }[] = [
-  { name: "rough", upTo: 40, fill: "bg-ink-muted/20" },
-  { name: "shaky", upTo: 60, fill: "bg-ink-muted/40" },
-  { name: "hireable", upTo: 80, fill: "bg-strong/55" },
+  { name: "rough", upTo: 40, fill: "bg-(--color-band-empty)" },
+  { name: "shaky", upTo: 60, fill: "bg-(--color-band-low)" },
+  { name: "hireable", upTo: 80, fill: "bg-(--color-band-partial)" },
   { name: "strong", upTo: 100, fill: "bg-strong" },
 ];
 

@@ -108,8 +108,13 @@ const STAGE_TITLE = "font-mono text-[0.76rem] uppercase tracking-[0.1em]";
 const STAGE_NOTE =
   "col-start-2 font-mono text-[0.6rem] uppercase tracking-[0.14em] whitespace-nowrap sm:col-start-3 sm:text-right";
 
-/** Skeleton block. Lighter than the panel it sits on, so it reads as unfilled. */
-const SKEL = "block bg-line";
+/**
+ * Skeleton block. Contrasts with the panel it sits on, so it reads as unfilled —
+ * which on dark means lighter than it and on paper means darker. `--color-track`
+ * rather than `--color-line`: these are slabs, and a value picked to survive as a
+ * 1px hairline cannot hold a 44px block once the direction flips.
+ */
+const SKEL = "block bg-(--color-track)";
 
 export function FinishReport({ sessionId }: { sessionId: string }) {
   const router = useRouter();
@@ -311,10 +316,16 @@ export function FinishReport({ sessionId }: { sessionId: string }) {
               style={{ width: `${pct.toFixed(1)}%` }}
             >
               {/* A light sweep, not a dark one: the travelling sheen has to read
-                  as something moving over the red, and paper is darker than it. */}
+                  as something moving over the red. Which of the two palette ends
+                  is the lighter one is exactly what reverses between the modes —
+                  on the near-black page it is the ink, on the press sheet it is
+                  the paper — so this cannot stay `via-ink/30`, which would drag
+                  a shadow across the bar and turn the glint into a smudge.
+                  `--sheen-hi` mixes toward whichever end is lighter where it
+                  lands, and is byte-identical to `ink/30` on dark. */}
               <span
                 aria-hidden="true"
-                className="absolute inset-0 block animate-sheen bg-linear-to-r from-transparent via-ink/30 to-transparent"
+                className="absolute inset-0 block animate-sheen bg-linear-to-r from-transparent via-(--sheen-hi) to-transparent"
               />
             </div>
           </div>
@@ -339,11 +350,18 @@ export function FinishReport({ sessionId }: { sessionId: string }) {
           <ol className="mt-3 border border-line">
             {STAGES.map((s) => (
               <li key={s.key} className={STAGE_ROW}>
+                {/* Both edges and the faint numeral are tokens rather than alpha
+                    modifiers, because an alpha cannot express what light needs:
+                    the faint ink step collapses to solid there, which is the
+                    only reason it finally clears AA, and a translucent border
+                    reads weaker on a bright ground than on a dark one. */}
                 <span
                   aria-hidden="true"
                   className={cx(
                     STAGE_MARK,
-                    s.done ? "border-strong/45 text-strong" : "border-line text-ink-muted/70",
+                    s.done
+                      ? "border-(--edge-stage-done) text-strong"
+                      : "border-line text-(--color-ink-faint)",
                   )}
                 >
                   {s.done ? "✓" : "○"}
@@ -475,7 +493,7 @@ function ReportSkeleton() {
                 <span className={cx(SKEL, "h-2 w-[14%]")} />
               </div>
               <span className="block h-[3px] bg-paper-sunken">
-                <span className={cx("block h-full bg-line", w)} />
+                <span className={cx("block h-full bg-(--color-track)", w)} />
               </span>
               <span className={cx(SKEL, "h-2 w-[84%]")} />
             </div>

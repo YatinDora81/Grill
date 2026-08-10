@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ExplainToggle } from "@/components/ExplainToggle";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { LogoutButton } from "./LogoutButton";
 import { STEP_BUILDING, STEP_EVENT } from "./appStep";
 
@@ -86,6 +87,22 @@ const GROUPS: { heading: string; items: Item[] }[] = [
   },
 ];
 
+/* Every fill and every faint ink step in the rows below is a TOKEN rather than
+   `bg-paper-raised` or `text-ink-muted/45`, for one reason each.
+
+   The fill: on the sheet a selected or hovered row has to take ON ink, while a
+   static raised card still lifts off the page. One value cannot do both once
+   the ground flips, so `--surface-hover` is the half that reverses and
+   `bg-paper-raised` — the account tile, the panels on the pages this rail
+   leads to — is the half that does not.
+
+   The alpha: a `/45` modifier fades toward whatever is behind it, which over
+   cream means fading toward the stock. That is backwards for a marker whose
+   whole job is to stay readable as the inert half of a pair, so the two faint
+   steps collapse to solid ink there. Both carry the dark values these classes
+   had, with one exception: the inert numeral was `/40` and now rides the `/45`
+   step. The pair is one marker in two parts, and five points of alpha was
+   never what told them apart. */
 const ITEM =
   "grid grid-cols-[26px_minmax(0,1fr)] items-center gap-2 border-l-2 px-5 py-3 font-mono text-[0.73rem] tracking-[0.1em] uppercase transition-colors";
 const NUM = "text-[0.66rem] not-italic";
@@ -178,11 +195,13 @@ export function AppRail({ name, initials }: { name: string | null; initials: str
                     aria-current={active ? "step" : undefined}
                     className={`${ITEM} cursor-default ${
                       active
-                        ? "border-l-ember bg-paper-raised text-ink"
-                        : "border-l-transparent text-ink-muted/45"
+                        ? "border-l-ember bg-(--surface-hover) text-ink"
+                        : "border-l-transparent text-(--color-ink-faintest)"
                     }`}
                   >
-                    <em className={`${NUM} ${active ? "text-ember" : "text-ink-muted/40"}`}>
+                    <em
+                      className={`${NUM} ${active ? "text-ember" : "text-(--color-ink-faintest)"}`}
+                    >
                       {item.n}
                     </em>
                     <span className="truncate">{item.label}</span>
@@ -196,11 +215,11 @@ export function AppRail({ name, initials }: { name: string | null; initials: str
                   aria-current={active ? "page" : undefined}
                   className={`${ITEM} ${
                     active
-                      ? "border-l-ember bg-paper-raised text-ink"
-                      : "border-l-transparent text-ink-muted hover:bg-paper-raised hover:text-ink"
+                      ? "border-l-ember bg-(--surface-hover) text-ink"
+                      : "border-l-transparent text-ink-muted hover:bg-(--surface-hover) hover:text-ink"
                   }`}
                 >
-                  <em className={`${NUM} ${active ? "text-ember" : "text-ink-muted/70"}`}>
+                  <em className={`${NUM} ${active ? "text-ember" : "text-(--color-ink-faint)"}`}>
                     {item.n}
                   </em>
                   <span className="truncate">{item.label}</span>
@@ -221,6 +240,7 @@ export function AppRail({ name, initials }: { name: string | null; initials: str
           <span className="truncate">{name ?? "Your account"}</span>
         </Link>
         <ExplainToggle className="w-full" />
+        <ThemeToggle className="mt-3.5 w-full" />
         <LogoutButton className="mt-3.5 block" />
       </div>
     </nav>
@@ -255,7 +275,13 @@ export function AppHeader({ initials }: { initials: string }) {
   return (
     <header
       data-app-header
-      className="sticky top-0 z-20 border-b border-line bg-paper-sunken/90 backdrop-blur-md lg:hidden"
+      /* `--veil-chrome`, not `bg-paper-sunken/90`: a backdrop blur preserves
+         luminance, so it smears the ink under this header into grey rather
+         than removing it, and the fill has to come up on the sheet or the page
+         reads through as legible shape instead of as texture. The token has to
+         hold 90% on dark — the number this class carried — or the header shifts
+         in a theme nobody switched. */
+      className="sticky top-0 z-20 border-b border-line bg-(--veil-chrome) backdrop-blur-md lg:hidden"
     >
       <div className="flex items-center justify-between gap-4 px-5 py-3">
         <Link
@@ -269,11 +295,20 @@ export function AppHeader({ initials }: { initials: string }) {
         >
           grill<i>.</i>
         </Link>
-        <div className="flex items-center gap-2">
-          {/* No width class: the toggle carries none of its own, so it hugs its
-              label here and fills the rail there without either side fighting
-              the cascade. */}
+        {/* Scrolls rather than wraps, the same way the section row below does.
+            Four controls plus the wordmark do not fit a phone — they did not
+            quite fit before the theme switcher was added either — and the two
+            alternatives are both worse: wrapping would change the header's
+            height, which `--app-header-h` states as a constant and the report's
+            `scroll-margin-top` is derived from, and clipping would silently eat
+            Sign out. `min-w-0` because a flex item will not shrink below its
+            content without it, so the row would push the wordmark out instead. */}
+        <div className="flex min-w-0 items-center gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {/* No width class on either: the toggles carry none of their own, so
+              they hug their labels here and fill the rail there without either
+              side fighting the cascade. */}
           <ExplainToggle />
+          <ThemeToggle />
           <LogoutButton />
           <Link href="/profile" aria-label="Profile">
             <Initials initials={initials} />
@@ -298,11 +333,11 @@ export function AppHeader({ initials }: { initials: string }) {
                    has to sit on the axis the eye scans across. */
                 className={`flex items-center gap-1.5 border-b-2 px-3.5 py-2 font-mono text-[0.66rem] tracking-[0.1em] whitespace-nowrap uppercase transition-colors ${
                   active
-                    ? "border-b-ember bg-paper-raised text-ink"
+                    ? "border-b-ember bg-(--surface-hover) text-ink"
                     : "border-b-transparent text-ink-muted hover:text-ink"
                 }`}
               >
-                <em className={`${NUM} ${active ? "text-ember" : "text-ink-muted/70"}`}>
+                <em className={`${NUM} ${active ? "text-ember" : "text-(--color-ink-faint)"}`}>
                   {item.n}
                 </em>
                 {item.label}

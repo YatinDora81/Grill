@@ -40,8 +40,14 @@ export function DeleteInterviewButton({ sessionId }: { sessionId: string }) {
       </button>
 
       {open ? (
+        // The scrim is a token, not `bg-paper/80`: a scrim has to DARKEN the page
+        // in both modes, and mixing it out of the surface colour only does that
+        // while the surface is near-black. On the press sheet `--scrim-confirm`
+        // is the ink instead, which reads as the page knocked back to a tint
+        // under a fresh sheet — and separates this panel from it far better than
+        // the dark value manages. Do not "fix" it back toward `paper`.
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-paper/80 px-4 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-(--scrim-confirm) px-4 backdrop-blur-sm"
           role="presentation"
           onClick={() => {
             if (!busy) setOpen(false);

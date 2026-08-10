@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import Link from "next/link";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { AuthModal, type AuthMode } from "./AuthModal";
 import { HeroRig } from "./HeroRig";
 import { SimZone } from "./SimZone";
@@ -712,20 +713,42 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
           <Link href="/" className="wordmark" aria-label="Grill home">
             grill<i>.</i>
           </Link>
-          <nav className="foot-links" aria-label="Footer">
-            {NAV.map((n) => (
-              <a href={n.href} key={n.href}>
-                {n.label}
-              </a>
-            ))}
-            {signedIn ? (
-              <Link href="/dashboard">Dashboard</Link>
-            ) : (
-              <button type="button" onClick={() => openAuth("login")}>
-                Log in
-              </button>
-            )}
-          </nav>
+          {/*
+            The theme control sits in the footer rather than in the top bar, and
+            the reason is measurement rather than taste. Below 800px `.lnav-in`
+            collapses to `auto 1fr` and the right-hand track is already carrying
+            Log in beside Start free; at 375px that leaves under 60px of slack,
+            which no three-state control fits into without shoving the one thing
+            the page is selling off the edge. This row wraps, so it holds one at
+            any width.
+
+            Paired with the link list inside a wrapper rather than dropped into
+            `.foot-top` directly: that row is `space-between`, and a third child
+            would fling the links away from the wordmark into the middle of it.
+            And beside the <nav> rather than inside it, because
+            `.grill-root .foot-links button` restyles every button it contains
+            and would flatten the toggle's three radios into footer links.
+          */}
+          <div className="flex flex-wrap items-center gap-x-8 gap-y-4">
+            <nav className="foot-links" aria-label="Footer">
+              {NAV.map((n) => (
+                <a href={n.href} key={n.href}>
+                  {n.label}
+                </a>
+              ))}
+              {signedIn ? (
+                <Link href="/dashboard">Dashboard</Link>
+              ) : (
+                <button type="button" onClick={() => openAuth("login")}>
+                  Log in
+                </button>
+              )}
+            </nav>
+            {/* Width stated here, never in the toggle's base class string —
+                see the note on `ExplainToggle`'s className for why a caller
+                could not override one anyway. */}
+            <ThemeToggle className="w-auto" />
+          </div>
         </div>
         <div className="wrap foot-bottom">
           <span>Grill — AI mock interviews</span>

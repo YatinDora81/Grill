@@ -18,7 +18,10 @@
     cannot drift apart.
 
     Colours are literals, not tokens: an SVG served as a static asset has no
-    stylesheet to inherit from. They mirror @theme in globals.css.
+    stylesheet to inherit from. They mirror the DARK @theme values in
+    globals.css and stay dark in both themes: browser chrome carries a theme of
+    its own, independent of the page's, so a favicon has no reader preference to
+    follow even in principle.
   -->
   <rect width="32" height="32" fill="#0e0e0e"/>
   <rect x="4" y="4" width="24" height="5" fill="#ff4633"/>

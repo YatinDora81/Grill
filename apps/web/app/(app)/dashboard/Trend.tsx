@@ -123,7 +123,12 @@ export function Trend({ scores }: { scores: number[] }) {
     >
       {/* Tinted toward the series hue rather than the border grey: a `line`
           gridline over the card surface is about 1.3:1 and reads as nothing at
-          all, while it still sits well under the dots and the numbers. */}
+          all, while it still sits well under the dots and the numbers.
+
+          A token rather than `stroke-ember/25`, because the hue the tint is cut
+          from is not the hue the series is drawn in once the ink ramp inverts —
+          `--chart-guide` follows `--ember-wash`, which is the top of the ramp on
+          dark and the spot plate on light. */}
       {GRID.map((score) => (
         <line
           key={score}
@@ -132,7 +137,7 @@ export function Trend({ scores }: { scores: number[] }) {
           y1={yOf(score)}
           y2={yOf(score)}
           strokeDasharray="3 6"
-          className="stroke-ember/25 [stroke-width:1]"
+          className="stroke-(--chart-guide) [stroke-width:1]"
         />
       ))}
       {GRID.map((score) => (
@@ -147,7 +152,10 @@ export function Trend({ scores }: { scores: number[] }) {
         </text>
       ))}
 
-      <path d={area} className="fill-ember/10" />
+      {/* The area wash needs MORE of the plate on the sheet than off it: a red
+          fading over cream has nowhere to fade to, so 10% that reads as heat on
+          black reads as a smudge unless the density comes up with it. */}
+      <path d={area} className="fill-(--chart-area)" />
       {/* pathLength="1" so one dash covers the line whatever its real length. */}
       <path
         d={line}
@@ -168,10 +176,17 @@ export function Trend({ scores }: { scores: number[] }) {
           cx={p[0]}
           cy={p[1]}
           r={hover === i ? 4 : 3.2}
+          /* The resting dot is knocked out of the CARD it is drawn on, not out
+             of the page. `fill-paper` only ever agreed with the card by
+             accident — five points of near-black apart on dark, the whole width
+             of the elevation step on the sheet. A token rather than swapping the
+             class to `fill-paper-raised`, because that would have been a change
+             to the DARK chart smuggled in with the light one; `--dot-rest` keeps
+             dark on the exact fill it has today. */
           className={
             hover === i
               ? "fill-ember stroke-ember [stroke-width:1.5]"
-              : "fill-paper stroke-ink-soft [stroke-width:1.5]"
+              : "fill-(--dot-rest) stroke-ink-soft [stroke-width:1.5]"
           }
         />
       ))}

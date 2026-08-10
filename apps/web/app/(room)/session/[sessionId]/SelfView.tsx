@@ -170,9 +170,20 @@ function snapToCorner(b: Box, minimised: boolean): Box {
  * Square, and outlined a step brighter than the bar inside it — the whole
  * redesign is hard-edged, and this box floats over a dark room with nothing but
  * its own edge to separate it from the question underneath.
+ *
+ * `border-line-strong` beside two `room-*` classes is not mixed vocabulary: the
+ * room is pinned dark, so both sets resolve to the same values in here, and
+ * `--color-room-line` is a full step darker than `--color-line-strong` — tidying
+ * one into the other would flatten the only edge this box has.
+ *
+ * The lift is `--shadow-float` rather than the literal it used to be, because a
+ * hardcoded `rgba(0,0,0,0.9)` is the one value in this file that would not
+ * follow if the pin were ever lifted: a near-black bruise under a cream panel,
+ * and the only thing left behind. It resolves to exactly that black today —
+ * pinned, the room has no light value for it and needs none.
  */
 const SHELL =
-  "group fixed z-50 cursor-grab touch-none overflow-hidden border border-line-strong bg-room-raised shadow-[0_22px_60px_-20px_rgba(0,0,0,0.9)] active:cursor-grabbing";
+  "group fixed z-50 cursor-grab touch-none overflow-hidden border border-line-strong bg-room-raised shadow-(--shadow-float) active:cursor-grabbing";
 
 /** The title bar doubles as the drag handle, so it keeps the grab cursor. */
 const BAR =

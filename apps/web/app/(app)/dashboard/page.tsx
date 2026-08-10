@@ -254,7 +254,11 @@ function ResumeBar({ session: s }: { session: RecentSession }) {
   return (
     <Link
       href={`/session/${s.session_id}`}
-      className="rv mb-9 grid grid-cols-[auto_1fr] items-center gap-x-5 gap-y-3 border border-ember/35 bg-[linear-gradient(90deg,var(--color-ember-soft),transparent_46%)] px-6 py-5 transition-colors hover:border-ember sm:grid-cols-[auto_1fr_auto]"
+      /* `--keylight-fade` rather than `transparent` as the terminator, and it is
+         not pedantry: `transparent` is alpha-zero BLACK, invisible fading out
+         of a black page and a grey-brown cast dragged through the middle of the
+         same fade over cream. The token is `transparent` on dark. */
+      className="rv mb-9 grid grid-cols-[auto_1fr] items-center gap-x-5 gap-y-3 border border-ember/35 bg-[linear-gradient(90deg,var(--color-ember-soft),var(--keylight-fade)_46%)] px-6 py-5 transition-colors hover:border-ember sm:grid-cols-[auto_1fr_auto]"
       data-io
     >
       <span className="inline-flex items-center gap-2 font-mono text-[0.6rem] tracking-[0.18em] whitespace-nowrap text-ember uppercase">
@@ -479,7 +483,11 @@ function SessionRow({ session: s }: { session: RecentSession }) {
               role IS the title, and this would print it twice. */}
           {s.name?.trim() && s.role?.trim() ? (
             <>
-              <span className="text-line-strong" aria-hidden="true">
+              {/* Ink, not a rule. `text-line-strong` is a DIVIDER token, and a
+                  divider is specified against the surface it splits — on the
+                  sheet that lands this glyph at 2.56:1 while the two strings it
+                  separates sit near 5. A separator between metadata is type. */}
+              <span className="text-ink-faintest" aria-hidden="true">
                 /
               </span>
               <span className="truncate">{s.role}</span>
@@ -502,8 +510,12 @@ function SessionRow({ session: s }: { session: RecentSession }) {
   // Three tracks on a phone, four from `sm`. Declaring four everywhere left a
   // 20px gutter hanging off the right of every row once the chip went
   // `max-sm:hidden` — an empty track is still a track the gap applies to.
+  //
+  // The hover fill is `--surface-hover` rather than `bg-paper-raised`: a row
+  // under the pointer has to take ON ink on the sheet, where a static raised
+  // card still lifts off it. Same value on dark, opposite sign on light.
   const shell =
-    "group grid grid-cols-[auto_1fr_auto] items-center gap-5 border-b border-line px-6 py-5 transition-colors last:border-b-0 hover:bg-paper-raised sm:grid-cols-[auto_1fr_auto_auto]";
+    "group grid grid-cols-[auto_1fr_auto] items-center gap-5 border-b border-line px-6 py-5 transition-colors last:border-b-0 hover:bg-(--surface-hover) sm:grid-cols-[auto_1fr_auto_auto]";
 
   // Cancelled and abandoned sessions have nothing to open — a row that looks
   // like a link and does nothing is worse than one that plainly doesn't.

@@ -15,7 +15,16 @@ const BUTTON_VARIANTS = {
   // Bone fill, not ember. Ember is now a true red and reads as an alarm, so it
   // is spent on accents (the star, the trend line, an accent word) and on the
   // hover of the one button that matters. A resting ember slab would make every
-  // screen shout. Ink on paper is 14:1; paper on ember-at-hover clears 5:1.
+  // screen shout.
+  //
+  // The slab is `ink` and its label is `paper`, which is the theme's maximum-
+  // contrast pair whichever way round the theme is: bone on black in the dark
+  // room at 15.49:1, near-black on cream on the light sheet at 16.15:1. That
+  // inversion is the intent, not an accident for a `light:` override to undo —
+  // a reversed-out slab is the loudest thing a two-colour press can print, and
+  // this is the one button that earns it. The ember hover keeps its knockout in
+  // both directions (5.68:1 and 5.17:1) because the light ember is an ink
+  // rather than a lamp, so `text-paper` is still what knocks out of it.
   primary: "border-ink bg-ink text-paper hover:border-ember hover:bg-ember",
   secondary: "border-line-strong bg-transparent text-ink hover:border-ember hover:text-ember",
   ghost: "border-transparent bg-transparent text-ink-soft hover:text-ink",
@@ -162,8 +171,16 @@ export function Field({
 //
 // Square, and sunken rather than raised: a field is a hole in the surface, and
 // on a flat card the only thing left to say "you can type here" is the depth.
+//
+// The ring takes `--focus-glow` rather than a fixed `ember/20` so its strength
+// cannot drift from `.input:focus` in globals.css, the product's only other
+// focus-reinforcement wash; that alignment costs this one four points of alpha
+// on dark, 20% down to that rule's 16%. Reinforcement is all it is — the
+// indicator is the 1px `focus:border-ember` beside it at 5.69:1 on a card,
+// which is why the ring can afford to be a wash here and why on the sheet it
+// has to more than double in strength to register at all.
 const CONTROL =
-  "w-full border border-line-strong bg-paper-sunken px-3.5 py-2.5 text-base text-ink placeholder:text-ink-muted focus:border-ember focus:bg-paper focus:outline-none focus:ring-2 focus:ring-ember/20 sm:text-sm";
+  "w-full border border-line-strong bg-paper-sunken px-3.5 py-2.5 text-base text-ink placeholder:text-ink-muted focus:border-ember focus:bg-paper focus:outline-none focus:ring-2 focus:ring-(--focus-glow) sm:text-sm";
 
 export function Input({ className, ...props }: ComponentProps<"input">) {
   return <input className={cx(CONTROL, className)} {...props} />;
@@ -176,13 +193,19 @@ export function Textarea({ className, ...props }: ComponentProps<"textarea">) {
 /**
  * Inline error. role="alert" so a failed submit is announced — the message
  * often appears far from the control that caused it.
+ *
+ * The edge is a token because it has to firm up on the sheet (35% → 55%) where
+ * a translucent hairline on a bright ground all but disappears; the 5% fill
+ * does not, because 5% of the light claret over cream is already a visible
+ * blush. Alpha on a fixed hue has a direction — the two halves of this box move
+ * by different amounts, which is exactly why only one of them is a token.
  */
 export function ErrorNote({ children }: { children: ReactNode }) {
   if (!children) return null;
   return (
     <p
       role="alert"
-      className="border border-weak/35 bg-weak/5 px-3.5 py-2.5 font-mono text-xs text-weak"
+      className="border border-(--danger-line) bg-weak/5 px-3.5 py-2.5 font-mono text-xs text-weak"
     >
       {children}
     </p>
@@ -256,9 +279,14 @@ export function ScoreMeter({
     <div>
       {/* The rule sits above the row, not under it: in the reference every
           meter is a hairline the label hangs off, so the eye reads the bar
-          first and the number second. */}
+          first and the number second.
+
+          The track takes `--color-track`, not `bg-line`: this is the divider
+          value used as a 3px SLAB, and a weight picked for a hairline cannot
+          hold one once the edge direction flips. The verdict fill above it
+          reads 6.33 / 6.02 / 4.26 against that track. */}
       <div
-        className="h-[3px] overflow-hidden bg-line"
+        className="h-[3px] overflow-hidden bg-(--color-track)"
         role="meter"
         aria-valuenow={Math.round(value)}
         aria-valuemin={0}

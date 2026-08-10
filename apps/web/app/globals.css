@@ -15,16 +15,34 @@
  */
 @custom-variant explain (&:where(.explain *));
 
+/* A `light:` variant, NOT `dark:`. Tailwind v4 already ships `dark:` meaning
+   `@media (prefers-color-scheme: dark)`, which follows the OS and would ignore
+   the app's own preference; and an attribute-keyed `dark:` would additionally
+   fail for a JS-off reader who never receives the attribute. `light:` is purely
+   additive on top of a dark base that needs no attribute at all. */
+@custom-variant light (&:where([data-theme="light"], [data-theme="light"] *));
+
 /**
  * Grill design tokens.
  *
- * The whole product is one warm dark room — near-black brown, cream ink, lit by
- * a single ember key-light. There is no light surface anywhere; the contrast we
- * trade on is heat against dark, not paper against room.
+ * Dark is the default and the origin, independent of the OS: one warm dark room
+ * — near-black brown, cream ink, lit by a single ember key-light. Everything
+ * declared in this block is that room, and it is what a reader with no stored
+ * preference, and a reader with JavaScript off, both get.
+ *
+ * Light is not the same room with the lights on. It is the print that came out
+ * of it: one warm uncoated stock, a dense warm black, and ember demoted from a
+ * lamp to a spot plate. Nothing emits, so every ramp that meant *more light*
+ * means *more ink* and reverses in lightness while keeping every relationship
+ * it encodes. Those values live in the `:root[data-theme="light"]` block below,
+ * never in here — and never behind `prefers-color-scheme`, which answers to the
+ * OS rather than to the app's own preference. The interview room is exempt and
+ * stays dark in both themes; see the pin block under the light one.
  *
  * Ember is heat: reserved for the live/recording state, primary actions and
  * accents. It must never be used for large fills, or it stops reading as
- * pressure.
+ * pressure — and on the sheet a large low-alpha ember has nothing to fade to
+ * and reads as a stain rather than as light.
  */
 @theme {
   /*
@@ -113,6 +131,879 @@
   --app-header-h: 106px;
   /* ReportNav's own height, which stacks under the header on the report page. */
   --report-nav-h: 44px;
+
+  /* ─────────────────────────────────────────────────────────────────────────
+     Tokens minted for the light-mode port. Every value below is the DARK one
+     and reproduces today's rendered output exactly, so nothing here moves a
+     pixel until `data-theme="light"` is set.
+
+     Only `--color-*` entries live in `@theme`, because those are the ones that
+     want a matching Tailwind utility (`text-ink-faint`, `bg-track`,
+     `fill-band-low`). The other ~90 minted tokens belong to no Tailwind
+     namespace at all: inside `@theme` they would be tree-shaken unless
+     something happened to reference them, and they would advertise utilities
+     (`shadow-modal`, `blur-veil`) that no call site should ever reach for. They
+     are declared in the plain `:root` block immediately after this one.
+     ───────────────────────────────────────────────────────────────────────── */
+
+  /* The two faint ink steps, which today are `/70`, `/45` and `/40` alpha
+     modifiers typed at five call sites. An alpha modifier cannot express what
+     light needs — there the faint step collapses to solid `ink-muted`, which is
+     the only reason it finally clears AA — so the step has to be a token. */
+  --color-ink-faint: color-mix(in oklab, var(--color-ink-muted) 70%, transparent);
+  --color-ink-faintest: color-mix(in oklab, var(--color-ink-muted) 45%, transparent);
+
+  /* `--color-line` used as a solid 3-5px SLAB rather than as a 1px hairline.
+     One value serves both roles today; once the divider direction flips, a
+     value picked for a hairline cannot hold a slab, so the roles split. */
+  --color-track: var(--color-line);
+
+  /* ScoreBand's four segments. Alpha steps on dark, solid inks on light: the
+     ramp has to stay monotonic in luminance across all four, and stacked
+     alphas over a bright ground do not. */
+  --color-band-empty: color-mix(in oklab, var(--color-ink-muted) 20%, transparent);
+  --color-band-low: color-mix(in oklab, var(--color-ink-muted) 40%, transparent);
+  --color-band-partial: color-mix(in oklab, var(--color-strong) 55%, transparent);
+
+  /* The tape player's letterbox. Derived from `paper` today, which would
+     silently become mid-grey mud the moment paper turns cream. A letterbox is
+     media, not a theme surface, and stays near-black in both modes. */
+  --color-lens: color-mix(in srgb, var(--color-paper) 45%, black);
+
+  /* The rig's inset node boxes. States the "cut into the plate" intent, so a
+     light palette cannot invert the figure's depth by accident. */
+  --color-surface-well: var(--color-paper);
+
+  /* Display-sized, on the brief's name field, which is why it gets its own
+     strength rather than riding a muted-caption value. */
+  --color-placeholder: color-mix(in srgb, var(--color-ink-muted) 65%, transparent);
+}
+
+/**
+ * The rest of the minted token set, in a plain `:root` rather than in `@theme`.
+ *
+ * None of these are `--color-*`, so none of them belong to a Tailwind
+ * namespace: see the note at the end of `@theme` for why that keeps them out
+ * of it. Everything below is the DARK value, and every one of them reproduces
+ * today's rendered output exactly.
+ *
+ * Several are complete shadow, filter or gradient VALUES rather than colours.
+ * That is deliberate and not laziness: on paper the honest answer for half the
+ * blooms is to switch off rather than to retune, and a colour token cannot
+ * express `none`.
+ */
+:root {
+  /* ── ink and structure ──────────────────────────────────────────────────── */
+
+  /* Control chrome, split off the two divider tokens. A divider separates two
+     regions; a control edge IS the control, and once the ground flips the two
+     want different weights. Dark keeps the divider values, so nothing moves. */
+  --edge-control: var(--color-line);
+  --edge-control-strong: var(--color-line-strong);
+  /* The meter's 5px boundary, which has to hold an extent rather than split
+     two fields, so it cannot ride a hairline value. */
+  --edge-track: var(--color-line);
+  /* `--color-line-strong` used as a slab: switch tracks, range tracks, the
+     deck scrubber. Same split as `--color-track`, one step louder. */
+  --track-strong: var(--color-line-strong);
+
+  /* The wash under a hovered or selected ROW, split from the static-card
+     surface it happens to share a value with today. On dark a hover lightens;
+     on light it has to darken, while a static card still goes the other way. */
+  --surface-hover: var(--color-paper-raised);
+
+  /* Secondary type on the inverted `.trow` slab, which borrows
+     `--color-line-strong` today and works only by coincidence. */
+  --invert-ink-soft: #3a3833;
+
+  /* `-webkit-text-stroke` on the hollow watermark numerals. Not just
+     `--color-line-strong`: on light the divider value would turn a 52px
+     watermark into a competing headline. */
+  --stroke-ghost: var(--color-line-strong);
+
+  /* The landing's hollow display type. Solid and hollow words alternate inside
+     one line, so on the sheet they read as one ink at two coverages — which
+     only works if they are literally the same ink, never a caption grey. */
+  --stroke-hollow: #82807a;
+  --stroke-hollow-w: 1.5px;
+
+  /* ── heat ───────────────────────────────────────────────────────────────── */
+
+  /* The base hue for every low-alpha ember TINT, split off the ramp so the ink
+     ramp can invert without dragging ~14 washes with it. It is the top of the
+     ramp on dark and the spot plate on light, which is the whole point. */
+  --ember-wash: var(--color-ember-glow);
+
+  --wash-heat-faint: color-mix(in srgb, var(--ember-wash) 4%, transparent);
+  --wash-heat: color-mix(in srgb, var(--ember-wash) 6%, transparent);
+  --wash-heat-on: color-mix(in srgb, var(--ember-wash) 8%, transparent);
+  /* Row hover. The strength has to travel with the value — 35% of the near-black
+     maroon over cream is a heavy grey slab — which is why redefining
+     `--color-ember-soft` alone could never have fixed this one. */
+  --wash-hover: color-mix(in srgb, var(--color-ember-soft) 35%, transparent);
+  --edge-heat: color-mix(in srgb, var(--ember-wash) 35%, transparent);
+  --edge-heat-strong: color-mix(in srgb, var(--ember-wash) 50%, transparent);
+  /* One token for every `border-ember/40` and `/45` in the product. 40 against
+     45 was never a meaningful distinction, and two idioms was one too many. */
+  --ember-edge: color-mix(in srgb, var(--color-ember) 40%, transparent);
+  --edge-fix: color-mix(in srgb, var(--color-ember) 25%, transparent);
+  /* The mid stop of the 2px filaments that fade to nothing at both ends. The
+     same value serves both modes — a dark ember at 2px on cream is a printed
+     rule, which is exactly the reading — but the four sites get a token so
+     they cannot drift. */
+  --heat-hairline: var(--color-ember);
+
+  /* The burner's centre stop. Mixing toward `white` is monotonic in LIGHTNESS
+     by construction and therefore cannot also be monotonic in contrast on a
+     pale ground; mixing toward the surface's opposite is what actually keeps
+     the four-stop ramp inside one hue. */
+  --burner-core: color-mix(in srgb, var(--color-ember-glow) 40%, white);
+
+  /* Every ember-filled bar. Gains contrast toward its leading edge in both
+     modes with no per-mode expression; minted so the two ends of the five bars
+     that use it can never be re-tuned independently. */
+  --meter-fill-grad: linear-gradient(90deg, var(--color-ember), var(--color-ember-glow));
+
+  /* `.flame`'s stops. No `.tsx` renders `.flame`; these exist so the mark
+     cannot rot behind a token change, not because it is worth any budget. */
+  --flame-1: var(--color-ember-glow);
+  --flame-2: var(--color-ember-hot);
+  --flame-3: var(--color-ember);
+  --flame-bloom: drop-shadow(0 0 26px color-mix(in srgb, var(--color-ember) 34%, transparent));
+
+  /* The key light, typed once for both `.keylight` and `.keylight-report`. */
+  --keylight-wash: color-mix(in srgb, var(--color-ember-glow) 9%, transparent);
+  /* Gradient terminator. `transparent` is alpha-zero BLACK: invisible fading
+     out of a black page, and a grey-brown cast dragged through the middle of
+     the same fade over cream. All six fade-outs in the file route through
+     here so the fix lands once. */
+  --keylight-fade: transparent;
+
+  --pulse-ring: color-mix(in srgb, var(--color-ember) 55%, transparent);
+  --pulse-trough: 0.45;
+  --ring-trough: 0.55;
+  --blink-floor: 0.25;
+  --focus-glow: color-mix(in srgb, var(--color-ember) 16%, transparent);
+
+  /* Blooms, as complete shadow and filter values. Three of the five have no
+     press equivalent and switch off entirely on light; the other two trade the
+     halo for a real contact shadow. None of that fits in a colour. */
+  --glow-modal: 0 0 120px -40px color-mix(in srgb, var(--color-ember) 30%, transparent);
+  --glow-ring: drop-shadow(0 0 12px color-mix(in srgb, var(--color-ember) 30%, transparent));
+  --glow-tick: 0 0 10px color-mix(in srgb, var(--color-ember-glow) 60%, transparent);
+  --glow-seal: 0 0 34px -8px color-mix(in srgb, var(--color-ember) 45%, transparent);
+  --glow-thumb: 0 0 16px -2px color-mix(in srgb, var(--color-ember) 60%, transparent);
+
+  /* The sweep across the report's ember bar. It has to move TOWARD the page's
+     own surface in either mode, or the glint reads as a smudge. */
+  --sheen-hi: color-mix(in oklab, var(--color-ink) 30%, transparent);
+
+  /* ── verdict-scale alphas ───────────────────────────────────────────────── */
+
+  --wash-zone-strong: color-mix(in srgb, var(--color-strong) 14%, transparent);
+  --edge-zone-strong: color-mix(in srgb, var(--color-strong) 30%, transparent);
+  --edge-verdict-strong: color-mix(in srgb, var(--color-strong) 50%, transparent);
+  --edge-verdict-weak: color-mix(in srgb, var(--color-weak) 50%, transparent);
+  --danger-edge: color-mix(in srgb, var(--color-weak) 40%, transparent);
+  --danger-line: color-mix(in srgb, var(--color-weak) 35%, transparent);
+  --danger-wash: color-mix(in srgb, var(--color-weak) 7%, transparent);
+  /* Both call sites are inside the pinned room, so the light value is never
+     painted; minted anyway so the pair reads as one idiom. */
+  --edge-mixed: color-mix(in srgb, var(--color-mixed) 35%, transparent);
+  /* A STRENGTH, not a colour. The status chips come in four hues, so their
+     borders are written `color-mix(in srgb, <hue> var(--chip-edge),
+     transparent)` and one edit repairs every one of them. */
+  --chip-edge: 30%;
+
+  /* ── optical ────────────────────────────────────────────────────────────── */
+
+  /* A scrim must DARKEN in both modes. Mixing it out of the surface token is
+     only correct while the surface is near-black; on light it becomes the ink,
+     which is also the better reading — a fresh sheet laid over a page knocked
+     back to a tint. Two tokens rather than one purely so `.overlay`'s 82% and
+     the delete confirm's 80% each keep their own dark value. */
+  --scrim: color-mix(in srgb, var(--color-paper) 82%, transparent);
+  --scrim-confirm: color-mix(in srgb, var(--color-paper) 80%, transparent);
+
+  /* Percentages, not colours, so the veils still derive from `--color-paper`.
+     Blur preserves luminance — it smears ink into grey rather than removing it
+     — so a light veil needs both a higher fill and a bigger radius. The
+     prefixed and unprefixed declarations at each site must take the token in
+     the same edit, or Safari alone ghosts. */
+  --veil-mix: 92%;
+  --veil-mix-chrome: 80%;
+  --veil-blur: blur(10px);
+  --scrim-blur: blur(8px);
+
+  /* Complete shadow values, because light needs different geometry as well as a
+     different alpha, and the black has to go warm: on the sheet a shadow is not
+     depth, it is the lift of one sheet lying on another, and a neutral shadow
+     under a warm stock reads as dirty grey. */
+  --shadow-modal: 0 40px 100px -30px rgba(0, 0, 0, 0.8);
+  --shadow-card: 0 22px 60px -32px rgba(0, 0, 0, 0.85);
+  --shadow-toast: 0 22px 60px -32px rgba(0, 0, 0, 0.85);
+  --shadow-float: 0 22px 60px -20px rgba(0, 0, 0, 0.9);
+
+  /* Grain: see `.grain` below for why the noise itself is never inverted. */
+  --grain-opacity: 0.04;
+  --grain-opacity-landing: 0.05;
+  --grain-blend: normal;
+  --grain-filter: none;
+
+  /* `antialiased` kills subpixel rendering and thins stems — right for light
+     type on a dark ground, actively harmful for dark type on a pale one, where
+     it erodes `--color-ink-muted`'s 4.97:1. All three sites in the file move
+     together, and the third is inside `.room-root`, so it is pinned too. */
+  --font-smoothing: antialiased;
+
+  /* 0.7 in BOTH modes. `opacity` composites the button as a group, so the
+     primary's label rides down with its own slab and the pair still measures
+     6.4:1; the rule beside it sets `cursor: wait`, which makes this the
+     *pending* state, whose label has to stay readable. Minted only so the
+     number lives in one place. */
+  --disabled-opacity: 0.7;
+  /* A disabled LINK is type on the page rather than a group being dimmed, so
+     unlike the button it does need a per-mode value. */
+  --opacity-disabled-link: 0.4;
+
+  /* Both room-only. Minted so the pin below has something to pin, which is
+     cheaper than remembering that they are room-only. */
+  --busy-dim: 0.4;
+  --word-in-blur: 5px;
+
+  /* ── rig (landing fig.01 plate) ─────────────────────────────────────────── */
+
+  --rig-key-glow: color-mix(in srgb, var(--color-ember) 11%, transparent);
+  /* The light-mode analogue of an additive glow is a blend, not a tint: it
+     darkens and warms the stock instead of painting pink over it. This is the
+     only `mix-blend-mode` the file gains, and deliberately the only one —
+     a blend makes the result depend on whatever happens to be underneath,
+     which is the exact coupling the token set exists to remove. */
+  --rig-key-blend: normal;
+  /* `--color-line` used as a DRAWN GRAPHIC rather than as a divider. A divider
+     value picked for legibility makes the wires jump forward and compete with
+     the pulses they are drawn to carry. */
+  --rig-wire: var(--color-line);
+  --rig-box-stroke: var(--color-line);
+  /* The translucency only produces heat because the backdrop is black; on the
+     sheet the lit boxes need saturation instead. Alpha on one side, solid on
+     the other. */
+  --rig-box-hot-stroke: color-mix(in srgb, var(--color-ember) 55%, transparent);
+  --track-unfilled: color-mix(in srgb, var(--color-ink) 12%, transparent);
+  --rig-grid-dot: color-mix(in srgb, var(--color-ink) 7%, transparent);
+  --rig-mark: var(--color-ink-muted);
+  /* Fine dark marks on paper carry more weight than fine light marks on black
+     at equal alpha, which is why the two opacities here go DOWN on light while
+     the four dimmers below go up. */
+  --rig-mark-opacity: 0.65;
+  --rig-trace-opacity: 0.75;
+  /* Dimming toward black banks ember into a deep coal; dimming toward white
+     tints it pastel pink, so less alpha reduction is needed on light to
+     protect the hue. These four go UP there, not down. */
+  --rig-dim-deep: 0.35;
+  --rig-dim-mid: 0.45;
+  --rig-dim-soft: 0.55;
+  --rig-dim-cite: 0.7;
+  --rig-pulse-idle: 0.3;
+
+  /* ── sim (landing live simulation) ──────────────────────────────────────── */
+
+  /* paper-inside-paper-raised is a visible groove at the black end of the scale
+     and imperceptible at the white end, so both cut-outs get named rather than
+     borrowing the page colour. */
+  --sim-groove: var(--color-paper);
+  --surface-recessed: var(--color-paper);
+  /* The idle bars must stay QUIETER than the live ember ones. Inverting
+     `--color-ink-muted` flips that ordering, because muted grey gains contrast
+     on light while ember loses it. */
+  --mic-idle: var(--color-ink-muted);
+  /* An accent mark, not a divider. */
+  --rule-quote: var(--color-line);
+  /* Must stay visibly weaker than the earned ember state it sits beside. */
+  --rule-pending: var(--color-line-strong);
+  /* Transparent on dark, so the painted output is unchanged. On light a faint
+     tint carries "boxed, not merely coloured" better than a heavier border. */
+  --fmark-fill: transparent;
+  /* `--color-line` as a 2px fill that the ember gradient slides over, so it has
+     to stay quieter than a divider would be. */
+  --rule-unlit: var(--color-line);
+  /* Dashed rules are chalk-quiet on black and heavy on cream — the construct
+     most sensitive to the perceived-weight asymmetry between the two modes. */
+  --stroke-dashed: var(--color-line-strong);
+
+  /* ── late arrivals ──────────────────────────────────────────────────────────
+     These were minted by the surface work rather than by the palette, so they
+     landed after the groups above rather than inside them. Every dark value here
+     is transcribed from the pre-light file, not re-derived — they are the exact
+     expressions their call sites used to carry inline. */
+
+  /* The `.g-stop-ember-22` SVG stop. 22% of an emitting ember over black is a
+     suggestion; 22% of a printed one over cream is a block. */
+  --area-heat: color-mix(in srgb, var(--color-ember) 22%, transparent);
+
+  /* Status-chip fill strength, paired with `--chip-edge`. A strength rather
+     than a colour so one edit retunes `.chip-ok`, `.chip-error` and the brief's
+     chips together, whatever hue each is cut from. */
+  --chip-fill: 7%;
+
+  /* 25%, not 60%: hover is one step up from `line-strong`, not a different
+     border. "One visible step" is a per-mode number, though — on the sheet both
+     ends of the mix have moved and the two inks have swapped which is lighter. */
+  --field-border-hover: color-mix(in srgb, var(--color-ink-muted) 25%, var(--color-line-strong));
+
+  /* The difficulty tiles. Strengths rather than colours because `--heat` is set
+     inline per tile from DIFFICULTY_META, and a custom property substitutes its
+     own var()s where it is DECLARED — a `:root` colour token could never see a
+     `--heat` that exists only on the button. The strength is the only half of
+     these mixes the two modes can share, so it is the half that gets tokenised. */
+  --tint-border-strong: 55%;
+  --tint-tile: 8%;
+  --tint-chip-loud: 13%;
+
+  /* The verdict panel's corner wash, set inline on the report. */
+  --verdict-wash: color-mix(in srgb, var(--color-ember) 9%, transparent);
+
+  /* The trend chart. `--chart-area` is the area wash under the series and
+     `--chart-guide` the dashed gridlines; both are cut from `--color-ember`
+     rather than from `--ember-wash`, so that the DARK stroke stays the exact
+     `ember/25` and `ember/10` it has always been. A wash needs more of the plate
+     on the sheet than off it: a red fading over cream has nowhere to fade to. */
+  --chart-area: color-mix(in oklab, var(--color-ember) 10%, transparent);
+  --chart-guide: color-mix(in oklab, var(--color-ember) 25%, transparent);
+
+  /* The two live backdrop-blurred veils — the mobile rail header and the
+     report's section nav. Blur preserves luminance, so it smears dark ink into
+     grey rather than removing it, and a light veil has to run denser to stop
+     text ghosting through as legible shape rather than as texture. */
+  --veil-chrome: color-mix(in oklab, var(--color-paper-sunken) 90%, transparent);
+  --veil-nav: color-mix(in oklab, var(--color-paper) 90%, transparent);
+
+  /* Two ember hairlines that sit one step ABOVE the shared strengths and always
+     did. `--edge-heat` is 35% and `--ember-edge` is 40%; the star's hover and
+     the seal/footnote pair were 40% and 45% before this change. Folding them
+     into the shared tokens would have moved dark by five points of alpha on
+     three live elements, which is a visible change dressed up as a refactor. */
+  --edge-heat-mid: color-mix(in srgb, var(--ember-wash) 40%, transparent);
+  --ember-edge-loud: color-mix(in srgb, var(--color-ember) 45%, transparent);
+
+  /* The build screen's completed-stage tick. 45%, not the 50% every other
+     verdict edge takes — it has always been the quieter of the two and folding
+     it in would move dark. */
+  --edge-stage-done: color-mix(in srgb, var(--color-strong) 45%, transparent);
+
+  /* Ember type sitting on an ember WASH rather than on the surface — the theme
+     switcher's selected cell, at 9.6px. The wash lifts the ground toward the
+     ink, so the ramp has to step up with it or the one cell whose job is to say
+     "this is the one you picked" becomes the least readable label in the group. */
+  --label-on-wash: var(--color-ember);
+
+  /* The end-of-interview screen's 62vh ember field. THIS ONE IS A DECISION, NOT
+     A STRENGTH: a low-alpha ember fading over 62vh of cream has nowhere to fade
+     to and becomes a stain, which is the single construct the press reading has
+     no answer for. It goes out on light, the way every other bloom does — the
+     seal and the headline were always what carried that screen. */
+  --done-glow-wash: color-mix(in srgb, var(--color-ember) 15%, transparent);
+
+  /* The trend chart's resting dot, which is knocked out of the CARD it is drawn
+     on rather than out of the page. On dark the two surfaces are 1.039 apart and
+     `--color-paper` agreed with the card closely enough to pass; on the sheet
+     they are 1.10 apart and the same fill would read as a dull grey bead. A
+     token rather than changing the class, so dark keeps the fill it has. */
+  --dot-rest: var(--color-paper);
+}
+
+/**
+ * `color-scheme`, out here instead of `style={{ colorScheme: "dark" }}` on
+ * <html>.
+ *
+ * An inline style sits at the top of the cascade, so no stylesheet rule could
+ * override it and the UA would keep painting scrollbar gutters, <select>
+ * popups, date pickers, spellcheck underlines, `:-webkit-autofill` fills and
+ * the overscroll area dark — black holes punched through a cream page. The bare
+ * `:root` rule reproduces the deleted inline declaration exactly, including for
+ * a reader with JavaScript off who never receives the attribute at all.
+ *
+ * Unlayered on purpose: `@theme` compiles into `@layer theme`, and an unlayered
+ * rule beats every layered one regardless of specificity. That is also what
+ * lets the light block below win without a single `!important`.
+ */
+:root {
+  color-scheme: dark;
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+/* READ BEFORE EDITING ANY VALUE BELOW.
+   Four things in this block are deliberately the reverse of the dark set:
+     1. --color-paper-sunken is DARKER than --color-paper. A recess that goes
+        toward white becomes a bump, and every score meter reads inside-out.
+     2. --color-ink-muted is LIGHTER than --color-ink-soft. The hierarchy is
+        carried by CONTRAST, not by lightness, and the hex ordering reverses.
+     3. The heat ramp gets DARKER as it gets hotter: ember → hot → glow is
+        5.17 → 7.22 → 9.83 against the stock. Monotonic in contrast, not in
+        lightness. More ink, not more light.
+     4. --color-line and --color-line-strong are DARKER than the surface.
+   Every accent and verdict value here was derived from a target contrast ratio
+   against the stock, never by mirroring a dark hex. Do not "fix" any of them
+   toward their dark counterpart.
+   HARD FLOOR: --color-ember must stay ≥3:1 on --color-paper-raised, or the
+   focus ring fails WCAG 1.4.11 across the entire product. */
+:root[data-theme="light"] {
+  /* ── the stock ──────────────────────────────────────────────────────────── */
+
+  /* Warm uncoated, and not #ffffff: pure white makes the black plate read as
+     screen UI and costs the raised card its headroom. This one value carries
+     the entire warmth budget, which is why no ember wash is needed anywhere
+     else to make the page feel warm. */
+  --color-paper: #f4f0e6;
+  /* Elevation is MORE separated here than on dark, 1.10 against 1.039, and
+     deliberately so: the eye resolves near-white steps far worse than
+     near-black ones. */
+  --color-paper-raised: #fdfbf6;
+  /* REVERSAL 1 — the one surface token whose direction does not invert. */
+  --color-paper-sunken: #ece7da;
+
+  /* Warm rich black, not #000. Also a FILL, for `.btn-primary` and the
+     reversed-out `.trow` slab. */
+  --color-ink: #17140e;
+  --color-ink-soft: #535045;
+  /* REVERSAL 2 — lighter than `ink-soft` above, and correct: 4.97 against
+     7.09. Specified by ratio, never by mirroring a dark hex. */
+  --color-ink-muted: #6b6759;
+
+  /* REVERSAL 4 — and 75 `border-line` call sites ride this one value. Both are
+     slightly above dark's ratio because a low-contrast edge on a bright surface
+     is perceptually weaker than the same edge on a dark one. They stay
+     DIVIDERS; control chrome has moved to `--edge-control*`. */
+  --color-line: #d7d0be;
+  --color-line-strong: #9d9787;
+
+  /* ── heat ───────────────────────────────────────────────────────────────── */
+
+  /* THE SPOT PLATE. HSV 9.3°/0.92/0.75 against dark's 5.6°/0.80/1.00 — a ~4°
+     hue drift with saturation RISING and value falling: same ink, more density,
+     less emission. Because it is dark, `color: var(--color-paper)` on an ember
+     fill inverts correctly on its own at 5.17:1, which is why this file has no
+     `--color-on-ember` and needs none.
+     HARD CONSTRAINT: ≥3:1 on `--color-paper-raised` — currently 5.69 — or the
+     focus ring breaks product-wide. */
+  --color-ember: #bf2b10;
+  /* REVERSAL 3 — hover means pressing harder, which on a press means more ink,
+     so hot and glow are DARKER than ember rather than brighter. 7.22 and 9.83
+     against the stock; the ramp stays monotonic in contrast. */
+  --color-ember-hot: #991f0b;
+  --color-ember-glow: #741808;
+  /* A pre-baked composite, not a hue, and it must stay a hand-picked literal:
+     12% of the light ember into the stock gives #eed8cc, on which ember falls
+     to 4.30 and fails. Do NOT derive this one with color-mix. */
+  --color-ember-soft: #f7e2da;
+
+  /* ── verdict ────────────────────────────────────────────────────────────── */
+
+  /* Ordering preserved from dark — 7.97 / 7.59 / 5.37 — because a failing
+     verdict must never become the loudest mark on the report. Under
+     deuteranopia strong and mixed are near-inseparable in BOTH modes, which is
+     a property of the palette and not of this port, so the standing rule
+     holds: VERDICT IS NEVER ENCODED BY COLOUR ALONE. `ScoreBand` carries four
+     labels and `.tone-*` always sits next to the word it colours; neither may
+     be dropped to save height. */
+  --color-strong: #305117;
+  /* A yellow earth ink, which is what a mustard reads as when it is printed
+     rather than emitted. This was the worst offender under naive inversion. */
+  --color-mixed: #654606;
+  /* Deliberately cooler than the spot plate — 351.8° against 9.3° — and less
+     saturated. The dark pair sit 0.2° apart and separate by value alone, so
+     light separates its two reds better than dark does, not worse. */
+  --color-weak: #a63f4d;
+
+  /* ── ink and structure ──────────────────────────────────────────────────── */
+
+  /* The alpha collapses to solid, which is the only reason this step finally
+     clears AA. Dark's 2.97 is a documented pre-existing failure, out of scope. */
+  --color-ink-faint: var(--color-ink-muted);
+  --color-ink-faintest: color-mix(in oklab, var(--color-ink-muted) 60%, transparent);
+  --edge-control: #c9c2ae;
+  /* Clears WCAG 1.4.11's 3:1 on every surface it lands on, including the
+     ember-soft tint at 3.06. With `--edge-control` it forms a DARKENING ramp
+     mirroring dark's lightening one, so hover always firms the edge up. */
+  --edge-control-strong: #898273;
+  --edge-track: #b5ae9c;
+  --color-track: #ded7c6;
+  --track-strong: #c3bcaa;
+  /* Hover DARKENS here, where on dark it lightens. Same gesture, opposite
+     sign — and the static raised card still goes the other way. */
+  --surface-hover: #e9e4d6;
+  /* Runs opposite to everything else in this block, because its ground does:
+     it is secondary type on the reversed-out `.trow` panel. */
+  --invert-ink-soft: #a9a294;
+  /* Light `--color-line-strong` here (2.82 vs the card) would turn a 52px
+     watermark into a competing headline. */
+  --stroke-ghost: #d0cabb;
+  /* A dense ink, NOT `--color-ink-muted`: the marquee alternation reads as ink
+     COVERAGE, so the solid and hollow words have to be the same ink laid down
+     two ways. Fallback if the stroke out-weighs the solid words beside it:
+     #565248 (6.84). */
+  --stroke-hollow: #3f3b31;
+  /* A light stroke on black blooms; a dark stroke on cream does not, so it
+     needs the extra half-pixel to hold the same weight. */
+  --stroke-hollow-w: 2px;
+  /* Solid rather than alpha steps, so the four-segment ramp stays monotonic in
+     luminance: 0.8727 → 0.6745 → 0.4430 → 0.2359 → 0.0658. */
+  --color-band-empty: #ddd6c4;
+  --color-band-low: #b9b1a0;
+  --color-band-partial: #6f8f4f;
+  /* Still near-black — a letterbox is media, not a theme surface. */
+  --color-lens: #141310;
+
+  /* ── heat ───────────────────────────────────────────────────────────────── */
+
+  /* The washes take the SPOT PLATE, not the top of the ramp. 9% of a pale
+     salmon over cream is the single most conspicuous artefact of a naive
+     inversion of this design, and this split is what avoids it. */
+  --ember-wash: var(--color-ember);
+  --wash-heat-faint: color-mix(in srgb, var(--ember-wash) 7%, transparent);
+  --wash-heat: color-mix(in srgb, var(--ember-wash) 11%, transparent);
+  --wash-heat-on: color-mix(in srgb, var(--ember-wash) 12%, transparent);
+  --wash-hover: color-mix(in srgb, var(--color-ember) 6%, transparent);
+  --edge-heat: color-mix(in srgb, var(--ember-wash) 50%, transparent);
+  --edge-heat-strong: color-mix(in srgb, var(--ember-wash) 65%, transparent);
+  --ember-edge: color-mix(in srgb, var(--color-ember) 55%, transparent);
+  --edge-fix: color-mix(in srgb, var(--color-ember) 40%, transparent);
+  /* Toward the INK, not toward white — see the definition. This is what keeps
+     the burner's four stops monotonic in contrast: 14.06 → 9.83 → 7.22 → 5.17. */
+  --burner-core: color-mix(in srgb, var(--color-ember-glow) 40%, var(--color-ink));
+  /* A misregistration ghost, not a halo: the press equivalent of a bloom is a
+     plate landing a hair off register. Fallback if it reads as a rendering
+     bug: `none`. Never a soft glow. */
+  --flame-bloom: drop-shadow(1px 1px 0 color-mix(in srgb, var(--color-ember-glow) 20%, transparent));
+  /* A SCORCH IN THE STOCK, not a lamp. 7% of the dense red composites to
+     HSV 26.4° at S 0.10 — a warm tan at 1.114 against the stock, in parity
+     with dark's 1.127 peak. Vestigial is the one outcome not permitted here:
+     if it reads as a stain, take it to `transparent` and say so. */
+  --keylight-wash: color-mix(in srgb, var(--color-ember) 7%, transparent);
+  /* An alpha-zero copy of the wash rather than `transparent`, which is
+     alpha-zero BLACK and drags a grey-brown cast through the middle of every
+     fade over cream. Check Safari as well as Chromium — premultiplication is
+     the part most likely to differ. */
+  --keylight-fade: rgb(240 226 215 / 0);
+  /* Deliberately UNDER parity with dark's 2.43: a dark annulus on paper reads
+     heavier than a light one on black at the same ratio, and the 7px dot inside
+     it already carries the signal at 5.17. */
+  --pulse-ring: color-mix(in srgb, var(--color-ember) 40%, transparent);
+  /* 0.68 is the first value clearing 1.4.11's 3:1 floor for the live recording
+     indicator; 0.58 gives 2.63 and 0.45 gives 2.09. Dark's 1.97 is a
+     pre-existing failure this change deliberately does not touch. */
+  --pulse-trough: 0.68;
+  --ring-trough: 0.72;
+  /* At 0.25 a light-mode ember composites to near-invisible, turning three
+     `step-end` dips into hard on/off strobes. */
+  --blink-floor: 0.45;
+  --focus-glow: color-mix(in srgb, var(--color-ember) 38%, transparent);
+  /* The pure halos switch OFF rather than retune. A bloom is a dark-room
+     device; there is no press equivalent, and a 10px halo around a 2px tick
+     makes the reading it marks imprecise. */
+  --glow-modal: 0 0 0 0 transparent;
+  --glow-ring: none;
+  --glow-tick: 0 0 0 0 transparent;
+  /* The two LIFTED objects keep their lift, but as a real contact shadow plus
+     a containing ring instead of a halo. */
+  --glow-seal: 0 2px 8px -3px rgba(60, 48, 30, 0.22), 0 0 0 1px color-mix(in srgb, var(--color-ember) 22%, transparent);
+  --glow-thumb: 0 1px 3px rgba(60, 48, 30, 0.28);
+  /* Toward the surface, so the sweep still lightens what it crosses.
+     `--color-ink` here would darken the ember bar and invert a glint into a
+     smudge. */
+  --sheen-hi: color-mix(in oklab, var(--color-paper) 45%, transparent);
+
+  /* ── verdict-scale alphas ───────────────────────────────────────────────── */
+
+  --wash-zone-strong: color-mix(in srgb, var(--color-strong) 22%, transparent);
+  --edge-zone-strong: color-mix(in srgb, var(--color-strong) 55%, transparent);
+  --edge-verdict-strong: color-mix(in srgb, var(--color-strong) 70%, transparent);
+  --edge-verdict-weak: color-mix(in srgb, var(--color-weak) 70%, transparent);
+  --danger-edge: color-mix(in srgb, var(--color-weak) 60%, transparent);
+  --danger-line: color-mix(in srgb, var(--color-weak) 55%, transparent);
+  --danger-wash: color-mix(in srgb, var(--color-weak) 12%, transparent);
+  /* Dead on light — both call sites are inside the pinned room — but stated so
+     the pair cannot drift if one of them ever moves out of it. */
+  --edge-mixed: color-mix(in srgb, var(--color-mixed) 55%, transparent);
+  --chip-edge: 50%;
+
+  /* ── optical ────────────────────────────────────────────────────────────── */
+
+  /* The INK at 45%, not the surface: a scrim has to darken in both modes. This
+     also beats dark on its own terms — 3.20:1 of panel separation against
+     1.03:1 — and reads as the page knocked back to a tint under a fresh sheet. */
+  --scrim: color-mix(in srgb, var(--color-ink) 45%, transparent);
+  --scrim-confirm: color-mix(in srgb, var(--color-ink) 45%, transparent);
+  /* Fill up and radius up: blur preserves luminance, so at the dark
+     percentages ink ghosts through a light veil as legible shape rather than
+     as texture. */
+  --veil-mix: 96%;
+  --veil-mix-chrome: 95%;
+  --veil-blur: blur(16px) saturate(1.1);
+  --scrim-blur: blur(14px);
+  /* The alpha collapses, the geometry tightens and the black goes WARM. All
+     three are required: a black shadow is nearly invisible on #0e0e0e and
+     heavy-handed on cream, and a neutral shadow under a warm stock reads as
+     dirty grey. */
+  --shadow-modal: 0 24px 56px -28px rgba(60, 48, 30, 0.20);
+  --shadow-card: 0 14px 34px -26px rgba(60, 48, 30, 0.16);
+  /* The toast is #fdfbf6 bordered #d7d0be sitting on #f4f0e6, so this shadow
+     is the only thing lifting it off the page. */
+  --shadow-toast: 0 10px 28px -12px rgba(60, 48, 30, 0.16), 0 2px 6px -2px rgba(60, 48, 30, 0.10);
+  /* Tooth rather than grain: lighter, multiplied INTO the stock, and stripped
+     of chroma — feTurbulence perturbs R/G/B independently, and that fringing is
+     invisible against black but shows as coloured speckle on cream. Grayscale
+     and NOT invert(1): inverting mid-grey noise about 0.5 is close to identity,
+     and `filter` never touches the alpha channel that drives the polarity, so
+     invert would ship as a no-op. If this still reads as dirt rather than
+     tooth, the honest fallback is 0 — not more tuning. */
+  --grain-opacity: 0.022;
+  --grain-opacity-landing: 0.028;
+  --grain-blend: multiply;
+  --grain-filter: grayscale(1);
+  /* The exact reverse of dark, for the same reason dark chose `antialiased`:
+     subpixel rendering thickens stems, which light-on-dark cannot afford and
+     dark-on-light needs. */
+  --font-smoothing: auto;
+  /* 0.4 of the light muted ink over cream lands near 1.6:1 — invisible rather
+     than quiet. */
+  --opacity-disabled-link: 0.5;
+  /* Room-only, so never actually painted; stated for completeness. */
+  --busy-dim: 0.55;
+
+  /* ── rig ────────────────────────────────────────────────────────────────── */
+
+  /* Light mode's one deliberate warmth-in-the-air moment, and on-doctrine only
+     because the multiply below makes it a scorch in the stock rather than a
+     lamp in the room. */
+  --rig-key-glow: color-mix(in srgb, var(--color-ember) 6%, transparent);
+  --rig-key-blend: multiply;
+  --rig-wire: color-mix(in srgb, var(--color-line) 55%, transparent);
+  --rig-box-stroke: color-mix(in srgb, var(--color-line) 70%, transparent);
+  /* Solid where dark is 55% translucent — see the definition. */
+  --rig-box-hot-stroke: var(--color-ember);
+  --color-surface-well: #ece8e0;
+  --track-unfilled: color-mix(in srgb, var(--color-ink) 16%, transparent);
+  --rig-grid-dot: color-mix(in srgb, var(--color-ink) 5%, transparent);
+  --rig-mark: color-mix(in srgb, var(--color-ink) 42%, transparent);
+  --rig-mark-opacity: 0.5;
+  --rig-trace-opacity: 1;
+  /* These four go UP, not down — see the definitions. Validate the PRODUCT on
+     `.pl`, which compounds `--rig-trace-opacity` with `--rig-dim-mid`. */
+  --rig-dim-deep: 0.5;
+  --rig-dim-mid: 0.55;
+  --rig-dim-soft: 0.62;
+  --rig-dim-cite: 0.78;
+  --rig-pulse-idle: 0.65;
+
+  /* ── sim ────────────────────────────────────────────────────────────────── */
+
+  --sim-groove: #ded8cb;
+  --surface-recessed: #ebe6db;
+  /* Quieter than the live ember bars, which inverting `--color-ink-muted`
+     would not have been. */
+  --mic-idle: #c4bfb3;
+  --rule-quote: #d6d0c3;
+  --rule-pending: #c3bcae;
+  --fmark-fill: color-mix(in srgb, var(--color-ember) 8%, transparent);
+  --rule-unlit: color-mix(in srgb, var(--color-ink) 12%, transparent);
+  --stroke-dashed: color-mix(in srgb, var(--color-ink) 22%, transparent);
+  --color-placeholder: color-mix(in srgb, var(--color-ink-muted) 85%, transparent);
+
+  /* ── late arrivals ─────────────────────────────────────────────────────── */
+
+  --area-heat: color-mix(in srgb, var(--color-ember) 14%, transparent);
+  --chip-fill: 12%;
+  --field-border-hover: color-mix(in srgb, var(--color-ink-muted) 38%, var(--color-line-strong));
+  --tint-border-strong: 70%;
+  --tint-tile: 12%;
+  --tint-chip-loud: 18%;
+  /* Down from 9%, not up: this is the one wash that sits under the verdict, and
+     the stock is already carrying the warmth budget the dark room needed the
+     ember for. Composited it is a scorch in the sheet, not a pink corner. */
+  --verdict-wash: color-mix(in srgb, var(--color-ember) 7%, transparent);
+  --chart-area: color-mix(in oklab, var(--color-ember) 14%, transparent);
+  --chart-guide: color-mix(in oklab, var(--color-ember) 40%, transparent);
+  --veil-chrome: color-mix(in oklab, var(--color-paper-sunken) 96%, transparent);
+  --veil-nav: color-mix(in oklab, var(--color-paper) 96%, transparent);
+  --edge-heat-mid: color-mix(in srgb, var(--ember-wash) 55%, transparent);
+  --ember-edge-loud: color-mix(in srgb, var(--color-ember) 60%, transparent);
+  --edge-stage-done: color-mix(in srgb, var(--color-strong) 70%, transparent);
+  --label-on-wash: var(--color-ember-hot);
+  --done-glow-wash: transparent;
+  --dot-rest: var(--color-paper-raised);
+}
+
+/**
+ * The interview room is PINNED DARK in both themes.
+ *
+ * Product: the hot seat is a video surface where a candidate watches their own
+ * webcam feed, and a cream page reflected off the monitor drags the camera's
+ * auto-exposure and white balance. Every serious video product keeps the stage
+ * dark for exactly that reason.
+ *
+ * Narrative: a press sheet is printed FROM something developed in a darkroom.
+ * The metaphor already contains the dark room — the interview is the exposure,
+ * the report is the print — so turning the lights on in here is not
+ * consistency, it is fogging the negative.
+ *
+ * THE INVARIANT, which must be enforced by a test rather than by memory: every
+ * custom property declared in the light block above must ALSO be declared here
+ * with its dark value. `HotSeat.tsx` is written almost entirely in BASE tokens
+ * and only `SelfView`/`Interviewer` speak `room-*`, so pinning the five
+ * `--color-room-*` tokens alone would leave near-black text on a near-black
+ * surface.
+ *
+ * And the non-obvious half of that invariant: a custom property's var()
+ * references are substituted where it is DECLARED, not where it is used. An
+ * unpinned `--wash-heat` therefore inherits into the room already resolved
+ * against the LIGHT ember, and no amount of re-pinning `--color-ember` here can
+ * undo it. That is why the five tokens whose two modes share an identical
+ * expression — `--heat-hairline`, `--meter-fill-grad` and the three `--flame-*`
+ * — still have to be restated below. Identical text, different substitution.
+ */
+:root[data-theme="light"] .room-root {
+  color-scheme: dark;
+  /* surfaces & ink */
+  --color-paper: #0e0e0e; --color-paper-raised: #131313; --color-paper-sunken: #0a0a0a;
+  --color-ink: #e9e6df; --color-ink-soft: #9b978e; --color-ink-muted: #82807a;
+  --color-ink-faint: color-mix(in oklab, var(--color-ink-muted) 70%, transparent);
+  --color-ink-faintest: color-mix(in oklab, var(--color-ink-muted) 45%, transparent);
+  --color-line: #262521; --color-line-strong: #3a3833;
+  --invert-ink-soft: #3a3833;
+  --stroke-hollow: #82807a; --stroke-hollow-w: 1.5px;
+  /* heat & verdict */
+  --color-ember: #ff4633; --color-ember-hot: #ff6a5a; --color-ember-glow: #ff8a72;
+  --color-ember-soft: #2a1512;
+  --color-strong: #8fbf6b; --color-mixed: #d9a441; --color-weak: #e05c4f;
+  /* every minted token whose value differs */
+  --ember-wash: var(--color-ember-glow);
+  --edge-control: var(--color-line); --edge-control-strong: var(--color-line-strong);
+  --edge-track: var(--color-line); --color-track: var(--color-line);
+  --track-strong: var(--color-line-strong); --surface-hover: var(--color-paper-raised);
+  --stroke-ghost: var(--color-line-strong); --keylight-fade: transparent;
+  --edge-mixed: color-mix(in srgb, var(--color-mixed) 35%, transparent);
+  --ember-edge: color-mix(in srgb, var(--color-ember) 40%, transparent);
+  --grain-opacity: 0.04; --grain-blend: normal; --grain-filter: none;
+  --font-smoothing: antialiased; --busy-dim: 0.4; --disabled-opacity: 0.7;
+  --pulse-trough: 0.45; --ring-trough: 0.55; --pulse-ring: color-mix(in srgb, var(--color-ember) 55%, transparent);
+  --shadow-card: 0 22px 60px -32px rgba(0, 0, 0, 0.85);
+  --shadow-float: 0 22px 60px -20px rgba(0, 0, 0, 0.9);
+  --word-in-blur: 5px;
+  --color-band-empty: color-mix(in oklab, var(--color-ink-muted) 20%, transparent);
+  --color-band-low: color-mix(in oklab, var(--color-ink-muted) 40%, transparent);
+  --color-band-partial: color-mix(in oklab, var(--color-strong) 55%, transparent);
+  /* `.deck-*` is the report's tape player and is never nested under
+     `.room-root`, so pinning these two cannot reach it. Pinned anyway: an
+     invariant with a remembered exception is not an invariant. */
+  --color-lens: color-mix(in srgb, var(--color-paper) 45%, black);
+  --color-surface-well: var(--color-paper);
+  /* heat */
+  --wash-heat-faint: color-mix(in srgb, var(--ember-wash) 4%, transparent);
+  --wash-heat: color-mix(in srgb, var(--ember-wash) 6%, transparent);
+  --wash-heat-on: color-mix(in srgb, var(--ember-wash) 8%, transparent);
+  --wash-hover: color-mix(in srgb, var(--color-ember-soft) 35%, transparent);
+  --edge-heat: color-mix(in srgb, var(--ember-wash) 35%, transparent);
+  --edge-heat-strong: color-mix(in srgb, var(--ember-wash) 50%, transparent);
+  --edge-fix: color-mix(in srgb, var(--color-ember) 25%, transparent);
+  --burner-core: color-mix(in srgb, var(--color-ember-glow) 40%, white);
+  --keylight-wash: color-mix(in srgb, var(--color-ember-glow) 9%, transparent);
+  --blink-floor: 0.25;
+  --focus-glow: color-mix(in srgb, var(--color-ember) 16%, transparent);
+  --glow-modal: 0 0 120px -40px color-mix(in srgb, var(--color-ember) 30%, transparent);
+  --glow-ring: drop-shadow(0 0 12px color-mix(in srgb, var(--color-ember) 30%, transparent));
+  --glow-tick: 0 0 10px color-mix(in srgb, var(--color-ember-glow) 60%, transparent);
+  --glow-seal: 0 0 34px -8px color-mix(in srgb, var(--color-ember) 45%, transparent);
+  --glow-thumb: 0 0 16px -2px color-mix(in srgb, var(--color-ember) 60%, transparent);
+  --sheen-hi: color-mix(in oklab, var(--color-ink) 30%, transparent);
+  /* Same expression in both modes, restated for the substitution reason in the
+     docblock above. `.q-n`'s filament and the two segment meters are inside the
+     room and would otherwise paint the light ember. */
+  --heat-hairline: var(--color-ember);
+  --meter-fill-grad: linear-gradient(90deg, var(--color-ember), var(--color-ember-glow));
+  --flame-1: var(--color-ember-glow); --flame-2: var(--color-ember-hot); --flame-3: var(--color-ember);
+  --flame-bloom: drop-shadow(0 0 26px color-mix(in srgb, var(--color-ember) 34%, transparent));
+  /* verdict-scale alphas */
+  --wash-zone-strong: color-mix(in srgb, var(--color-strong) 14%, transparent);
+  --edge-zone-strong: color-mix(in srgb, var(--color-strong) 30%, transparent);
+  --edge-verdict-strong: color-mix(in srgb, var(--color-strong) 50%, transparent);
+  --edge-verdict-weak: color-mix(in srgb, var(--color-weak) 50%, transparent);
+  --danger-edge: color-mix(in srgb, var(--color-weak) 40%, transparent);
+  --danger-line: color-mix(in srgb, var(--color-weak) 35%, transparent);
+  --danger-wash: color-mix(in srgb, var(--color-weak) 7%, transparent);
+  --chip-edge: 30%;
+  /* optical */
+  --scrim: color-mix(in srgb, var(--color-paper) 82%, transparent);
+  --scrim-confirm: color-mix(in srgb, var(--color-paper) 80%, transparent);
+  --veil-mix: 92%; --veil-mix-chrome: 80%;
+  --veil-blur: blur(10px); --scrim-blur: blur(8px);
+  --shadow-modal: 0 40px 100px -30px rgba(0, 0, 0, 0.8);
+  --shadow-toast: 0 22px 60px -32px rgba(0, 0, 0, 0.85);
+  --grain-opacity-landing: 0.05;
+  --opacity-disabled-link: 0.4;
+  /* rig & sim. Neither the landing plate nor the simulation renders inside the
+     room; they are here because the invariant admits no exceptions, and an
+     unpinned token is one a future call site can drag in. */
+  --rig-key-glow: color-mix(in srgb, var(--color-ember) 11%, transparent);
+  --rig-key-blend: normal;
+  --rig-wire: var(--color-line); --rig-box-stroke: var(--color-line);
+  --rig-box-hot-stroke: color-mix(in srgb, var(--color-ember) 55%, transparent);
+  --track-unfilled: color-mix(in srgb, var(--color-ink) 12%, transparent);
+  --rig-grid-dot: color-mix(in srgb, var(--color-ink) 7%, transparent);
+  --rig-mark: var(--color-ink-muted); --rig-mark-opacity: 0.65; --rig-trace-opacity: 0.75;
+  --rig-dim-deep: 0.35; --rig-dim-mid: 0.45; --rig-dim-soft: 0.55; --rig-dim-cite: 0.7;
+  --rig-pulse-idle: 0.3;
+  --sim-groove: var(--color-paper); --surface-recessed: var(--color-paper);
+  --mic-idle: var(--color-ink-muted); --rule-quote: var(--color-line);
+  --rule-pending: var(--color-line-strong); --fmark-fill: transparent;
+  --rule-unlit: var(--color-line); --stroke-dashed: var(--color-line-strong);
+  --color-placeholder: color-mix(in srgb, var(--color-ink-muted) 65%, transparent);
+  --area-heat: color-mix(in srgb, var(--color-ember) 22%, transparent);
+  --chip-fill: 7%; --tint-border-strong: 55%; --tint-tile: 8%; --tint-chip-loud: 13%;
+  --field-border-hover: color-mix(in srgb, var(--color-ink-muted) 25%, var(--color-line-strong));
+  --verdict-wash: color-mix(in srgb, var(--color-ember) 9%, transparent);
+  --chart-area: color-mix(in oklab, var(--color-ember) 10%, transparent);
+  --chart-guide: color-mix(in oklab, var(--color-ember) 25%, transparent);
+  --veil-chrome: color-mix(in oklab, var(--color-paper-sunken) 90%, transparent);
+  --veil-nav: color-mix(in oklab, var(--color-paper) 90%, transparent);
+  --edge-heat-mid: color-mix(in srgb, var(--ember-wash) 40%, transparent);
+  --ember-edge-loud: color-mix(in srgb, var(--color-ember) 45%, transparent);
+  --edge-stage-done: color-mix(in srgb, var(--color-strong) 45%, transparent);
+  --label-on-wash: var(--color-ember);
+  --done-glow-wash: color-mix(in srgb, var(--color-ember) 15%, transparent);
+  --dot-rest: var(--color-paper);
+}
+
+/* Forced colours. The system palette replaces every colour anyway, so the
+   atmosphere is zeroed rather than fought: a bloom or a grain wash that
+   survives here survives only as an artefact the reader cannot switch off.
+
+   The selector is `:root`, as specified. Note that it therefore loses to the
+   (0,1,1) light block above for a reader who is in light mode AND forced
+   colours; the affected values are all decorative, but the gap is real and is
+   recorded here so it is found deliberately rather than rediscovered. */
+@media (forced-colors: active) {
+  /* Selector list, not a bare `:root`. The light block is
+     `:root[data-theme="light"]` at (0,2,0) and this reset was (0,1,0), so in
+     LIGHT mode — the only mode with atmosphere values worth zeroing — every
+     declaration below lost the cascade and the block did nothing at all. */
+  :root,
+  :root[data-theme="light"],
+  :root[data-theme="light"] .room-root {
+    --keylight-wash: transparent;
+    --glow-modal: none;
+    --glow-tick: 0 0 0 0 transparent;
+    --flame-bloom: none;
+    --grain-opacity: 0;
+    --grain-opacity-landing: 0;
+    --shadow-modal: none;
+    --shadow-card: none;
+  }
+  :focus-visible {
+    outline-color: Highlight;
+  }
 }
 
 /* 64rem is Tailwind's `lg`, which is what `lg:hidden` on the header and
@@ -125,7 +1016,7 @@
 
 @layer base {
   html {
-    -webkit-font-smoothing: antialiased;
+    -webkit-font-smoothing: var(--font-smoothing);
   }
 
   body {
@@ -176,13 +1067,19 @@
 
      22% → 12%, because the strength was calibrated against the old warm-brown
      base. The same alpha over #0e0e0e reads roughly twice as hot, and the
-     reference hot seat has barely a suggestion of light behind the question. */
+     reference hot seat has barely a suggestion of light behind the question.
+
+     Those two stops are now permanent rather than provisional. The only call
+     site is inside `.room-root`, which is pinned dark in both themes, so
+     #0e0e0e is the only base they will ever composite over and a light-mode
+     value would be dead code. Only the terminator is tokenised, and only so
+     that the six fade-to-nothing gradients in this file stay one idiom. */
   .ember-glow {
     background: radial-gradient(
       58% 60% at 50% 0%,
       color-mix(in srgb, var(--color-ember) 12%, transparent),
       color-mix(in srgb, var(--color-ember-glow) 4%, transparent) 46%,
-      transparent 72%
+      var(--keylight-fade) 72%
     );
   }
 
@@ -195,7 +1092,7 @@
       transform: scale(1);
     }
     50% {
-      opacity: 0.45;
+      opacity: var(--pulse-trough);
       transform: scale(0.86);
     }
   }
@@ -209,7 +1106,7 @@
     0%,
     100% {
       transform: scale(1);
-      opacity: 0.55;
+      opacity: var(--ring-trough);
     }
     50% {
       transform: scale(1.06);
@@ -241,7 +1138,7 @@
     from {
       opacity: 0;
       transform: translateY(0.45em);
-      filter: blur(5px);
+      filter: blur(var(--word-in-blur));
     }
     to {
       opacity: 1;
@@ -327,7 +1224,7 @@
   font-family: var(--font-sans);
   font-size: 16px;
   line-height: 1.6;
-  -webkit-font-smoothing: antialiased;
+  -webkit-font-smoothing: var(--font-smoothing);
 }
 .grill-root {
   --wrap-max: 1160px;
@@ -382,15 +1279,24 @@
   inset: 0;
   z-index: 40;
   pointer-events: none;
-  opacity: 0.04;
+  /* Film grain lifting the blacks on dark; paper tooth on light. The noise is
+     never inverted — it is subtractive by nature, so its polarity is already
+     right — and only its weight, blend and chroma move. `normal` and `none`
+     are the initial values of the two properties below, so dark paints exactly
+     what it painted before they were declared. */
+  opacity: var(--grain-opacity);
+  mix-blend-mode: var(--grain-blend);
+  filter: var(--grain-filter);
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 .grill-root .grain {
-  opacity: 0.05;
+  opacity: var(--grain-opacity-landing);
 }
 
 /* The single ember key-light. Decorative and under everything: z-index 0,
-   pointer-events none. */
+   pointer-events none. The wash is typed once for both rules below — only the
+   gradient's geometry differs, a 30% origin here and 70% on the report — so the
+   two can never be re-tuned apart. */
 .keylight {
   position: absolute;
   inset: -12% -20% auto;
@@ -399,8 +1305,8 @@
   pointer-events: none;
   background: radial-gradient(
     44% 38% at 30% 0%,
-    color-mix(in srgb, var(--color-ember-glow) 9%, transparent),
-    transparent 68%
+    var(--keylight-wash),
+    var(--keylight-fade) 68%
   );
 }
 /* The report reads right-to-left off the ring, so its light comes from there. */
@@ -408,8 +1314,8 @@
   height: 56vh;
   background: radial-gradient(
     44% 38% at 70% 0%,
-    color-mix(in srgb, var(--color-ember-glow) 9%, transparent),
-    transparent 68%
+    var(--keylight-wash),
+    var(--keylight-fade) 68%
   );
 }
 
@@ -490,10 +1396,16 @@
  * Bone, not ember — and this is the one that surprises people.
  *
  * The accent is reserved for heat: live state, the unfinished session's edge,
- * the marker on a score band. A filled ember button competes with all of it, and
- * on a near-black page the brightest thing available is the ink itself. So the
- * primary action is a bone slab that turns red under the cursor: the heat is
- * what the press promises, not what the button already is.
+ * the marker on a score band. A filled ember button competes with all of it, so
+ * the primary action is instead the boldest mark the sheet can carry — which is
+ * the ink itself in either mode: on a near-black page the brightest thing
+ * available, on the press sheet the densest. It turns red under the cursor: the
+ * heat is what the press promises, not what the button already is.
+ *
+ * Stated at that altitude the rule needs no light value and gets better rather
+ * than merely surviving — 16.15:1 at rest, 5.17:1 on hover, both above dark's.
+ * Ink and paper are an exact inverting pair, so a black plate at rest and a red
+ * plate on hover is a two-colour press run described literally.
  */
 .btn-primary {
   border-color: var(--color-ink);
@@ -505,8 +1417,12 @@
   background: var(--color-ember);
   color: var(--color-paper);
 }
+/* The border IS the control here, which is why it takes the control-chrome
+   token rather than the divider it happens to share a value with on dark. A
+   divider separates two regions and can afford to be faint; an edge that is the
+   only thing drawing the button has to be found. */
 .btn-secondary {
-  border-color: var(--color-line-strong);
+  border-color: var(--edge-control-strong);
   background: transparent;
   color: var(--color-ink);
 }
@@ -522,29 +1438,36 @@
 .btn-ghost:hover {
   color: var(--color-ink);
 }
-/* On the report a ghost button is a mono chip, not a nav link. */
+/* On the report a ghost button is a mono chip, not a nav link. Its rest edge is
+   decorative and its hover edge is the control proper, so the two take different
+   tokens: that pair lightens on dark and darkens on light, which is what makes
+   hover firm the chip up in both modes rather than only in one. */
 .report-main .btn-ghost {
-  border-color: var(--color-line);
+  border-color: var(--edge-control);
   font-family: var(--font-mono);
   font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 .report-main .btn-ghost:hover {
-  border-color: var(--color-line-strong);
+  border-color: var(--edge-control-strong);
   color: var(--color-ink);
 }
+/* Quiet until you reach for it: a decorative chip edge and muted type at rest,
+   and only the hover says danger. The hover edge is a token because its strength
+   has to travel with its value — the 40% that reads as a warning over black is
+   too faint to register over paper, where it takes 60%. */
 .btn-danger {
-  border-color: var(--color-line);
+  border-color: var(--edge-control);
   background: transparent;
   color: var(--color-ink-muted);
 }
 .btn-danger:hover {
-  border-color: color-mix(in srgb, var(--color-weak) 40%, transparent);
+  border-color: var(--danger-edge);
   color: var(--color-weak);
 }
 .btn:disabled {
-  opacity: 0.7;
+  opacity: var(--disabled-opacity);
   transform: none;
   cursor: wait;
 }
@@ -613,24 +1536,31 @@
 @keyframes g-pulse {
   0%,
   100% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-ember) 55%, transparent);
+    box-shadow: 0 0 0 0 var(--pulse-ring);
   }
+  /* The vanishing end stays an inline 0% mix rather than a second token: it is
+     an alpha-zero copy of the same hue, and box-shadow colours interpolate
+     premultiplied, so neither end of the ring can fringe. Tokenising it for
+     symmetry would only invent a way for the two ends to disagree. */
   55% {
     box-shadow: 0 0 0 7px color-mix(in srgb, var(--color-ember) 0%, transparent);
   }
 }
 
 /* The word that carries the heat. Gradient-clipped text, so it needs a
-   transparent fill — and a `display: inline-block` to keep the clip box sane. */
+   transparent fill — and a `display: inline-block` to keep the clip box sane.
+   The stops are tokens so the pan cannot rot behind a ramp change: on light the
+   same four run the other way in lightness while gaining contrast, and never
+   fall below 5.17:1 at any point in the 5.5s sweep. */
 .flame {
   display: inline-block;
   padding-right: 0.06em;
   background: linear-gradient(
     105deg,
-    var(--color-ember-glow) 0%,
-    var(--color-ember-hot) 34%,
-    var(--color-ember) 58%,
-    var(--color-ember-glow) 92%
+    var(--flame-1) 0%,
+    var(--flame-2) 34%,
+    var(--flame-3) 58%,
+    var(--flame-1) 92%
   );
   background-size: 220% 100%;
   -webkit-background-clip: text;
@@ -642,8 +1572,20 @@
   font-style: normal;
   font-weight: 800;
   letter-spacing: -0.02em;
-  filter: drop-shadow(0 0 26px color-mix(in srgb, var(--color-ember) 34%, transparent));
+  filter: var(--flame-bloom);
   animation: g-flame 5.5s ease-in-out infinite alternate;
+}
+/* Where `background-clip: text` is unsupported — older and embedded UAs, and
+   some print pipelines — the declarations above leave transparent type over a
+   fill that never lands, so the word vanishes rather than degrading. It has had
+   no solid fallback at all until now, which costs nothing on screen and
+   everything on paper; print stops being hypothetical the moment the page is a
+   sheet. */
+@supports not ((background-clip: text) or (-webkit-background-clip: text)) {
+  .flame {
+    -webkit-text-fill-color: var(--color-ember);
+    color: var(--color-ember);
+  }
 }
 @keyframes g-flame {
   from {
@@ -670,7 +1612,11 @@
   color: var(--color-ember);
 }
 /* The report rules off its kicker; the dashboard's sits in a tight head row
-   where a trailing rule would only add noise. */
+   where a trailing rule would only add noise. The 40px tick takes the
+   control-edge token rather than the divider it matches today — it is a mark
+   attached to a label, not a boundary between two regions — which also keeps
+   decorative rules and control chrome from drifting once the divider
+   direction flips. */
 .report-main .kicker {
   display: flex;
   align-items: center;
@@ -680,18 +1626,27 @@
   content: "";
   width: 40px;
   height: 1px;
-  background: var(--color-line-strong);
+  background: var(--edge-control-strong);
 }
 
+/* A 5px well, so its boundary has to hold an extent rather than split two
+   fields, and a hairline divider value cannot do that once the direction flips.
+   The fill stays `--color-paper-sunken`, the one surface token that does NOT
+   invert on light: a recess that goes toward white becomes a bump and every
+   score meter in the product reads inside-out. Do not "fix" it lighter. */
 .meter {
   overflow: hidden;
   height: 5px;
-  border: 1px solid var(--color-line);
+  border: 1px solid var(--edge-track);
   background: var(--color-paper-sunken);
 }
+/* Five bars across the product copy this fill, so the gradient is a token and
+   its two ends can never be re-tuned independently. It gains contrast toward
+   its leading edge in both modes — lighter on dark, denser on light — which is
+   the same reading of "hotter" made out of ink instead of out of light. */
 .meter-fill {
   height: 100%;
-  background: linear-gradient(90deg, var(--color-ember), var(--color-ember-glow));
+  background: var(--meter-fill-grad);
   transform-origin: left;
   animation: g-fill 1s cubic-bezier(0.2, 0.7, 0.2, 1) both;
 }
@@ -754,7 +1709,12 @@
 @supports (-webkit-text-stroke: 1px black) {
   .grill-root .hollow {
     color: transparent;
-    -webkit-text-stroke: 1.5px var(--color-ink-muted);
+    /* Its own ink, not the caption grey it happens to share a hex with on
+       dark: solid and hollow words alternate inside one line, so on the sheet
+       they have to read as one ink laid down at two coverages. The width goes
+       UP on light for the matching reason — a light stroke on black blooms, a
+       dark stroke on cream does not. */
+    -webkit-text-stroke: var(--stroke-hollow-w) var(--stroke-hollow);
   }
 }
 .grill-root .red {
@@ -804,9 +1764,14 @@
   top: 0;
   z-index: 30;
   border-bottom: 1px solid var(--color-line);
-  background: color-mix(in srgb, var(--color-paper) 92%, transparent);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  /* Fill strength and blur radius are both per-mode. Blur preserves luminance
+     — it smears ink into grey rather than removing it — so a light veil at the
+     dark percentage lets the headline underneath ghost through as legible
+     shape rather than as texture. The prefixed and unprefixed declarations
+     have to take the token in the same edit, or Safari alone ghosts. */
+  background: color-mix(in srgb, var(--color-paper) var(--veil-mix), transparent);
+  backdrop-filter: var(--veil-blur);
+  -webkit-backdrop-filter: var(--veil-blur);
 }
 /* Three tracks, not flex: the links must be centred against the page, not
    against whatever the two ends happen to measure. */
@@ -1069,7 +2034,10 @@
   letter-spacing: inherit;
   text-transform: inherit;
   color: var(--color-ink-soft);
-  border-bottom: 1px solid var(--color-line-strong);
+  /* The underline IS the control here rather than a divider between two
+     regions, so it takes the control edge: the same value on dark, but on
+     light it firms up to one that carries a real affordance. */
+  border-bottom: 1px solid var(--edge-control-strong);
   padding-bottom: 1px;
   transition:
     color 0.2s ease,
@@ -1163,6 +2131,15 @@
   animation: g-wave 1.4s ease-in-out infinite alternate;
   animation-delay: calc(var(--n) * -0.08s);
 }
+/* 3px of decoration wants a ~3:1 target, not type's 4.5:1: the light muted ink
+   reads at 4.97 and would turn the waveform into a barcode. Scoped rather than
+   swapped on the rule above, because the faintest step is a 45% alpha on dark
+   where these bars are solid today. The `:not()` is load-bearing — this
+   selector out-specifies the ember accent below, which keeps its colour in
+   both modes. */
+:root[data-theme="light"] .grill-root .wave i:not(:nth-child(7n)) {
+  background: var(--color-ink-faintest);
+}
 .grill-root .wave i:nth-child(7n) {
   background: var(--color-ember);
 }
@@ -1187,8 +2164,12 @@
 .grill-root .bn:first-child {
   border-left: 0;
 }
+/* The row-hover wash, not the raised-card surface it shares a value with on
+   dark. A hovered row and a static card move in opposite directions on the
+   sheet — the row darkens, the card lifts — so the two roles are separate
+   tokens even where one value serves both today. */
 .grill-root .bn:hover {
-  background: var(--color-paper-raised);
+  background: var(--surface-hover);
 }
 .grill-root .bn .n {
   font-family: var(--font-display);
@@ -1260,9 +2241,17 @@
   border-left: 0;
 }
 /* Hover darkens rather than lightens: the grid is the raised surface, so the
-   cell under the cursor drops back to the page and reads as cut into it. */
+   cell under the cursor drops back to the page and reads as cut into it.
+   On light it drops one step further, to the shared row-hover wash, so this
+   cell reads at the same strength as every other hovered row on the page. That
+   is scoped rather than swapped outright because the same token resolves to
+   the raised surface on dark — the colour the grid is already painted in —
+   which would erase this hover entirely. */
 .grill-root .mode:hover {
   background: var(--color-paper);
+}
+:root[data-theme="light"] .grill-root .mode:hover {
+  background: var(--surface-hover);
 }
 .grill-root .mode .mk {
   font-family: var(--font-mono);
@@ -1341,6 +2330,11 @@
  * physically making room for the line you are reading. Everything inside has to
  * be restated against bone, including the arrow's stroke, or the row goes blank
  * on hover.
+ *
+ * The slab is the page's own opposite in both modes, which is why none of it is
+ * per-mode: on dark a bone sheet lands on black, on light a reversed-out panel
+ * lands on the sheet. `--color-ink` as the fill and `--color-paper` as the
+ * knockout are an exact inverting pair, so neither is ever a literal here.
  */
 .grill-root .trow:hover {
   padding-inline: 1.4rem;
@@ -1382,17 +2376,21 @@
   transition: stroke 0.22s ease;
 }
 .grill-root .trow:hover .tn {
-  color: var(--color-line-strong);
+  color: var(--invert-ink-soft);
 }
 .grill-root .trow:hover h3,
 .grill-root .trow:hover .ar svg {
   color: var(--color-paper);
   stroke: var(--color-paper);
 }
-/* `line-strong` is the darkest grey in the set — on bone it lands as body copy
-   rather than as a second heading, which is what the paper reads like. */
+/* Secondary type on the reversed-out slab. It borrowed `line-strong` — the
+   darkest grey in the set, which on bone lands as body copy rather than as a
+   second heading, which is what the paper reads like — and worked only by
+   coincidence. Named now, because it is the one value in this range that has
+   to run opposite to the rest of the palette: its ground is the page's
+   opposite, so it lightens where everything else darkens. */
 .grill-root .trow:hover p {
-  color: var(--color-line-strong);
+  color: var(--invert-ink-soft);
 }
 .grill-root .trow:hover .ar {
   border-color: var(--color-paper);
@@ -1426,7 +2424,7 @@
 }
 .grill-root .faqi summary:hover {
   padding-inline: 1rem;
-  background: var(--color-paper-raised);
+  background: var(--surface-hover);
 }
 .grill-root .faqi h3 {
   font-family: var(--font-display);
@@ -1721,10 +2719,20 @@
      dimmed rather than recoloured. It used to be a re-typed warm near-black
      (12, 9, 6) picked to sit under the brown paper; against a neutral #0e0e0e
      that literal tinted the dimmed room amber. Mixing from `paper` means the
-     scrim can never drift from the surface it is dimming again. */
-  background: color-mix(in srgb, var(--color-paper) 82%, transparent);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+     scrim can never drift from the surface it is dimming again.
+     That last sentence only holds while the surface is near-black, which is why
+     the 82% now lives in `--scrim` and not here: a scrim has to DARKEN in both
+     modes, so on the sheet it is mixed out of the INK instead, and the panel
+     gets 3.20:1 of separation against the 1.03:1 dark manages. The dark value
+     is unchanged, and has its own token so the delete confirm's 80% can never
+     drag `.overlay` down to 80% with it.
+     The blur goes up with it. Blur preserves luminance — it smears ink into
+     grey rather than removing it — so at 8px a light veil lets the dimmed page
+     read through as shape. Prefixed and unprefixed take the token in the same
+     edit, or Safari alone ghosts. */
+  background: var(--scrim);
+  backdrop-filter: var(--scrim-blur);
+  -webkit-backdrop-filter: var(--scrim-blur);
   animation: g-ov-in 0.3s ease both;
 }
 .overlay.closing {
@@ -1749,10 +2757,17 @@
   padding: 26px 28px 24px;
   border: 1px solid var(--color-line-strong);
   border-radius: var(--radius-card);
+  /* Raised at the near edge falling to sunken at 80%: a top-lit panel. It needs
+     no per-mode expression because `--color-paper-sunken` is the one surface
+     token whose direction does NOT invert — a recess stays darker than paper on
+     the sheet too — so 170deg still runs from the lit edge to the shaded one. */
   background: linear-gradient(170deg, var(--color-paper-raised), var(--color-paper-sunken) 80%);
-  box-shadow:
-    0 40px 100px -30px rgba(0, 0, 0, 0.8),
-    0 0 120px -40px color-mix(in srgb, var(--color-ember) 30%, transparent);
+  /* Two layers, and only the first has a press equivalent. The lift survives
+     but goes tight and warm on light, because a neutral shadow under a warm
+     stock reads as dirty grey; the ember bloom is a darkroom device with
+     nothing to fade into on cream, so it switches off rather than being
+     retuned to a value that would only ever be a stain. */
+  box-shadow: var(--shadow-modal), var(--glow-modal);
   animation: g-dlg-in 0.38s cubic-bezier(0.2, 0.7, 0.2, 1) both;
 }
 .overlay.closing .modal {
@@ -1776,7 +2791,12 @@
   inset: 0 0 auto;
   height: 2px;
   border-radius: var(--radius-card) var(--radius-card) 0 0;
-  background: linear-gradient(90deg, transparent, var(--color-ember), transparent);
+  /* The terminators are `--keylight-fade` despite there being no key light in a
+     dialog: `transparent` is alpha-zero BLACK, which is invisible fading out of
+     a black page and drags a grey-brown cast through both tails of the same
+     fade over cream. The mid stop is the shared filament token — at 2px a dark
+     ember on paper is simply a printed rule, so it wants no per-mode value. */
+  background: linear-gradient(90deg, var(--keylight-fade), var(--heat-hairline), var(--keylight-fade));
 }
 .modal-top {
   display: flex;
@@ -1854,6 +2874,16 @@
   color: var(--color-ink-muted);
   transition: color 0.3s ease;
 }
+/* The one accent in the dialog that used to be an inline style, which is why it
+   gets a class of its own rather than `.link-ember`: that one resets `font` to
+   inherit and would blow this 10.5px mono row up to body size. Kept as three
+   declarations here so a scoped theme rule can reach them — an inline style sits
+   at the top of the cascade where nothing can. */
+.hint-link {
+  color: var(--color-ember);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
 .hint.ok {
   color: var(--color-strong);
 }
@@ -1887,15 +2917,24 @@
 /* 25%, not 60%: hover is meant to be one step up from `line-strong`, not a
    different border. A 60% mix lands most of the way to `ink-muted` and reads as
    focus, which the ember ring below is already saying. Re-checked against the
-   neutral tokens — the 25% mix still lands a single visible step up. */
+   neutral tokens — the 25% mix still lands a single visible step up.
+   "One visible step" is a per-mode number rather than a constant, though, and
+   25% was hand-tuned against the dark greys: on the sheet both ends of the mix
+   have moved and the two inks have swapped which is lighter, so the strength
+   travels with the mode in `--field-border-hover` and is 38% there. The dark
+   mix is the same expression it always was. */
 .input:hover {
-  border-color: color-mix(in srgb, var(--color-ink-muted) 25%, var(--color-line-strong));
+  border-color: var(--field-border-hover);
 }
 .input:focus {
   outline: none;
   border-color: var(--color-ember);
   background: var(--color-paper);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-ember) 16%, transparent);
+  /* Reinforcement, not the indicator — the 1px ember border above carries that
+     on its own at 5.69:1 against the card. Which is why the ring can go from
+     16% to 38% on light without shouting: a low-alpha red over cream has
+     nothing to fade into, so it needs the density to register at all. */
+  box-shadow: 0 0 0 3px var(--focus-glow);
 }
 .input.has-toggle {
   padding-right: 62px;
@@ -1923,7 +2962,9 @@
   overflow: hidden;
   height: 3px;
   margin-top: 8px;
-  background: var(--color-line);
+  /* The track is a 3px slab, not a hairline, so it takes `--color-track`: the
+     divider value cannot hold an extent once the direction flips. */
+  background: var(--color-track);
 }
 .pw-meter-fill {
   height: 100%;
@@ -1940,8 +2981,8 @@
   align-items: center;
   gap: 9px;
   padding: 10px 13px;
-  border: 1px solid color-mix(in srgb, var(--color-weak) 35%, transparent);
-  background: color-mix(in srgb, var(--color-weak) 7%, transparent);
+  border: 1px solid var(--danger-line);
+  background: var(--danger-wash);
   font-family: var(--font-mono);
   font-size: 12px;
   letter-spacing: 0.02em;
@@ -1988,7 +3029,7 @@
   color: var(--color-ember);
   text-decoration: underline;
   text-underline-offset: 4px;
-  text-decoration-color: color-mix(in srgb, var(--color-ember) 40%, transparent);
+  text-decoration-color: var(--ember-edge);
   cursor: pointer;
   transition:
     color 0.18s ease,
@@ -2006,7 +3047,7 @@
 .modal-fine {
   margin-top: 20px;
   padding-top: 13px;
-  border-top: 1px dashed var(--color-line-strong);
+  border-top: 1px dashed var(--stroke-dashed);
   font-family: var(--font-mono);
   font-size: 10.5px;
   letter-spacing: 0.06em;
@@ -2019,14 +3060,26 @@
 
 /* ══════════════════════════ signed-in chrome ══════════════════════════ */
 
+/* Nothing renders `.topbar` any more — `AppRail.tsx:14` and `layout.tsx:32` both
+   call it the old topbar. Kept and tokenised with the rest anyway: the veil
+   below is exactly what the rail will want the day it goes sticky, and porting a
+   stale hardcode then is worse than carrying a live one now. */
 .topbar {
   position: sticky;
   top: 0;
   z-index: 30;
-  border-bottom: 1px solid var(--color-line);
-  background: color-mix(in srgb, var(--color-paper) 80%, transparent);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  /* Chrome, not a rule between two blocks of content. It rides the control ramp
+     so this edge can firm up on light without dragging all 75 `border-line`
+     call sites along with it. */
+  border-bottom: 1px solid var(--edge-control);
+  /* Light raises both the fill and the blur radius (80% → 95%, 10px → 16px):
+     blur preserves luminance, so it smears ink into grey rather than removing
+     it, and a veil tuned over black lets dark type ghost through cream as
+     legible shape. The prefixed and unprefixed declarations must take the token
+     in the same edit, or Safari alone ghosts. */
+  background: color-mix(in srgb, var(--color-paper) var(--veil-mix-chrome), transparent);
+  backdrop-filter: var(--veil-blur);
+  -webkit-backdrop-filter: var(--veil-blur);
 }
 .topbar-in {
   display: flex;
@@ -2049,11 +3102,14 @@
     background-color 0.18s ease;
 }
 .topnav a:hover {
-  background: var(--color-paper-raised);
+  /* Deliberately not the raised-card token it happens to equal on dark: a hover
+     has to step away from the page, which is lighter on black and DARKER on
+     cream, while a static card steps up on both. */
+  background: var(--surface-hover);
   color: var(--color-ink);
 }
 .topnav a.active {
-  background: var(--color-paper-raised);
+  background: var(--surface-hover);
   color: var(--color-ink);
   box-shadow: inset 0 -2px 0 var(--color-ember);
 }
@@ -2068,11 +3124,16 @@
   justify-content: center;
   width: 32px;
   height: 32px;
-  border: 1px solid color-mix(in srgb, var(--color-ember) 40%, transparent);
+  border: 1px solid var(--ember-edge);
   background: var(--color-ember-soft);
   font-family: var(--font-mono);
   font-size: 11px;
   letter-spacing: 0.06em;
+  /* The ramp top on its own tint, and it survives the flip because the heat ramp
+     is monotonic in CONTRAST rather than lightness: dark `#ff8a72` on `#2a1512`
+     is 6.9, light `#741808` on `#f7e2da` is 8.65. The name misleads on paper —
+     there the glow is the DENSEST ember, and dropping to `--color-ember` to
+     "brighten" these initials would cost half the contrast (4.72). */
   color: var(--color-ember-glow);
 }
 /* The design hides this row on a phone. Wired to real routes, hiding it would
@@ -2166,9 +3227,14 @@
   border: 1px solid var(--color-line);
   border-left: 2px solid var(--color-ember);
   border-radius: var(--radius-card);
+  /* The tint at full strength. `--color-ember-soft` is a pre-baked composite
+     per mode rather than a hue, so a second alpha on top of it would be one
+     number trying to serve two different bases: on the press sheet 50% of
+     `#f7e2da` over the raised card is nothing at all. The dark composite does
+     move a shade with this — `.resume` has no call site, so nothing paints it. */
   background: linear-gradient(
     90deg,
-    color-mix(in srgb, var(--color-ember-soft) 50%, transparent),
+    var(--color-ember-soft),
     var(--color-paper-raised) 55%
   );
 }
@@ -2289,7 +3355,16 @@
   position: absolute;
   inset: 0 0 auto;
   height: 2px;
-  background: linear-gradient(90deg, transparent, var(--color-ember), transparent);
+  /* `transparent` is alpha-zero *black*, which drags a grey-brown cast through
+     the middle of a fade over cream; `--keylight-fade` is an alpha-zero copy of
+     the stock and stays in hue end to end. The mid stop is shared with the
+     file's three other 2px filaments so the four can never drift. */
+  background: linear-gradient(
+    90deg,
+    var(--keylight-fade),
+    var(--heat-hairline),
+    var(--keylight-fade)
+  );
 }
 .trend-head {
   display: flex;
@@ -2342,30 +3417,49 @@
     opacity: 1;
   }
 }
+/* Raised, not paper: the dot is knocked out of the card it is drawn on, not out
+   of the page behind it. In the dark room the two are one step apart and nobody
+   could tell; on the press sheet the card is the *lighter* of the pair, so the
+   wrong one punches a dull cream hole in a white dot. The same fix belongs on
+   `Trend.tsx`'s `fill-paper` circles, which are what actually renders today. */
 .trend-dot {
-  fill: var(--color-paper);
+  fill: var(--color-paper-raised);
   stroke: var(--color-ember-glow);
   stroke-width: 1.6;
 }
 .trend-dot-last {
   fill: var(--color-ember-glow);
-  stroke: color-mix(in srgb, var(--color-ember-glow) 35%, transparent);
+  stroke: var(--edge-heat);
   stroke-width: 6;
 }
+/* A ring that cannot glow reads as nothing but weight, and 6px of ink around a
+   4px dot is a blot rather than a halo. The only width the light scope touches
+   anywhere in the product — everything else moves value and hue alone. */
+:root[data-theme="light"] .trend-dot-last {
+  stroke-width: 4;
+}
 /* The hovered point borrows the latest point's treatment, one notch cooler so
-   "where you stand now" still reads as the brighter of the two. */
+   "where you stand now" still reads as the brighter of the two. On paper the
+   ring is ink, so "brighter" becomes "heavier": the latest point's ring opens to
+   50% coverage while this one holds at 22%, and the ranking comes through the
+   inversion unchanged. Left as its own expression rather than folded into
+   `--edge-heat` precisely so that two-step gap can be tuned as a gap. */
 .trend-dot-hover {
   fill: var(--color-ember-glow);
-  stroke: color-mix(in srgb, var(--color-ember-glow) 22%, transparent);
+  stroke: color-mix(in srgb, var(--ember-wash) 22%, transparent);
   stroke-width: 5;
 }
 /* Tinted toward the series hue rather than the border grey. A `line-strong`
    guide on the card surface is about 1.5:1 and reads as nothing happening at
    all; the reference draws these gridlines faintly red for the same reason. It
    still sits well under the dots and the numbers, which is the order that
-   matters. */
+   matters. The 30% was set against the black card and survives the flip only
+   because the hue is `--ember-wash` and not a rung of the ink ramp: 30% of the
+   spot red over a near-white card is about 2.2:1, a printed crosshair. Light
+   `--color-ember-glow` is the *densest* ember, and would have drawn an oxblood
+   rule straight through the chart. */
 .trend-guide {
-  stroke: color-mix(in srgb, var(--color-ember-glow) 30%, transparent);
+  stroke: color-mix(in srgb, var(--ember-wash) 30%, transparent);
   stroke-width: 1;
 }
 .trend-val {
@@ -2400,7 +3494,7 @@
   border-top: none;
 }
 .row:hover {
-  background: color-mix(in srgb, var(--color-ember-soft) 35%, transparent);
+  background: var(--wash-hover);
 }
 .row-t {
   display: flex;
@@ -2452,15 +3546,26 @@
 /* Scoped to `.app-root` for the same reason `.app-root .btn-sm` is: the base
    `.app-root .chip` above is (0,2,0) and sets `color` and the `border`
    shorthand, so an unscoped `.chip-error` (0,1,0) would lose both and every
-   status chip would paint the same neutral grey. */
+   status chip would paint the same neutral grey.
+
+   Strengths rather than colours, because a tint calibrated to hold against
+   black is too thin to survive on cream: these two and the brief's `.chip-ok` /
+   `.chip-req` are one idiom, and `--chip-edge` / `--chip-fill` let it be
+   retuned in one place for every hue at once. The pair drops from 35% to the
+   shared 30% on dark — a difference nothing renders, since neither chip has a
+   call site. */
 .app-root .chip-error {
-  border-color: color-mix(in srgb, var(--color-weak) 35%, transparent);
-  background: color-mix(in srgb, var(--color-weak) 6%, transparent);
+  border-color: color-mix(in srgb, var(--color-weak) var(--chip-edge), transparent);
+  background: color-mix(in srgb, var(--color-weak) var(--chip-fill), transparent);
   color: var(--color-weak);
 }
+/* Edge and fill ride `--ember-wash`, the type stays on `--color-ember-glow`: a
+   low-alpha tint must not follow the ink ramp when the ramp inverts, or the
+   chip's outline turns oxblood on paper while its label — which *should* be the
+   densest ember it can be — is the one thing that wanted that value. */
 .app-root .chip-gen {
-  border-color: color-mix(in srgb, var(--color-ember-glow) 35%, transparent);
-  background: color-mix(in srgb, var(--color-ember-glow) 6%, transparent);
+  border-color: color-mix(in srgb, var(--ember-wash) var(--chip-edge), transparent);
+  background: var(--wash-heat);
   color: var(--color-ember-glow);
 }
 .row-arrow {
@@ -2518,13 +3623,20 @@
   position: absolute;
   inset: 0 0 auto;
   height: 2px;
-  background: linear-gradient(90deg, transparent, var(--color-ember), transparent);
+  background: linear-gradient(90deg, var(--keylight-fade), var(--heat-hairline), var(--keylight-fade));
 }
 .mono-note {
   font-family: var(--font-mono);
   font-size: 10.5px;
   letter-spacing: 0.06em;
   color: var(--color-ink-muted);
+}
+/* The tape player's only error message. A modifier rather than the inline colour
+   it used to be, for the same reason as `.hint-link` — and not a Tailwind utility
+   either, because `.mono-note` is unlayered bespoke CSS and beats anything
+   compiled into `@layer utilities`. */
+.mono-note-error {
+  color: var(--color-weak);
 }
 
 .back {
@@ -2605,7 +3717,7 @@
   stroke: currentColor;
   stroke-width: 7;
   stroke-linecap: round;
-  filter: drop-shadow(0 0 12px color-mix(in srgb, var(--color-ember) 30%, transparent));
+  filter: var(--glow-ring);
   animation: g-ring 1.4s cubic-bezier(0.4, 0, 0.2, 1) 0.2s both;
 }
 @keyframes g-ring {
@@ -2766,8 +3878,8 @@ a.vs-label:hover {
   position: absolute;
   top: -1px;
   bottom: -1px;
-  border: 1px solid color-mix(in srgb, var(--color-strong) 30%, transparent);
-  background: color-mix(in srgb, var(--color-strong) 14%, transparent);
+  border: 1px solid var(--edge-zone-strong);
+  background: var(--wash-zone-strong);
 }
 .band-zone-label {
   position: absolute;
@@ -2787,7 +3899,7 @@ a.vs-label:hover {
   bottom: -8px;
   width: 2px;
   background: var(--color-ember-glow);
-  box-shadow: 0 0 10px color-mix(in srgb, var(--color-ember-glow) 60%, transparent);
+  box-shadow: var(--glow-tick);
 }
 .band-tick-label {
   position: absolute;
@@ -2849,17 +3961,17 @@ a.vs-label:hover {
   color: var(--color-ink-soft);
 }
 .quote-strong {
-  border-left-color: color-mix(in srgb, var(--color-strong) 50%, transparent);
+  border-left-color: var(--edge-verdict-strong);
 }
 .quote-weak {
-  border-left-color: color-mix(in srgb, var(--color-weak) 50%, transparent);
+  border-left-color: var(--edge-verdict-weak);
 }
 .fix {
   display: flex;
   gap: 10px;
   margin-top: 10px;
   padding: 10px 14px;
-  border: 1px solid color-mix(in srgb, var(--color-ember) 25%, transparent);
+  border: 1px solid var(--edge-fix);
   background: var(--color-ember-soft);
   font-size: 13.5px;
   color: var(--color-ember-hot);
@@ -2891,10 +4003,10 @@ a.vs-label:hover {
   background: var(--color-paper-raised);
 }
 .hl-strong {
-  border-top: 2px solid color-mix(in srgb, var(--color-strong) 50%, transparent);
+  border-top: 2px solid var(--edge-verdict-strong);
 }
 .hl-weak {
-  border-top: 2px solid color-mix(in srgb, var(--color-weak) 50%, transparent);
+  border-top: 2px solid var(--edge-verdict-weak);
 }
 .hl-head {
   display: flex;
@@ -2991,14 +4103,14 @@ a.vs-label:hover {
   transition: background-color 0.2s ease;
 }
 .turn-head:hover {
-  background: color-mix(in srgb, var(--color-ember-soft) 35%, transparent);
+  background: var(--wash-hover);
 }
 .turn-n {
   font-family: var(--font-display);
   font-size: 20px;
   font-weight: 800;
   color: transparent;
-  -webkit-text-stroke: 1px var(--color-line-strong);
+  -webkit-text-stroke: 1px var(--stroke-ghost);
   transition: -webkit-text-stroke-color 0.2s ease;
 }
 .turn[data-open="true"] .turn-n,
@@ -3022,7 +4134,7 @@ a.vs-label:hover {
   color: var(--color-ink-muted);
 }
 .turn-type.followup {
-  border-color: color-mix(in srgb, var(--color-ember-glow) 35%, transparent);
+  border-color: var(--edge-heat);
   color: var(--color-ember-glow);
 }
 .chev {
@@ -3100,7 +4212,7 @@ a.vs-label:hover {
 }
 .rub-f {
   height: 100%;
-  background: linear-gradient(90deg, var(--color-ember), var(--color-ember-glow));
+  background: var(--meter-fill-grad);
 }
 .improve {
   padding: 12px 14px;
@@ -3132,8 +4244,8 @@ a.vs-label:hover {
 }
 .ans {
   padding: 9px 12px 10px;
-  border-left: 2px solid color-mix(in srgb, var(--color-ember-glow) 50%, transparent);
-  background: color-mix(in srgb, var(--color-ember-glow) 4%, transparent);
+  border-left: 2px solid var(--edge-heat-strong);
+  background: var(--wash-heat-faint);
 }
 .ans-tag {
   font-family: var(--font-mono);
@@ -3147,6 +4259,25 @@ a.vs-label:hover {
   font-size: 13px;
   line-height: 1.55;
   color: var(--color-ink-soft);
+}
+
+/* The recording blink outlived the `.vid-*` tape player it was written for. That
+   player had no call site left once playback moved to `.deck-*`, and its whole
+   block — stage vignette, media scrim, transport, letterbox and ember bloom —
+   went with it; the keyframe stays because the deck's own REC dot on the report
+   and three of the landing's live marks still animate on it.
+
+   The floor is a token rather than 0.25 because a printed ember at a quarter
+   composites to near nothing: the dip stops reading as a blink and starts
+   reading as a strobe. */
+@keyframes g-blinkrec {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: var(--blink-floor);
+  }
 }
 
 .turn-actions {
@@ -3167,12 +4298,12 @@ a.vs-label:hover {
     transform 0.18s ease;
 }
 .star:hover {
-  border-color: color-mix(in srgb, var(--color-ember-glow) 40%, transparent);
+  border-color: var(--edge-heat-mid);
   color: var(--color-ember-glow);
 }
 .star[data-on="true"] {
-  border-color: color-mix(in srgb, var(--color-ember-glow) 50%, transparent);
-  background: color-mix(in srgb, var(--color-ember-glow) 8%, transparent);
+  border-color: var(--edge-heat-strong);
+  background: var(--wash-heat-on);
   color: var(--color-ember-glow);
 }
 .star[data-on="true"]:active {
@@ -3199,10 +4330,15 @@ a.vs-label:hover {
    The core is the white-hot centre of the burner coil, and it used to be a
    literal `#ffdca8` — a cream-amber picked to sit one step above the old amber
    `ember-glow`. It is the top of a four-stop ramp whose other three are now red,
-   so left alone it put a yellow flare in the middle of a red coil. Blowing out
-   `ember-glow` toward white keeps the ramp in one hue and can't drift from it. */
+   so left alone it put a yellow flare in the middle of a red coil. What holds the
+   ramp inside one hue is blowing that stop out toward the SURFACE'S OPPOSITE —
+   white in the dark room, the ink on the sheet — and not toward white in both.
+   Mixing toward white is monotonic in lightness by construction and therefore
+   cannot also be monotonic in contrast on a pale ground: it would leave the coil's
+   core the faintest of its four stops instead of the densest. `--burner-core`
+   carries the pair. */
 .g-stop-core {
-  stop-color: color-mix(in srgb, var(--color-ember-glow) 40%, white);
+  stop-color: var(--burner-core);
 }
 .g-stop-glow {
   stop-color: var(--color-ember-glow);
@@ -3213,8 +4349,11 @@ a.vs-label:hover {
 .g-stop-ember {
   stop-color: var(--color-ember);
 }
+/* A per-mode strength, which is why it is a token rather than a percentage typed
+   here: 22% of an emitting ember over black is a suggestion, and 22% of a printed
+   one over cream is a block. */
 .g-stop-ember-22 {
-  stop-color: color-mix(in srgb, var(--color-ember) 22%, transparent);
+  stop-color: var(--area-heat);
 }
 .g-stop-ember-0 {
   stop-color: color-mix(in srgb, var(--color-ember) 0%, transparent);
@@ -3305,14 +4444,14 @@ a.vs-label:hover {
   justify-content: center;
   width: 64px;
   height: 64px;
-  border: 1px solid color-mix(in srgb, var(--color-ember) 45%, transparent);
+  border: 1px solid var(--ember-edge-loud);
   background: var(--color-ember-soft);
   font-family: var(--font-display);
   font-size: 22px;
   font-weight: 800;
   letter-spacing: 0.02em;
   color: var(--color-ember-glow);
-  box-shadow: 0 0 34px -8px color-mix(in srgb, var(--color-ember) 45%, transparent);
+  box-shadow: var(--glow-seal);
 }
 .id-name {
   font-family: var(--font-display);
@@ -3351,7 +4490,7 @@ a.vs-label:hover {
   transition: background-color 0.2s ease;
 }
 .stat-link:hover {
-  background: color-mix(in srgb, var(--color-ember-soft) 35%, transparent);
+  background: var(--wash-hover);
 }
 .stat-link:hover .stat-v {
   color: var(--color-ember-glow);
@@ -3386,7 +4525,7 @@ a.vs-label:hover {
 .fineprint {
   margin-top: 26px;
   padding-top: 16px;
-  border-top: 1px dashed var(--color-line-strong);
+  border-top: 1px dashed var(--stroke-dashed);
   font-family: var(--font-mono);
   font-size: 10.5px;
   line-height: 1.8;
@@ -3413,12 +4552,23 @@ a.vs-label:hover {
    for the same reason `.chip-error` is: the base `.app-root .chip` is (0,2,0)
    and sets both `color` and the `border` shorthand. */
 .app-root .chip-ok {
-  border-color: color-mix(in srgb, var(--color-strong) 30%, transparent);
-  background: color-mix(in srgb, var(--color-strong) 7%, transparent);
+  border-color: color-mix(in srgb, var(--color-strong) var(--chip-edge), transparent);
+  background: color-mix(in srgb, var(--color-strong) var(--chip-fill), transparent);
   color: var(--color-strong);
 }
 .app-root .chip-req {
-  border-color: color-mix(in srgb, var(--color-ember) 40%, transparent);
+  /* `--ember-edge`, not the `--chip-edge` strength its two siblings take: this
+     chip's border has always been 40% where theirs were 30%, and it is the only
+     one of the three with a call site, so folding it into the shared strength
+     would have been a visible dark-mode change dressed up as a refactor.
+     `--ember-edge` is exactly that 40/55 pair and is what the rest of the
+     product's ember hairlines already ride. */
+  border-color: var(--ember-edge);
+  /* Keeps the pre-baked tint where `.chip-ok` above takes `--chip-fill`:
+     `--color-ember-soft` is a hand-picked literal in both modes and is the
+     page's one ember tint block — the seal, the drag state, a checked pick
+     and the selected segment all share it. Deriving this one from a strength
+     mix instead would fork that block into two nearly-identical pinks. */
   background: var(--color-ember-soft);
   color: var(--color-ember-glow);
 }
@@ -3456,7 +4606,7 @@ a.vs-label:hover {
   color: var(--color-ink);
 }
 .brief-name::placeholder {
-  color: color-mix(in srgb, var(--color-ink-muted) 65%, transparent);
+  color: var(--color-placeholder);
 }
 .brief-name:focus {
   outline: none;
@@ -3466,13 +4616,13 @@ a.vs-label:hover {
   height: 2px;
   margin-top: 10px;
   overflow: hidden;
-  background: var(--color-line);
+  background: var(--rule-unlit);
 }
 .brief-rule::after {
   content: "";
   position: absolute;
   inset: 0;
-  background: linear-gradient(90deg, var(--color-ember), var(--color-ember-glow));
+  background: var(--meter-fill-grad);
   transform: scaleX(0);
   transform-origin: left;
   transition: transform 0.45s cubic-bezier(0.2, 0.7, 0.2, 1);
@@ -3495,7 +4645,7 @@ a.vs-label:hover {
   line-height: 1;
   letter-spacing: -0.02em;
   color: transparent;
-  -webkit-text-stroke: 1.1px var(--color-line-strong);
+  -webkit-text-stroke: 1.1px var(--stroke-ghost);
   transition: -webkit-text-stroke-color 0.25s ease;
 }
 .card:focus-within .bstep-n,
@@ -3525,7 +4675,7 @@ a.vs-label:hover {
   display: block;
   margin-top: 18px;
   padding: 38px 24px;
-  border: 2px dashed var(--color-line-strong);
+  border: 2px dashed var(--stroke-dashed);
   background: var(--color-paper-sunken);
   text-align: center;
   cursor: pointer;
@@ -3612,7 +4762,7 @@ a.vs-label:hover {
   color: var(--color-weak);
 }
 .underlink:disabled {
-  opacity: 0.4;
+  opacity: var(--opacity-disabled-link);
   cursor: default;
 }
 
@@ -3848,7 +4998,7 @@ a.vs-label:hover {
   height: 24px;
   margin-top: 2px;
   border: 0;
-  background: var(--color-line-strong);
+  background: var(--track-strong);
   cursor: pointer;
   transition: background-color 0.2s ease;
 }
@@ -3905,8 +5055,14 @@ a.vs-label:hover {
   background: var(--color-paper-sunken);
 }
 .heat[aria-checked="true"] {
-  border-color: color-mix(in srgb, var(--heat) 55%, transparent);
-  background: color-mix(in srgb, var(--heat) 8%, transparent);
+  /* Percentages rather than colours — here and on `.heat-chip` below —
+     because `--heat` is set inline per tile from DIFFICULTY_META, and a
+     custom property substitutes its own var()s where it is DECLARED: a
+     `:root` colour token could never see a `--heat` that exists only on the
+     button. The strength is the only half of these mixes the two modes can
+     share, so it is the half that gets tokenised. */
+  border-color: color-mix(in srgb, var(--heat) var(--tint-border-strong), transparent);
+  background: color-mix(in srgb, var(--heat) var(--tint-tile), transparent);
   color: var(--color-ink);
   font-weight: 600;
 }
@@ -3919,7 +5075,7 @@ a.vs-label:hover {
 }
 .heat-chip {
   padding: 4px 10px;
-  background: color-mix(in srgb, var(--heat) 13%, transparent);
+  background: color-mix(in srgb, var(--heat) var(--tint-chip-loud), transparent);
   font-family: var(--font-mono);
   font-size: 10.5px;
   letter-spacing: 0.1em;
@@ -3972,7 +5128,7 @@ a.vs-label:hover {
   background: linear-gradient(
     90deg,
     var(--color-ember) 0 var(--fill, 0%),
-    var(--color-line-strong) var(--fill, 0%)
+    var(--track-strong) var(--fill, 0%)
   );
 }
 .range::-webkit-slider-thumb {
@@ -3982,7 +5138,7 @@ a.vs-label:hover {
   margin-top: -7px;
   border: 3px solid var(--color-paper);
   background: var(--color-ember);
-  box-shadow: 0 0 16px -2px color-mix(in srgb, var(--color-ember) 60%, transparent);
+  box-shadow: var(--glow-thumb);
   transition: transform 0.15s ease;
 }
 .range:active::-webkit-slider-thumb {
@@ -3990,7 +5146,7 @@ a.vs-label:hover {
 }
 .range::-moz-range-track {
   height: 4px;
-  background: var(--color-line-strong);
+  background: var(--track-strong);
 }
 .range::-moz-range-progress {
   height: 4px;
@@ -4001,7 +5157,7 @@ a.vs-label:hover {
   height: 12px;
   border: 3px solid var(--color-paper);
   background: var(--color-ember);
-  box-shadow: 0 0 16px -2px color-mix(in srgb, var(--color-ember) 60%, transparent);
+  box-shadow: var(--glow-thumb);
 }
 .range-ends {
   display: flex;
@@ -4022,7 +5178,7 @@ a.vs-label:hover {
   gap: 14px;
   margin-top: 18px;
   padding-top: 16px;
-  border-top: 1px dashed var(--color-line-strong);
+  border-top: 1px dashed var(--stroke-dashed);
 }
 
 .launch {
@@ -4064,7 +5220,11 @@ a.vs-label:hover {
   font-family: var(--font-sans);
   font-size: 16px;
   line-height: 1.6;
-  -webkit-font-smoothing: antialiased;
+  /* The one of the file's three smoothing sites that is inside the room, so the
+     value it reads comes from the pin rather than from the light block — the
+     ground in here is still #0e0e0e and still wants stems thinned. Tokenised
+     anyway: three literals that have to agree is three chances to drift. */
+  -webkit-font-smoothing: var(--font-smoothing);
 }
 @layer base {
   :where(.room-root) a {
@@ -4157,25 +5317,32 @@ a.vs-label:hover {
   gap: 4px;
   height: 5px;
 }
+/* Two token swaps, neither of which moves this strip a pixel — the room is
+   pinned. `--color-track` because a 5px slab is not a 1px hairline and the two
+   roles part company the moment the divider direction flips; the live cell
+   below mixes 36% ember INTO it, so it needs a substrate with real contrast
+   under it rather than a value picked to be nearly invisible. And
+   `--meter-fill-grad` because the same ember fill runs in five bars across the
+   product, and the two ends of it must never be re-tuned apart. */
 .seg-i {
   flex: 1;
-  background: var(--color-line);
+  background: var(--color-track);
   transition: background-color 0.45s ease;
 }
 .seg-i[data-done="true"] {
-  background: linear-gradient(90deg, var(--color-ember), var(--color-ember-glow));
+  background: var(--meter-fill-grad);
 }
 .seg-i[data-live="true"] {
-  background: color-mix(in srgb, var(--color-ember) 36%, var(--color-line));
+  background: color-mix(in srgb, var(--color-ember) 36%, var(--color-track));
 }
 .bar-track {
   overflow: hidden;
   height: 5px;
-  background: var(--color-line);
+  background: var(--color-track);
 }
 .bar-fill {
   height: 100%;
-  background: linear-gradient(90deg, var(--color-ember), var(--color-ember-glow));
+  background: var(--meter-fill-grad);
   transition: width 0.5s cubic-bezier(0.2, 0.7, 0.2, 1);
 }
 
@@ -4274,7 +5441,7 @@ a.vs-label:hover {
     transform 0.5s ease;
 }
 .q-wrap[data-busy="true"] {
-  opacity: 0.4;
+  opacity: var(--busy-dim);
   filter: blur(2px);
   transform: scale(0.99);
 }
@@ -4298,14 +5465,20 @@ a.vs-label:hover {
   border: 1px solid var(--color-line);
   border-radius: var(--radius-card);
   background: var(--color-paper-raised);
-  box-shadow: 0 22px 60px -32px rgba(0, 0, 0, 0.85);
+  /* Hygiene only: the room is pinned, so the card keeps the deep black lift a
+     black ground needs. Tokenised so that the last hardcoded rgba() in this
+     range is not what a future light-mode sweep finds and "fixes" by hand. */
+  box-shadow: var(--shadow-card);
 }
 .q-card::before {
   content: "";
   position: absolute;
   inset: 0 0 auto;
   height: 2px;
-  background: linear-gradient(90deg, transparent, var(--color-ember), transparent);
+  /* The filament, and one of four in the file that fade to nothing at both
+     ends. It gets a token not because the value moves — a 2px ember on cream is
+     a printed rule and wants the same hex — but so the four cannot drift. */
+  background: linear-gradient(90deg, transparent, var(--heat-hairline), transparent);
 }
 @media (min-height: 820px) {
   .q-card {
@@ -4325,7 +5498,11 @@ a.vs-label:hover {
   line-height: 1;
   letter-spacing: -0.02em;
   color: transparent;
-  -webkit-text-stroke: 1px var(--color-line-strong);
+  /* `--stroke-ghost`, which equals the divider on dark and deliberately does
+     not on light: a watermark outlined in the light `--color-line-strong` stops
+     being a watermark and becomes a 52px headline competing with the question.
+     Pinned in here, so this one keeps the divider value. */
+  -webkit-text-stroke: 1px var(--stroke-ghost);
   pointer-events: none;
   user-select: none;
 }
@@ -4377,7 +5554,8 @@ a.vs-label:hover {
 }
 .lvl-bar {
   width: 4px;
-  background: var(--color-line);
+  /* A 4px slab, so the same split as the progress cells above. */
+  background: var(--color-track);
 }
 /* No height transition while live: the level updates every frame, so an ease
    never finishes and the bars crawl. The analyser's smoothing does the work. */
@@ -4537,6 +5715,17 @@ a.vs-label:hover {
   color: var(--color-ink);
   text-align: center;
 }
+/* This screen is NOT inside `.room-root`, despite sitting among the room's
+   rules: `HotSeat` returns `ThankYou` INSTEAD of the room, never within it, so
+   the done screen and the seal further down follow the theme like any other
+   page and the room pin cannot reach them.
+   Only the terminator is tokenised here. `transparent` is alpha-zero BLACK,
+   which is invisible fading out of a black page and drags a grey-brown cast
+   through the middle of the same fade over cream. The 15% ember stop above it
+   is a 62vh low-alpha ember field, which is the one construct the press reading
+   has no answer for. The decision, since `ThankYou` deliberately renders OUTSIDE
+   `.room-root` and therefore follows the reader's theme: it goes out on light
+   rather than being retuned, the way every other bloom in the file does. */
 .done-glow {
   position: absolute;
   inset: auto 0 0;
@@ -4544,8 +5733,8 @@ a.vs-label:hover {
   pointer-events: none;
   background: radial-gradient(
     46% 58% at 50% 100%,
-    color-mix(in srgb, var(--color-ember) 15%, transparent),
-    transparent 70%
+    var(--done-glow-wash),
+    var(--keylight-fade) 70%
   );
 }
 .done-in {
@@ -4708,8 +5897,13 @@ a.vs-label:hover {
 .deck-screen {
   position: relative;
   aspect-ratio: 16 / 9;
-  /* Darker than any surface: a lens, not a card. Token-derived, not re-typed. */
-  background: color-mix(in srgb, var(--color-paper) 45%, black);
+  /* Darker than any surface: a lens, not a card. Token-derived, not re-typed —
+     but deriving it from `--color-paper` was only ever correct while paper was
+     near-black: the same 45% mix over the stock lands on #6e6c68, mid-grey mud
+     behind a video. A letterbox is media, not a theme surface. The tape player
+     renders on the REPORT, so this is one of exactly two rules in this range
+     the room pin must not reach, and its light value does apply. */
+  background: var(--color-lens);
 }
 .deck-el {
   position: absolute;
@@ -4746,6 +5940,11 @@ a.vs-label:hover {
 }
 .deck-poster:disabled {
   cursor: wait;
+  /* 0.85 rather than the shared `--disabled-opacity`, which is 0.7. It is the
+     only disabled state in the file that is not 0.7 and nobody recorded why,
+     so it is very likely an oversight — but correcting it would move DARK, and
+     that is not this change's to make. Left exactly as it was; worth its own
+     commit if the inconsistency is real. */
   opacity: 0.85;
 }
 .deck-poster .spinner {
@@ -4804,7 +6003,11 @@ a.vs-label:hover {
   right: 0;
   left: 0;
   height: 4px;
-  background: var(--color-line-strong);
+  /* A 4px slab, not a divider, and the second of the two rules in this range
+     the pin must not reach — the deck is on the report. Its light value matters
+     more than its dark one: a hairline value under the ember fill would let the
+     unfilled remainder outweigh the part that has played. */
+  background: var(--track-strong);
   transform: translateY(-50%);
 }
 .deck-prog {
@@ -4950,8 +6153,14 @@ a.vs-label:hover {
   font-size: 31px;
   font-weight: 700;
   line-height: 1;
-  color: var(--color-ember);
-  opacity: 0.55;
+  /* The 55% moved out of `opacity` and into the colour. The composite is
+     identical either way, but an alpha leaves the glyph tied to whatever it
+     happens to be sitting on, and on the stock a quote mark has to read as a
+     quiet ink rather than as a washed-out one — 2.4:1 at 31px, decorative, and
+     2.6:1 for the dark equivalent it replaces. `opacity: 1` is stated rather
+     than dropped so the alpha cannot quietly come back. */
+  color: color-mix(in srgb, var(--color-ember) 55%, var(--color-paper-raised));
+  opacity: 1;
 }
 
 /* Stillness for the seal, same policy as the rest of the room. */
@@ -5019,15 +6228,20 @@ a.vs-label:hover {
   overflow: hidden;
   border: 1px solid var(--color-line);
   /* Raised surface plus a faint ink grid: the diagram is drawn on graph paper,
-     not floated over the page. */
+     not floated over the page. The second stop sits at the same 1px as the
+     first, so nothing interpolates between them — that `transparent` is a hard
+     edge rather than a fade terminator, and must not take `--keylight-fade`. */
   background-color: var(--color-paper-raised);
   background-image: radial-gradient(
-    color-mix(in srgb, var(--color-ink) 7%, transparent) 1px,
+    var(--rig-grid-dot) 1px,
     transparent 1px
   );
   background-size: 22px 22px;
 }
-/* The room's one light, caught in the corner the verdict sits in. */
+/* The room's one light, caught in the corner the verdict sits in — and on the
+   press sheet the one place any warmth is permitted in the air at all. It earns
+   that exception only through `--rig-key-blend`: a multiply scorches the corner
+   into the stock instead of lighting it from behind, so nothing here emits. */
 .grill-root .rig::after {
   content: "";
   position: absolute;
@@ -5035,10 +6249,11 @@ a.vs-label:hover {
   width: 75%;
   aspect-ratio: 1;
   pointer-events: none;
+  mix-blend-mode: var(--rig-key-blend);
   background: radial-gradient(
     closest-side,
-    color-mix(in srgb, var(--color-ember) 11%, transparent),
-    transparent 70%
+    var(--rig-key-glow),
+    var(--keylight-fade) 70%
   );
 }
 
@@ -5049,32 +6264,32 @@ a.vs-label:hover {
   z-index: 2;
   width: 10px;
   height: 10px;
-  opacity: 0.65;
+  opacity: var(--rig-mark-opacity);
   pointer-events: none;
 }
 .grill-root .rig-marks span:nth-child(1) {
   top: 8px;
   left: 8px;
-  border-top: 1px solid var(--color-ink-muted);
-  border-left: 1px solid var(--color-ink-muted);
+  border-top: 1px solid var(--rig-mark);
+  border-left: 1px solid var(--rig-mark);
 }
 .grill-root .rig-marks span:nth-child(2) {
   top: 8px;
   right: 8px;
-  border-top: 1px solid var(--color-ink-muted);
-  border-right: 1px solid var(--color-ink-muted);
+  border-top: 1px solid var(--rig-mark);
+  border-right: 1px solid var(--rig-mark);
 }
 .grill-root .rig-marks span:nth-child(3) {
   bottom: 8px;
   left: 8px;
-  border-bottom: 1px solid var(--color-ink-muted);
-  border-left: 1px solid var(--color-ink-muted);
+  border-bottom: 1px solid var(--rig-mark);
+  border-left: 1px solid var(--rig-mark);
 }
 .grill-root .rig-marks span:nth-child(4) {
   bottom: 8px;
   right: 8px;
-  border-bottom: 1px solid var(--color-ink-muted);
-  border-right: 1px solid var(--color-ink-muted);
+  border-bottom: 1px solid var(--rig-mark);
+  border-right: 1px solid var(--rig-mark);
 }
 
 /* Above the glow, which is painted on the panel itself. `flex-wrap` for the same
@@ -5191,18 +6406,18 @@ a.vs-label:hover {
 /* ── boxes, wires, and what travels along them ──────────────────────────── */
 
 .grill-root .rig .nbox {
-  fill: var(--color-paper);
-  stroke: var(--color-line);
+  fill: var(--color-surface-well);
+  stroke: var(--rig-box-stroke);
 }
 /* Only the two processors are lit. The heat is what says "running", and putting
    it on the input or the output would flatten the distinction the figure is
    drawn to make. */
 .grill-root .rig .nbox.hot {
-  stroke: color-mix(in srgb, var(--color-ember) 55%, transparent);
+  stroke: var(--rig-box-hot-stroke);
 }
 .grill-root .rig .wire {
   fill: none;
-  stroke: var(--color-line);
+  stroke: var(--rig-wire);
   stroke-width: 1.5;
 }
 /*
@@ -5254,7 +6469,7 @@ a.vs-label:hover {
    scale is per-bar; the phase machine holds them at zero until the words have
    actually been scored, which is what makes the fill read as the scoring. */
 .grill-root .rig .jt {
-  fill: color-mix(in srgb, var(--color-ink) 12%, transparent);
+  fill: var(--track-unfilled);
 }
 .grill-root .rig .jm {
   fill: var(--color-ember);
@@ -5277,7 +6492,7 @@ a.vs-label:hover {
   fill: none;
   stroke: var(--color-ember);
   stroke-width: 1.5;
-  opacity: 0.75;
+  opacity: var(--rig-trace-opacity);
   stroke-dasharray: 26 200;
   stroke-dashoffset: 226;
   animation: g-draw 2.8s linear infinite;
@@ -5317,25 +6532,27 @@ a.vs-label:hover {
 }
 .grill-root .rig[data-phase="listen"] .gw,
 .grill-root .rig[data-phase="listen"] .gs {
-  opacity: 0.45;
+  opacity: var(--rig-dim-mid);
 }
 .grill-root .rig[data-phase="listen"] .gv,
 .grill-root .rig[data-phase="route"] .gv {
-  opacity: 0.35;
+  opacity: var(--rig-dim-deep);
 }
 .grill-root .rig[data-phase="judge"] .gyou,
 .grill-root .rig[data-phase="judge"] .gv {
-  opacity: 0.55;
+  opacity: var(--rig-dim-soft);
 }
-/* Never fully dark: the verdict has to keep citing the words it came from. */
+/* Never fully receded: the verdict has to keep citing the words it came from.
+   Not "never fully dark" — on the press sheet these dims run toward the stock
+   rather than toward black, which is why their light values go up, not down. */
 .grill-root .rig[data-phase="verdict"] .gyou {
-  opacity: 0.7;
+  opacity: var(--rig-dim-cite);
 }
 .grill-root .rig[data-phase="route"] .fin {
   opacity: 0.95;
 }
 .grill-root .rig[data-phase="judge"] .fin {
-  opacity: 0.3;
+  opacity: var(--rig-pulse-idle);
 }
 .grill-root .rig[data-phase="judge"] .fout {
   opacity: 0.95;
@@ -5565,21 +6782,26 @@ a.vs-label:hover {
   animation-delay: calc(var(--n) * -0.14s);
 }
 /* Before the mic opens there is no level to show. Grey and low reads as a mic
-   that is on rather than one that is hearing something. */
+   that is on rather than one that is hearing something. `--mic-idle` rather
+   than `--color-ink-muted` itself, because the two part company on light: muted
+   gains contrast against the stock while ember loses it, so borrowing the
+   caption colour here would leave the idle bars louder than the live ones. */
 .grill-root .sim.idle .mic i {
-  background: var(--color-ink-muted);
+  background: var(--mic-idle);
   transform: scaleY(0.3);
   animation: none;
 }
 /* `min-height` for the same reason as the question's, at the height the
    finished answer occupies; the rule down the left is the transcript's, so it
-   has to be there before there is a transcript. */
+   has to be there before there is a transcript. It rides `--rule-quote`, not
+   `--color-line`: at 2px it is an accent beside a quotation rather than a
+   hairline separating two regions, and the divider is tuned for the other job. */
 .grill-root .sim-a .txt {
   max-width: 60ch;
   min-height: 6.5em;
   margin-top: 0.8rem;
   padding-left: 1.1rem;
-  border-left: 2px solid var(--color-line);
+  border-left: 2px solid var(--rule-quote);
   font-size: 0.95rem;
   line-height: 1.95;
   color: var(--color-ink-soft);
@@ -5594,11 +6816,17 @@ a.vs-label:hover {
   animation: grill-rise 0.18s ease-out both;
 }
 /* Boxed, not just coloured: a filler has to be findable in the middle of a
-   paragraph of the same ember-free grey. */
+   paragraph of the same ember-free grey. On dark the hairline alone does that;
+   over cream the same edge reads as an outline round a word rather than as a
+   marked word, so `--fmark-fill` lays a faint ember tint behind it instead of
+   thickening the border — transparent on dark, so nothing there is repainted.
+   The edge joins the shared `--ember-edge` at 40%; the 45% it used to carry was
+   never a distinction worth a value of its own. */
 .grill-root .fmark {
   margin: 0 0.18em;
   padding: 0.05em 0.38em;
-  border: 1px solid color-mix(in srgb, var(--color-ember) 45%, transparent);
+  border: 1px solid var(--ember-edge-loud);
+  background: var(--fmark-fill);
   font-family: var(--font-mono);
   font-size: 0.82em;
   font-weight: 600;
@@ -5612,17 +6840,31 @@ a.vs-label:hover {
 
 /* ── the adaptive follow-up ─────────────────────────────────────────────── */
 
-/* Sunk to the page colour inside a raised frame, so the question the answer
-   earned reads as cut out of the transcript rather than stacked on it. */
+/* Sunk below the raised frame, so the question the answer earned reads as cut
+   out of the transcript rather than stacked on it. On dark the recess is exactly
+   the page colour; on light the page is *lighter* than the frame it sits in, so
+   deriving the fill from `--color-paper` would turn this cut-out into a bump.
+   `--surface-recessed` names the recess instead of borrowing it. */
 .grill-root .sim-follow {
   margin-top: 1.3rem;
   padding: 1rem 1.1rem;
   border: 1px dashed var(--color-line);
-  border-left: 3px solid var(--color-line-strong);
-  background: var(--color-paper);
+  border-left: 3px solid var(--rule-pending);
+  background: var(--surface-recessed);
   transition:
     border-color 0.5s cubic-bezier(0.19, 1, 0.22, 1),
     border-left-color 0.5s cubic-bezier(0.19, 1, 0.22, 1);
+}
+/* Both of this box's unearned rules want to be the one token, so that the
+   outline and the bar stay weaker together than the ember `.on` earns. Light
+   takes `--rule-pending` on the outline too; dark cannot follow it there,
+   because the token's dark value is `--color-line-strong` and this outline has
+   always been the plain hairline. Three sides, not the shorthand: `.on` claims
+   the left edge for ember and this selector outranks it. */
+:root[data-theme="light"] .grill-root .sim-follow {
+  border-top-color: var(--rule-pending);
+  border-right-color: var(--rule-pending);
+  border-bottom-color: var(--rule-pending);
 }
 .grill-root .sim-follow.on {
   border-style: solid;
@@ -5699,6 +6941,15 @@ a.vs-label:hover {
 .grill-root .smet.hit {
   background: color-mix(in srgb, var(--color-ember) 7%, transparent);
 }
+/* Light joins `--wash-heat-on`, the shared "this one is lit" tint every other
+   surface flashes with, and it is laid at twelve percent rather than seven — a
+   tint block on cream has to be heavier than a wash on black to read at the same
+   strength. Scoped rather than swapped outright because the token's dark value
+   is 8% of `--ember-wash`, the pale glow, not 7% of the ember: adopting it here
+   would repaint dark, which is not the theme being changed. */
+:root[data-theme="light"] .grill-root .smet.hit {
+  background: var(--wash-heat-on);
+}
 .grill-root .smet .sk {
   font-family: var(--font-mono);
   font-size: 0.6rem;
@@ -5737,9 +6988,13 @@ a.vs-label:hover {
   text-transform: uppercase;
   color: var(--color-ink-muted);
 }
+/* The chip has no fill, so its hairline is not separating two regions — it is
+   the whole of the shape. `--edge-control`, which light draws a step stronger
+   than the divider, rather than `--color-line`, which light tunes for adjacency
+   and which would leave an empty chip barely there on the stock. */
 .grill-root .vchip {
   padding: 0.4rem 0.9rem;
-  border: 1px solid var(--color-line);
+  border: 1px solid var(--edge-control);
   letter-spacing: 0.16em;
   color: var(--color-ink-muted);
   transition:
@@ -5754,12 +7009,15 @@ a.vs-label:hover {
 /* ── the progress bar ───────────────────────────────────────────────────── */
 
 /* Three pixels, on the frame's own bottom rule. Any thicker and it competes
-   with the ember down the side of the follow-up. */
+   with the ember down the side of the follow-up. The unrun part of it is
+   `--sim-groove`, not the page colour it happens to equal on dark: paper inside
+   paper-raised is a legible groove at the black end of the scale and nothing at
+   all at the white end, so light has to cut it below the page to keep it. */
 .grill-root .sim-track {
   position: relative;
   height: 3px;
   border-top: 1px solid var(--color-line);
-  background: var(--color-paper);
+  background: var(--sim-groove);
 }
 .grill-root .sim-track i {
   position: absolute;
