@@ -1,6 +1,7 @@
 import { test, expect, describe } from "bun:test";
 import { render } from "@testing-library/react";
 import type { DeliveryPoint } from "@repo/types";
+import { COMPOSED, paceNote } from "../report/[sessionId]/Delivery";
 import {
   DeliverySpark,
   PACE_BAND,
@@ -73,6 +74,32 @@ describe("pinned pace domain", () => {
     expect(yOf(PACE_BAND[1], PACE)).toBeGreaterThanOrEqual(PLOT.TOP);
     expect(yOf(PACE_BAND[0], PACE)).toBeLessThanOrEqual(PLOT.BASE);
     expect(yOf(PACE_BAND[1], PACE)).toBeLessThan(yOf(PACE_BAND[0], PACE));
+  });
+});
+
+describe("one band, both screens", () => {
+  test("the shaded band is the report's composed band", () => {
+    expect(PACE_BAND).toEqual([COMPOSED.lo, COMPOSED.hi]);
+  });
+
+  test("a reading the report calls composed is not called off pace here", () => {
+    expect(paceNote(115)!.tone).toBe("strong");
+    expect(deltaOf("pace", 150, 115).word).toBe("on pace");
+    expect(deltaOf("pace", 150, 115).improving).toBe(true);
+  });
+
+  test("rendered: the spoken band is the one the report states", () => {
+    const { container } = render(
+      <DeliverySpark
+        series={series([
+          [150, 9],
+          [115, 4],
+        ])}
+      />,
+    );
+    const label = container.querySelector("svg")!.getAttribute("aria-label")!;
+    expect(label).toContain(`${COMPOSED.lo} to ${COMPOSED.hi} words per minute`);
+    expect(label).toContain("Latest 115 words per minute");
   });
 });
 
@@ -211,6 +238,20 @@ describe("delta direction, not sign", () => {
     const d = deltaOf("pace", 125, 155);
     expect(d.improving).toBe(true);
     expect(d.word).toBe("on pace");
+  });
+
+  test("an over-correction across the band is never called level", () => {
+    const d = deltaOf("pace", 100, 170);
+    expect(d.magnitude).toBe(70);
+    expect(d.improving).toBe(null);
+    expect(d.word).toBe("faster");
+    expect(deltaOf("pace", 170, 100).word).toBe("slower");
+  });
+
+  test("only an unchanged reading is called level", () => {
+    const d = deltaOf("pace", 100, 100);
+    expect(d.magnitude).toBe(0);
+    expect(d.word).toBe("level");
   });
 
   test("rendered: a fall in fillers is toned as an improvement", () => {

@@ -1,5 +1,6 @@
 import { Fragment } from "react";
 import type { DeliveryPoint } from "@repo/types";
+import { COMPOSED } from "@/app/(app)/report/[sessionId]/Delivery";
 import { Explain } from "@/components/Explain";
 import { cx } from "@/components/ui";
 
@@ -9,7 +10,7 @@ export const PLOT = { X0: 6, X1: 154, TOP: 8, BASE: 40 } as const;
 
 export const PACE_DOMAIN = [90, 200] as const;
 
-export const PACE_BAND = [120, 160] as const;
+export const PACE_BAND = [COMPOSED.lo, COMPOSED.hi] as const;
 
 export const FILLER_FLOOR = 6;
 
@@ -82,7 +83,8 @@ export function deltaOf(kind: SparkKind, prev: number, next: number): SparkDelta
   if (after < before) return { magnitude, rising, improving: true, word: "steadier" };
   if (after > before) return { magnitude, rising, improving: false, word: "off pace" };
   if (after === 0) return { magnitude, rising, improving: true, word: "on pace" };
-  return { magnitude, rising, improving: null, word: "level" };
+  if (magnitude === 0) return { magnitude, rising, improving: null, word: "level" };
+  return { magnitude, rising, improving: null, word: rising ? "faster" : "slower" };
 }
 
 export interface SparkModel {
