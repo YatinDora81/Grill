@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { getUserId } from "@/lib/auth";
 import { OG_IMAGE } from "@/lib/siteMeta";
 import { ExplainBanner } from "@/components/Explain";
 import { GapForm } from "./GapForm";
@@ -46,14 +47,16 @@ const STEPS = [
   },
 ];
 
-export default function ResumeVsJdPage() {
+export default async function ResumeVsJdPage() {
+  const signedIn = Boolean(await getUserId());
+
   return (
     <div className="app-root">
       <div className="grain" aria-hidden="true" />
       <div className="keylight" aria-hidden="true" />
 
       <main className="wrap pb-16">
-        <div className="mt-6 flex flex-wrap items-center justify-between gap-x-6 gap-y-3 border border-dashed border-line-strong bg-paper-raised px-4 py-3.5 sm:mt-8">
+        <div className="mt-6 flex flex-wrap items-center justify-between gap-x-6 gap-y-3 border border-dashed border-(--stroke-dashed) bg-paper-raised px-4 py-3.5 sm:mt-8">
           <p className="font-mono text-[0.66rem] leading-relaxed tracking-[0.13em] uppercase text-ink-muted">
             <span className="text-ember">Free tool.</span> No account, no upload history —{" "}
             <span className="text-ink">nothing is saved unless you sign up.</span>
@@ -81,7 +84,7 @@ export default function ResumeVsJdPage() {
 
         <div className="mt-9">
           <ExplainBanner />
-          <GapForm />
+          <GapForm signedIn={signedIn} />
         </div>
 
         <section className="mt-[clamp(44px,7vh,64px)]" aria-label="How this works">

@@ -15,6 +15,10 @@ const MAX_RESUME_BYTES = 5 * 1024 * 1024;
 const MULTIPART_OVERHEAD_BYTES = 16 * 1024;
 const TOO_LARGE = "That file is too large — 5 MB is the ceiling.";
 
+const ROUTE_BUDGET_MS = 50_000;
+const GAP_TIMEOUT_MS = 20_000;
+const MIN_GAP_MS = 5_000;
+
 const BURST = {
   bucket: "gap",
   opts: { limit: 5, windowMs: 600_000 },
@@ -41,6 +45,7 @@ function limit(req: Request, rule: typeof BURST): void {
 }
 
 export async function POST(req: Request) {
+  const deadline = Date.now() + ROUTE_BUDGET_MS;
   try {
     limit(req, BURST);
     limit(req, DAILY);
@@ -57,7 +62,7 @@ export async function POST(req: Request) {
     });
 
     const resumeText = await resumeTextFromForm(form, resume_text);
-    const value = await compareResumeToJd(jd, resumeText);
+    const value = await compareResumeToJd(jd, resumeText, deadline);
 
     return json(value satisfies ResumeGapResponse);
   } catch (err) {
@@ -87,13 +92,21 @@ async function resumeTextFromForm(form: FormData, pasted: string | undefined): P
   throw badRequest("Upload a résumé, or paste its text.", "missing_resume");
 }
 
-async function compareResumeToJd(jd: string, resumeText: string): Promise<ResumeGapResponse> {
+function callTimeout(deadline: number): number {
+  return Math.min(GAP_TIMEOUT_MS, Math.max(MIN_GAP_MS, deadline - Date.now()));
+}
+
+async function compareResumeToJd(
+  jd: string,
+  resumeText: string,
+  deadline: number,
+): Promise<ResumeGapResponse> {
   try {
     const { value } = await generateJson(resumeGapResponseSchema, {
       system: RESUME_GAP_SYSTEM,
       prompt: resumeGapPrompt({ jd, resumeText }),
       temperature: 0.3,
-      timeoutMs: 45_000,
+      timeoutMs: callTimeout(deadline),
     });
     return value;
   } catch (err) {

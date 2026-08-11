@@ -46,10 +46,10 @@ function matchTone(pct: number): MatchTone {
 
 const DROP_BASE =
   "flex min-h-[168px] cursor-pointer flex-col items-start justify-center gap-2 border-2 border-dashed p-5 transition-colors has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-ember";
-const DROP_REST = "border-line-strong bg-paper-sunken hover:border-ink-muted";
+const DROP_REST = "border-(--stroke-dashed) bg-paper-sunken hover:border-ink-muted";
 const DROP_HOT = "border-ember bg-ember-soft";
 
-export function GapForm() {
+export function GapForm({ signedIn }: { signedIn: boolean }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const inFlight = useRef(false);
 
@@ -285,7 +285,7 @@ export function GapForm() {
             </div>
 
             <div
-              className="relative mt-4 h-2 bg-line"
+              className="relative mt-4 h-2 bg-track"
               role="img"
               aria-label={`${pct}% match — ${TONE_VERDICT[tone]}. The scale is marked at 40 and 70.`}
             >
@@ -383,7 +383,7 @@ export function GapForm() {
           </div>
 
           <div className="mt-12 flex flex-wrap items-center gap-x-6 gap-y-3 border-t border-line pt-7">
-            <ButtonLink href="/signup?next=%2Fnew" onClick={carryJdOver}>
+            <ButtonLink href={signedIn ? "/new" : "/signup?next=%2Fnew"} onClick={carryJdOver}>
               Interview me on these gaps →
             </ButtonLink>
             <span className="font-mono text-[0.7rem] tracking-[0.06em] text-ink-soft">
