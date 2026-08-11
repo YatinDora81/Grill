@@ -25,6 +25,7 @@ import { PlayAnswer } from "./PlayAnswer";
 import { Replay } from "./Replay";
 import { ReportNav, type Section } from "./ReportNav";
 import { RetryButton } from "./RetryButton";
+import { ShareControl } from "./ShareControl";
 
 export const metadata: Metadata = {
   title: "Report",
@@ -542,6 +543,8 @@ export default async function ReportPage({
             })}
           />
         </div>
+
+        <ShareControl sessionId={sessionId} sessionName={title} />
 
         {/* Retry is the hot action, and the only ember button on the page. */}
         <div className="endrow rv" data-io>
