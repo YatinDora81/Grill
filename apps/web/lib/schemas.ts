@@ -263,7 +263,7 @@ export const startRequestSchema = z
   // interviews being CREATED. The same shape has to keep reading sessions
   // recorded when the floor was 1.
   .superRefine((v, ctx) => {
-    if (v.config.num_questions < QUESTION_BOUNDS.min) {
+    if (v.config.mode !== "starred" && v.config.num_questions < QUESTION_BOUNDS.min) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["config", "num_questions"],

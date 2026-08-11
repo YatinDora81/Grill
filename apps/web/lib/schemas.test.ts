@@ -519,6 +519,26 @@ describe("the starred drill", () => {
     expect(r.data!.num_questions).toBe(8);
   });
 
+  test.each([1, 2])(
+    "starts a drill of %i saved question(s), a size the whole-interview floor has no say over",
+    (n) => {
+      const hashes = Array.from({ length: n }, (_, i) => i.toString(16).padStart(64, "0"));
+      const r = startRequestSchema.safeParse(
+        start({ config: starred({ starred_hashes: hashes, num_questions: n }) }),
+      );
+      expect(r.success).toBe(true);
+      expect(r.data!.config.starred_hashes).toEqual(hashes);
+    },
+  );
+
+  test("still holds every other mode to the floor", () => {
+    const r = startRequestSchema.safeParse(
+      start({ config: cfg({ num_questions: QUESTION_BOUNDS.min - 1 }) }),
+    );
+    expect(r.success).toBe(false);
+    expect(issuePaths(r)).toContain("config.num_questions");
+  });
+
   test("still reads back a stored starred drill unchanged", () => {
     const r = storedConfigSchema.safeParse({
       mode: "starred",
