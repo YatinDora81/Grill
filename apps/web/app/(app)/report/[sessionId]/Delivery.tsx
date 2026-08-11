@@ -23,10 +23,26 @@ const SCALE = { lo: 80, hi: 200 } as const;
 const pct = (wpm: number) => ((wpm - SCALE.lo) / (SCALE.hi - SCALE.lo)) * 100;
 const clamp = (v: number) => Math.max(0, Math.min(100, v));
 
-export function Delivery({ metrics: m }: { metrics: DeliveryMetrics }) {
+export type DeliverySubject = "you" | "them";
+
+const VOICE = {
+  you: { they: "you", their: "your", tick: "you" },
+  them: { they: "they", their: "their", tick: "them" },
+} as const;
+
+type Voice = (typeof VOICE)[DeliverySubject];
+
+export function Delivery({
+  metrics: m,
+  subject = "you",
+}: {
+  metrics: DeliveryMetrics;
+  subject?: DeliverySubject;
+}) {
   const acousticsMissing =
     m.pitch_variation === null && m.energy === null && m.mean_pitch_hz === null;
   const note = paceNote(m.wpm);
+  const v = VOICE[subject];
 
   return (
     /* One hairline lattice, not a card: the container draws the top and left
@@ -40,7 +56,7 @@ export function Delivery({ metrics: m }: { metrics: DeliveryMetrics }) {
           label="Pace"
           value={m.wpm ? String(Math.round(m.wpm)) : "—"}
           unit="wpm"
-          note={paceExplain(m.wpm)}
+          note={paceExplain(m.wpm, v)}
         >
           {note ? (
             <span
@@ -57,7 +73,7 @@ export function Delivery({ metrics: m }: { metrics: DeliveryMetrics }) {
           label="Avg pause"
           value={m.avg_pause_ms ? String(Math.round(m.avg_pause_ms)) : "—"}
           unit="ms"
-          note={pauseExplain(m.avg_pause_ms)}
+          note={pauseExplain(m.avg_pause_ms, v)}
         />
         <Metric
           label="Fillers"
@@ -71,7 +87,7 @@ export function Delivery({ metrics: m }: { metrics: DeliveryMetrics }) {
           unit="Hz"
           note={
             m.pitch_variation !== null
-              ? "How much your voice moves while you talk. The bigger the number, the less flat you sound."
+              ? `How much ${v.their} voice moves while ${v.they} talk. The bigger the number, the less flat ${v.they} sound.`
               : null
           }
         />
@@ -81,7 +97,7 @@ export function Delivery({ metrics: m }: { metrics: DeliveryMetrics }) {
           unit="rms"
           note={
             m.energy !== null
-              ? "How loudly you spoke, straight off the waveform. It's a relative level, not decibels — compare it against your own other runs."
+              ? `How loudly ${v.they} spoke, straight off the waveform. It's a relative level, not decibels — compare it against ${v.their} own other runs.`
               : null
           }
         />
@@ -91,7 +107,7 @@ export function Delivery({ metrics: m }: { metrics: DeliveryMetrics }) {
           unit="Hz"
           note={
             m.mean_pitch_hz !== null
-              ? "The average pitch of your voice. It says nothing about how you did — it's the baseline the variation is measured against."
+              ? `The average pitch of ${v.their} voice. It says nothing about how ${v.they} did — it's the baseline the variation is measured against.`
               : null
           }
         />
@@ -101,7 +117,7 @@ export function Delivery({ metrics: m }: { metrics: DeliveryMetrics }) {
           cell above means, and splitting them into two panels made the reader
           carry a number across a gap. */}
       <div className="border-r border-b border-line p-5 sm:p-6">
-        <PaceBand wpm={m.wpm} />
+        <PaceBand wpm={m.wpm} voice={v} />
 
         {acousticsMissing ? (
           <p className="mono-note" style={{ marginTop: 16 }}>
@@ -127,7 +143,7 @@ export function Delivery({ metrics: m }: { metrics: DeliveryMetrics }) {
  * derived from the same two constants the verdict above uses, so the picture and
  * the word can never disagree.
  */
-function PaceBand({ wpm }: { wpm: number }) {
+function PaceBand({ wpm, voice }: { wpm: number; voice: Voice }) {
   const zoneLeft = pct(COMPOSED.lo);
   const zoneWidth = pct(COMPOSED.hi) - zoneLeft;
 
@@ -136,7 +152,7 @@ function PaceBand({ wpm }: { wpm: number }) {
        to separate itself from the metric grid, and the cell border above now
        does that job. */
     <div>
-      <p className="dk">Where your pace sits</p>
+      <p className="dk">Where {voice.their} pace sits</p>
       <div className="band-scale">
         <div className="band-zone" style={{ left: `${zoneLeft}%`, width: `${zoneWidth}%` }}>
           <span className="band-zone-label">
@@ -147,7 +163,9 @@ function PaceBand({ wpm }: { wpm: number }) {
             claim this interview was slow, when it was silent. */}
         {wpm ? (
           <div className="band-tick" style={{ left: `${clamp(pct(wpm))}%` }}>
-            <span className="band-tick-label">you · {Math.round(wpm)}</span>
+            <span className="band-tick-label">
+              {voice.tick} · {Math.round(wpm)}
+            </span>
           </div>
         ) : null}
       </div>
@@ -157,7 +175,7 @@ function PaceBand({ wpm }: { wpm: number }) {
       </div>
       <Explain>
         The whole bar is words a minute, from {SCALE.lo} to {SCALE.hi}. The lit strip is the stretch
-        interviewers hear as composed{wpm ? ", and the tick is you" : ""}.
+        interviewers hear as composed{wpm ? `, and the tick is ${voice.tick}` : ""}.
       </Explain>
     </div>
   );
@@ -206,14 +224,14 @@ export function paceNote(wpm: number): { text: string; tone: "strong" | "mixed" 
  * The bands are stated from the same constants the verdict and the picture use,
  * so nobody can read three different numbers off one metric.
  */
-function paceExplain(wpm: number): string | null {
+function paceExplain(wpm: number, voice: Voice): string | null {
   if (!wpm) return null;
-  return `How fast you spoke. ${COMPOSED.lo}–${COMPOSED.hi} words a minute is the stretch an interviewer hears as composed: slower and you sound unsure of the answer, faster and they stop following it.`;
+  return `How fast ${voice.they} spoke. ${COMPOSED.lo}–${COMPOSED.hi} words a minute is the stretch an interviewer hears as composed: slower and ${voice.they} sound unsure of the answer, faster and the interviewer stops following it.`;
 }
 
-function pauseExplain(ms: number): string | null {
+function pauseExplain(ms: number, voice: Voice): string | null {
   if (!ms) return null;
-  return "The average gap between your words. Short gaps read as fluent, long ones read as hesitation — a pause is only a problem when it lands mid-sentence.";
+  return `The average gap between ${voice.their} words. Short gaps read as fluent, long ones read as hesitation — a pause is only a problem when it lands mid-sentence.`;
 }
 
 function fillerExplain(count: number): string {

@@ -147,6 +147,8 @@ export default async function ReportPage({
   const parent = await repo.getRetryParent(session, userId);
   const before = parent?.report;
 
+  const shareIsLive = await repo.hasLiveReportShare(sessionId, userId);
+
   const cats = report.category_scores;
   const fixes = report.next_steps.slice(0, FIX_LIMIT);
   const hasHighlights = Boolean(report.best_answer || report.worst_answer);
@@ -544,7 +546,7 @@ export default async function ReportPage({
           />
         </div>
 
-        <ShareControl sessionId={sessionId} sessionName={title} />
+        <ShareControl sessionId={sessionId} sessionName={title} initiallyShared={shareIsLive} />
 
         {/* Retry is the hot action, and the only ember button on the page. */}
         <div className="endrow rv" data-io>

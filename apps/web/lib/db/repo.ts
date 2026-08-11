@@ -39,10 +39,6 @@ export function createUser(input: { email: string; passwordHash: string; name?: 
   });
 }
 
-export function updateUserName(id: string, name: string | null) {
-  return prisma.user.update({ where: { id }, data: { name } });
-}
-
 export function updateUserProfile(
   id: string,
   patch: { name?: string | null; emailOnReport?: boolean },
@@ -888,6 +884,14 @@ export function upsertReportShare(sessionId: string, tokenHash: string): Promise
     update: { tokenHash, revokedAt: null, createdAt: new Date() },
     select: { id: true },
   });
+}
+
+export async function hasLiveReportShare(sessionId: string, userId: string): Promise<boolean> {
+  const share = await prisma.reportShare.findFirst({
+    where: { sessionId, revokedAt: null, session: { userId, ...aliveSession } },
+    select: { id: true },
+  });
+  return share !== null;
 }
 
 export async function revokeReportShare(sessionId: string, userId: string): Promise<boolean> {

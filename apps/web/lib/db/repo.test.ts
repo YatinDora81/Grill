@@ -64,12 +64,17 @@ mock.module("@repo/db", () => ({
     },
     reportShare: {
       findFirst: async ({ where, select }: { where: Record<string, unknown>; select?: Select }) => {
-        const share = shares.find((s) => s.tokenHash === where.tokenHash);
+        const share = shares.find((s) =>
+          where.tokenHash !== undefined
+            ? s.tokenHash === where.tokenHash
+            : s.sessionId === where.sessionId,
+        );
         if (!share) return null;
         if (where.revokedAt === null && share.revokedAt !== null) return null;
         const gate = (where.session ?? {}) as Record<string, unknown>;
         const session = sessions.get(share.sessionId);
         if (!session) return null;
+        if (gate.userId !== undefined && session.userId !== gate.userId) return null;
         if (gate.status !== undefined && session.status !== gate.status) return null;
         if (gate.deletedAt === null && session.deletedAt !== null) return null;
         return project({ id: share.id, session }, select);
@@ -362,4 +367,34 @@ test("revokeReportShare refuses another user's session and leaves the link live"
 
   expect(await repo.revokeReportShare("s1", "user-2")).toBe(false);
   expect(await repo.getSharedReport("hash-1")).not.toBeNull();
+});
+
+test("hasLiveReportShare tells the owner a link is live, so the report can offer Revoke", async () => {
+  shareFixture();
+
+  expect(await repo.hasLiveReportShare("s1", OWNER)).toBe(true);
+});
+
+test("hasLiveReportShare is false once the link is revoked", async () => {
+  shareFixture();
+
+  await repo.revokeReportShare("s1", OWNER);
+
+  expect(await repo.hasLiveReportShare("s1", OWNER)).toBe(false);
+});
+
+test("hasLiveReportShare is false for a session that was never shared", async () => {
+  shareFixture();
+
+  expect(await repo.hasLiveReportShare("s2", OWNER)).toBe(false);
+});
+
+test("hasLiveReportShare refuses another user and a soft-deleted session", async () => {
+  shareFixture();
+
+  expect(await repo.hasLiveReportShare("s1", "user-2")).toBe(false);
+
+  sessions.get("s1")!.deletedAt = new Date();
+
+  expect(await repo.hasLiveReportShare("s1", OWNER)).toBe(false);
 });

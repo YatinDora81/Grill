@@ -20,6 +20,7 @@ const INK_SOFT = "#9b978e";
 const LINE_STRONG = "#3a3833";
 const EMBER = "#ff4633";
 const VERDICT_COLOR = { strong: "#8fbf6b", mixed: "#d9a441", weak: "#e05c4f" } as const;
+const ROLE_MAX = 48;
 
 export default async function SharedVerdictImage({
   params,
@@ -80,6 +81,8 @@ export default async function SharedVerdictImage({
             <span
               style={{
                 display: "flex",
+                flexShrink: 0,
+                whiteSpace: "nowrap",
                 fontSize: 26,
                 letterSpacing: "0.1em",
                 textTransform: "uppercase",
@@ -163,7 +166,7 @@ async function lookup(token: string): Promise<CardData | null> {
     if (!shared) return null;
 
     const meta = [
-      shared.role?.trim().toLowerCase(),
+      clampRole(shared.role?.trim().toLowerCase()),
       `${shared.questionCount} question${shared.questionCount === 1 ? "" : "s"}`,
       shared.createdAt
         .toLocaleDateString("en-GB", { month: "short", year: "numeric" })
@@ -182,6 +185,11 @@ async function lookup(token: string): Promise<CardData | null> {
     console.error("[share-og] card lookup failed:", err);
     return null;
   }
+}
+
+function clampRole(role: string | undefined): string | null {
+  if (!role) return null;
+  return role.length > ROLE_MAX ? `${role.slice(0, ROLE_MAX - 1).trimEnd()}…` : role;
 }
 
 function hostOf(url: string): string {

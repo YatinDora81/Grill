@@ -196,7 +196,7 @@ export default async function SharedVerdictPage({
               title="How they sounded"
               note="measured from the recording · never guessed"
             />
-            <Delivery metrics={delivery} />
+            <Delivery metrics={delivery} subject="them" />
           </section>
         ) : null}
 

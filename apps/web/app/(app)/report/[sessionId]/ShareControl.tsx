@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import toast from "react-hot-toast";
 import { apiDelete, apiPost, ApiClientError } from "@/lib/apiClient";
 import { Explain } from "@/components/Explain";
@@ -13,14 +13,27 @@ interface ShareLink {
 export function ShareControl({
   sessionId,
   sessionName,
+  initiallyShared = false,
 }: {
   sessionId: string;
   sessionName: string;
+  initiallyShared?: boolean;
 }) {
   const [url, setUrl] = useState<string | null>(null);
+  const [live, setLive] = useState(initiallyShared);
   const [busy, setBusy] = useState<"create" | "revoke" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const fieldRef = useRef<HTMLInputElement>(null);
+  const createRef = useRef<HTMLButtonElement>(null);
+  const afterPaint = useRef<"select" | "focus" | null>(null);
+
+  useEffect(() => {
+    const next = afterPaint.current;
+    if (!next) return;
+    afterPaint.current = null;
+    if (next === "select") fieldRef.current?.select();
+    else createRef.current?.focus();
+  });
 
   async function create() {
     if (busy) return;
@@ -29,7 +42,8 @@ export function ShareControl({
     try {
       const res = await apiPost<ShareLink>(`/api/report/${sessionId}/share`, {});
       setUrl(res.url);
-      requestAnimationFrame(() => fieldRef.current?.select());
+      setLive(true);
+      afterPaint.current = "select";
     } catch (err) {
       setError(err instanceof ApiClientError ? err.message : "Could not create a link. Try again.");
     } finally {
@@ -44,7 +58,9 @@ export function ShareControl({
     try {
       await apiDelete(`/api/report/${sessionId}/share`, {});
       setUrl(null);
+      setLive(false);
       toast.success("Link revoked");
+      afterPaint.current = "focus";
     } catch (err) {
       setError(
         err instanceof ApiClientError
@@ -96,14 +112,27 @@ export function ShareControl({
             </button>
           </>
         ) : (
-          <button
-            type="button"
-            className="btn btn-ghost"
-            disabled={busy !== null}
-            onClick={() => void create()}
-          >
-            {busy === "create" ? "Minting a link…" : "Share verdict"}
-          </button>
+          <>
+            <button
+              ref={createRef}
+              type="button"
+              className="btn btn-ghost"
+              disabled={busy !== null}
+              onClick={() => void create()}
+            >
+              {busy === "create" ? "Minting a link…" : live ? "Make a new link" : "Share verdict"}
+            </button>
+            {live ? (
+              <button
+                type="button"
+                className="btn btn-danger btn-xs"
+                disabled={busy !== null}
+                onClick={() => void revoke()}
+              >
+                {busy === "revoke" ? "Revoking…" : "Revoke"}
+              </button>
+            ) : null}
+          </>
         )}
       </div>
 
@@ -129,6 +158,13 @@ export function ShareControl({
       {url ? (
         <p className="mono-note" style={{ marginTop: 6 }}>
           This is a fresh link — any earlier one you made for this interview has stopped working.
+        </p>
+      ) : null}
+
+      {live && !url ? (
+        <p className="mono-note" style={{ marginTop: 6 }}>
+          A link for this interview is live right now. The address itself isn&apos;t stored, so it
+          can&apos;t be shown again — make a new one to copy, or revoke this one.
         </p>
       ) : null}
 
