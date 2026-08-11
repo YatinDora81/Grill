@@ -544,6 +544,12 @@ export default async function ReportPage({
               };
             })}
           />
+          <Explain>
+            Where an answer kept its <b>word timings</b>, the words light up in time with the
+            recording as it plays — and <b>clicking any word seeks the player to it</b>, so you can
+            hear one phrase back without hunting for it. Fillers stay tinted even when the audio has
+            been purged and there is nothing left to play.
+          </Explain>
         </div>
 
         <ShareControl sessionId={sessionId} sessionName={title} initiallyShared={shareIsLive} />

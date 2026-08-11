@@ -25,16 +25,25 @@ export function normalizeFillerWord(word: string): string {
   return word.toLowerCase().replace(/[^a-z']/g, "");
 }
 
-export function fillerWordFlags(words: string[]): boolean[] {
+export interface FillerMatches {
+  flagged: boolean[];
+  occurrences: number;
+}
+
+export function findFillerWords(words: string[]): FillerMatches {
   const tokens = words.map(normalizeFillerWord);
-  const flags = new Array<boolean>(tokens.length).fill(false);
+  const flagged = new Array<boolean>(tokens.length).fill(false);
+  let occurrences = 0;
 
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i]!;
     if (!token) continue;
 
     if (token === "like") {
-      if (!likeReadsLiteral(tokens, i)) flags[i] = true;
+      if (!likeReadsLiteral(tokens, i)) {
+        flagged[i] = true;
+        occurrences++;
+      }
       continue;
     }
 
@@ -48,12 +57,13 @@ export function fillerWordFlags(words: string[]): boolean[] {
         }
       }
       if (!matched) continue;
-      for (let k = 0; k < phrase.length; k++) flags[i + k] = true;
+      for (let k = 0; k < phrase.length; k++) flagged[i + k] = true;
+      occurrences++;
       break;
     }
   }
 
-  return flags;
+  return { flagged, occurrences };
 }
 
 function likeReadsLiteral(tokens: string[], i: number): boolean {

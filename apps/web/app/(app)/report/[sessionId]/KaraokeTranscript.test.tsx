@@ -151,6 +151,28 @@ describe("filler tinting", () => {
     expect(container.querySelector(".chip-error")?.textContent).toBe("×2 fillers");
   });
 
+  test("two fillers said back to back count twice, not once", () => {
+    const { container } = render(
+      <KaraokeTranscript
+        words={words(["um", 0, 0.2], ["uh", 0.2, 0.4], ["yeah", 0.4, 1])}
+        currentTime={null}
+      />,
+    );
+    expect(textsWith(container, "text-weak")).toEqual(["um", "uh"]);
+    expect(container.querySelector(".chip-error")?.textContent).toBe("×2 fillers");
+  });
+
+  test("a two-word phrase next to a single filler is two, not three", () => {
+    const { container } = render(
+      <KaraokeTranscript
+        words={words(["um", 0, 0.2], ["you", 0.2, 0.4], ["know", 0.4, 0.6], ["shipped", 0.6, 1])}
+        currentTime={null}
+      />,
+    );
+    expect(textsWith(container, "text-weak")).toEqual(["um", "you", "know"]);
+    expect(container.querySelector(".chip-error")?.textContent).toBe("×2 fillers");
+  });
+
   test("one filler is singular", () => {
     const { container } = render(
       <KaraokeTranscript words={words(["um", 0, 0.2], ["yeah", 0.2, 1])} currentTime={null} />,

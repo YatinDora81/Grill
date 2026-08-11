@@ -234,6 +234,7 @@ function Turn({
                   turnIndex={t.turn_index}
                   onTime={t.transcript_words ? onTime : undefined}
                   seekRef={playerRef}
+                  scrubber
                 />
               ) : (
                 <span className="mono-note">typed answer</span>

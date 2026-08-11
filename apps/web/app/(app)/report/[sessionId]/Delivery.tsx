@@ -16,7 +16,7 @@ import { cx } from "@/components/ui";
  */
 
 /** The conversational band an interviewer reads as composed, in wpm. */
-const COMPOSED = { lo: 110, hi: 160 } as const;
+export const COMPOSED = { lo: 110, hi: 160 } as const;
 /** The scale the band sits on. Wide enough that a real outlier still lands. */
 const SCALE = { lo: 80, hi: 200 } as const;
 

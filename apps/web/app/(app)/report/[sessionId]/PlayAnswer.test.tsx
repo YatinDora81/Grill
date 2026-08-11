@@ -8,6 +8,7 @@ class FakeAudio {
   readonly src: string;
   paused = true;
   currentTime = 0;
+  duration = 118;
   playCalls = 0;
   pauseCalls = 0;
   onended: (() => void) | null = null;
@@ -145,6 +146,62 @@ test("once loaded, a word click seeks the element already in hand", async () => 
   expect(presignHits).toBe(1);
   expect(FakeAudio.instances.length).toBe(1);
   expect(FakeAudio.instances[0]!.currentTime).toBe(7);
+});
+
+test("pausing freezes the reported time; only ending hands back null", async () => {
+  const times: (number | null)[] = [];
+  const { getByLabelText } = render(
+    <PlayAnswer sessionId="s1" turnIndex={0} onTime={(s) => times.push(s)} />,
+  );
+
+  fireEvent.click(getByLabelText("Play your answer"));
+  releasePresign();
+  await waitFor(() => expect(getByLabelText("Pause your answer")).toBeDefined());
+
+  FakeAudio.instances[0]!.currentTime = 4.2;
+  await waitFor(() => expect(times.at(-1)).toBe(4.2));
+
+  fireEvent.click(getByLabelText("Pause your answer"));
+
+  expect(times).not.toContain(null);
+  expect(times.at(-1)).toBe(4.2);
+
+  act(() => {
+    FakeAudio.instances[0]!.onended?.();
+  });
+  expect(times.at(-1)).toBeNull();
+});
+
+test("the scrubber seeks from the keyboard, where the word layer cannot", async () => {
+  const { getByLabelText } = render(<PlayAnswer sessionId="s1" turnIndex={0} scrubber />);
+
+  fireEvent.click(getByLabelText("Play your answer"));
+  releasePresign();
+  await waitFor(() => expect(getByLabelText("Pause your answer")).toBeDefined());
+
+  const slider = (await waitFor(() =>
+    getByLabelText("Seek within your answer"),
+  )) as HTMLInputElement;
+  expect(slider.getAttribute("tabindex")).toBeNull();
+  expect(slider.closest("[aria-hidden='true']")).toBeNull();
+  expect(slider.max).toBe("118");
+
+  fireEvent.focus(slider);
+  fireEvent.change(slider, { target: { value: "30" } });
+  fireEvent.keyUp(slider, { key: "ArrowRight" });
+
+  expect(FakeAudio.instances[0]!.currentTime).toBe(30);
+  expect(presignHits).toBe(1);
+});
+
+test("a player with no scrubber asked for renders none", async () => {
+  const { getByLabelText, queryByLabelText } = mount();
+
+  fireEvent.click(getByLabelText("Play your answer"));
+  releasePresign();
+  await waitFor(() => expect(getByLabelText("Pause your answer")).toBeDefined());
+
+  expect(queryByLabelText("Seek within your answer")).toBeNull();
 });
 
 test("a presign failure reports itself instead of leaving a silent loading button", async () => {

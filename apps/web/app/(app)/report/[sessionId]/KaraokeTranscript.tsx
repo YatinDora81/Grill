@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import type { TranscriptWord } from "@repo/types";
 import { cx } from "@/components/ui";
-import { fillerWordFlags } from "@/lib/fillers";
+import { findFillerWords } from "@/lib/fillers";
 
 export function activeWordIndex(words: TranscriptWord[], currentTime: number | null): number {
   if (currentTime === null) return -1;
@@ -38,12 +38,11 @@ export function KaraokeTranscript({
   currentTime: number | null;
   onSeek?: (seconds: number) => void;
 }) {
-  const fillers = useMemo(() => fillerWordFlags(words.map((w) => w.word)), [words]);
-  const active = useMemo(() => activeWordIndex(words, currentTime), [words, currentTime]);
-  const fillerCount = useMemo(
-    () => fillers.reduce((n, on, i) => (on && !fillers[i - 1] ? n + 1 : n), 0),
-    [fillers],
+  const { flagged: fillers, occurrences: fillerCount } = useMemo(
+    () => findFillerWords(words.map((w) => w.word)),
+    [words],
   );
+  const active = useMemo(() => activeWordIndex(words, currentTime), [words, currentTime]);
   const plain = useMemo(() => words.map((w) => w.word.trim()).join(" "), [words]);
   const running = active >= 0;
 
