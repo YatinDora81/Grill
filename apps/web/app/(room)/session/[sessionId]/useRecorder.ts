@@ -38,12 +38,12 @@ export function useRecorder(maxSeconds: number) {
   }, []);
 
   const recorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const rafRef = useRef<number | null>(null);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const resolveRef = useRef<((b: Blob | null) => void) | null>(null);
+  const generationRef = useRef(0);
+  const mountedRef = useRef(true);
   /**
    * The take is promised from the moment recording starts, not from the moment
    * someone asks for it: the cap stops the recorder on its own schedule, and a
@@ -52,6 +52,7 @@ export function useRecorder(maxSeconds: number) {
   const takeRef = useRef<Promise<Blob | null> | null>(null);
 
   const teardown = useCallback(() => {
+    generationRef.current += 1;
     if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
     if (tickRef.current !== null) clearInterval(tickRef.current);
     rafRef.current = null;
@@ -63,11 +64,27 @@ export function useRecorder(maxSeconds: number) {
     setLevel(0);
   }, []);
 
+  const dropRecorder = useCallback(() => {
+    const rec = recorderRef.current;
+    recorderRef.current = null;
+    if (rec && rec.state !== "inactive") rec.stop();
+  }, []);
+
   // Release the mic if the user navigates away mid-answer — a hot mic left open
   // is both a privacy problem and a battery one.
-  useEffect(() => teardown, [teardown]);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      teardown();
+      dropRecorder();
+    };
+  }, [teardown, dropRecorder]);
 
   const start = useCallback(async () => {
+    teardown();
+    dropRecorder();
+    const gen = generationRef.current;
     setError("");
     setCapped(false);
     setState("requesting");
@@ -78,6 +95,10 @@ export function useRecorder(maxSeconds: number) {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true },
       });
+      if (gen !== generationRef.current || !mountedRef.current) {
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
       streamRef.current = stream;
 
       const ctx = new AudioContext();
@@ -114,22 +135,25 @@ export function useRecorder(maxSeconds: number) {
 
       const mimeType = pickMimeType();
       const rec = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-      chunksRef.current = [];
+      const chunks: Blob[] = [];
+      let settle: ((b: Blob | null) => void) | null = null;
       rec.ondataavailable = (e) => {
-        if (e.data.size > 0) chunksRef.current.push(e.data);
+        if (e.data.size > 0) chunks.push(e.data);
       };
       rec.onstop = () => {
-        const blob = new Blob(chunksRef.current, {
+        const blob = new Blob(chunks, {
           type: rec.mimeType || "audio/webm",
         });
-        teardown();
-        setState("stopped");
-        resolveRef.current?.(blob.size > 0 ? blob : null);
-        resolveRef.current = null;
+        if (gen === generationRef.current) {
+          teardown();
+          setState("stopped");
+        }
+        settle?.(blob.size > 0 ? blob : null);
+        settle = null;
       };
       recorderRef.current = rec;
       takeRef.current = new Promise<Blob | null>((resolve) => {
-        resolveRef.current = resolve;
+        settle = resolve;
       });
       rec.start();
       setSeconds(0);
@@ -152,6 +176,7 @@ export function useRecorder(maxSeconds: number) {
         });
       }, 1000);
     } catch (err) {
+      if (gen !== generationRef.current || !mountedRef.current) return;
       teardown();
       const name = (err as DOMException)?.name;
       setState(name === "NotAllowedError" ? "denied" : "idle");
@@ -161,7 +186,7 @@ export function useRecorder(maxSeconds: number) {
           : "No microphone available. You can type your answer instead.",
       );
     }
-  }, [maxSeconds, teardown]);
+  }, [maxSeconds, teardown, dropRecorder]);
 
   /** Stop and resolve with the recorded audio (null if nothing was captured). */
   const stop = useCallback(() => {
@@ -176,12 +201,13 @@ export function useRecorder(maxSeconds: number) {
 
   const reset = useCallback(() => {
     teardown();
+    dropRecorder();
     takeRef.current = null;
     setState("idle");
     setSeconds(0);
     setCapped(false);
     setError("");
-  }, [teardown]);
+  }, [teardown, dropRecorder]);
 
   return { state, seconds, level, error, capped, start, stop, reset, supported };
 }

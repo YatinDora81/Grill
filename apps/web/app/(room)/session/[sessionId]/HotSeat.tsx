@@ -40,6 +40,8 @@ type Phase = "answering" | "sending" | "finishing";
 /** The question's entrance runs 0.55s; the voice comes in just behind it. */
 const SPEAK_DELAY_MS = 500;
 
+const LEAVE_CANCEL_WAIT_MS = 2_500;
+
 /**
  * Codes that mean "your view of this interview is behind the server's", not
  * "you did something wrong". Retrying is pointless; re-reading state is the fix.
@@ -140,7 +142,7 @@ function seatLine(s: {
         : { text: "That take is in", sub: "sending it now", tone: "calm" };
     default:
       return s.speaking
-        ? { text: "Reading the question out loud", sub: "the mic starts when you tap", tone: "calm" }
+        ? { text: "Reading the question out loud", sub: "tap the mic when you're ready", tone: "calm" }
         : { text: "Ready when you are", sub: "tap the mic, then just talk", tone: "calm" };
   }
 }
@@ -235,6 +237,8 @@ export function HotSeat(props: Props) {
     }
     // Last answer in. /end only queues the report now and returns at once, so
     // this is a fast call — the build happens behind the thank-you screen.
+    stopSpeaking();
+    rec.reset();
     setPhase("finishing");
     // Fire the flush now, but do NOT await it here: ThankYou waits on it before
     // starting its countdown. Awaiting here would leave the candidate staring at
@@ -286,6 +290,7 @@ export function HotSeat(props: Props) {
 
   async function submitText() {
     if (!text.trim() || busy) return;
+    stopSpeaking();
     setPhase("sending");
     setError("");
     const send = async () => {
@@ -362,11 +367,14 @@ export function HotSeat(props: Props) {
 
   async function quit() {
     if (!confirm("Leave this interview? It won't be scored.")) return;
-    try {
-      await apiPost("/api/interview/cancel", { session_id: props.sessionId });
-    } catch {
-      // Cancelling is a courtesy to the server; never block the exit on it.
-    }
+    stopSpeaking();
+    rec.reset();
+    video.stream?.getTracks().forEach((t) => t.stop());
+    // Cancelling is a courtesy to the server; never block the exit on it.
+    await Promise.race([
+      apiPost("/api/interview/cancel", { session_id: props.sessionId }).catch(() => {}),
+      new Promise((resolve) => setTimeout(resolve, LEAVE_CANCEL_WAIT_MS)),
+    ]);
     router.push("/dashboard");
   }
 
@@ -441,7 +449,13 @@ export function HotSeat(props: Props) {
               <span className="q-type" data-kind={questionType}>
                 {TYPE_LABEL[questionType]}
               </span>
-              {!busy && <Interviewer speech={speech} question={question} />}
+              {!busy && (
+                <Interviewer
+                  speech={speech}
+                  question={question}
+                  micLive={rec.state === "recording" || rec.state === "requesting"}
+                />
+              )}
             </div>
 
             {/* A follow-up is the one question type whose PROVENANCE matters:
@@ -540,9 +554,12 @@ export function HotSeat(props: Props) {
             ? "Spoken answers get delivery scoring — pace, pauses, fillers, tone."
             : "Typed answers are scored on content only."}
         </p>
-        {video.state === "recording" ? (
-          <p>This interview is being recorded so you can watch it back. Deleted after 100 days.</p>
-        ) : null}
+        {video.state === "denied" || video.state === "failed" ? null : (
+          <p>
+            This interview is being recorded — picture and sound, for the whole session — so you can
+            watch it back. Deleted after 100 days.
+          </p>
+        )}
       </footer>
 
       {/* Purely a preview. Unmounting it no longer touches the camera — the

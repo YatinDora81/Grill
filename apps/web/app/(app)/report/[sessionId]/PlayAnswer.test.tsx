@@ -5,12 +5,14 @@ import type { PlayAnswerHandle } from "./PlayAnswer";
 
 class FakeAudio {
   static instances: FakeAudio[] = [];
-  readonly src: string;
+  static playGate: Promise<void> | null = null;
+  src: string;
   paused = true;
   currentTime = 0;
   duration = 118;
   playCalls = 0;
   pauseCalls = 0;
+  loadCalls = 0;
   onended: (() => void) | null = null;
   onerror: (() => void) | null = null;
 
@@ -21,12 +23,17 @@ class FakeAudio {
 
   async play() {
     this.playCalls++;
+    if (FakeAudio.playGate) await FakeAudio.playGate;
     this.paused = false;
   }
 
   pause() {
     this.pauseCalls++;
     this.paused = true;
+  }
+
+  load() {
+    this.loadCalls++;
   }
 }
 
@@ -36,6 +43,7 @@ let releasePresign: () => void;
 
 beforeEach(() => {
   FakeAudio.instances = [];
+  FakeAudio.playGate = null;
   presignHits = 0;
   presignFails = false;
   const gate = new Promise<void>((resolve) => {
@@ -130,6 +138,48 @@ test("unmounting during playback leaves nothing playing", async () => {
   unmount();
 
   expect(FakeAudio.instances.every((a) => a.paused)).toBe(true);
+});
+
+test("collapsing the turn while the presign is in flight mints no Audio at all", async () => {
+  const { getByLabelText, unmount } = mount();
+
+  fireEvent.click(getByLabelText("Play your answer"));
+  expect(getByLabelText("Play your answer").textContent).toContain("loading…");
+
+  unmount();
+
+  releasePresign();
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 10));
+  });
+
+  expect(presignHits).toBe(1);
+  expect(FakeAudio.instances.length).toBe(0);
+});
+
+test("unmounting between the mint and play() resolving leaves that element paused", async () => {
+  let releasePlay!: () => void;
+  FakeAudio.playGate = new Promise<void>((resolve) => {
+    releasePlay = resolve;
+  });
+
+  const { getByLabelText, unmount } = mount();
+
+  fireEvent.click(getByLabelText("Play your answer"));
+  releasePresign();
+  await waitFor(() => expect(FakeAudio.instances.length).toBe(1));
+
+  unmount();
+
+  await act(async () => {
+    releasePlay();
+    await new Promise((r) => setTimeout(r, 10));
+  });
+
+  const el = FakeAudio.instances[0]!;
+  expect(el.paused).toBe(true);
+  expect(el.src).toBe("");
+  expect(el.onended).toBeNull();
 });
 
 test("once loaded, a word click seeks the element already in hand", async () => {

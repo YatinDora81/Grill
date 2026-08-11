@@ -46,6 +46,7 @@ export function PlayAnswer({
   const onTimeRef = useRef(onTime);
   const pendingSeekRef = useRef<number | null>(null);
   const loadingRef = useRef(false);
+  const aliveRef = useRef(true);
 
   useEffect(() => {
     onTimeRef.current = onTime;
@@ -84,7 +85,9 @@ export function PlayAnswer({
   useEffect(() => {
     // Don't leave audio playing after the component goes away — collapsing a
     // turn in the replay unmounts this.
+    aliveRef.current = true;
     return () => {
+      aliveRef.current = false;
       audioRef.current?.pause();
       audioRef.current = null;
       stopClock();
@@ -131,6 +134,10 @@ export function PlayAnswer({
       const { url } = await apiGet<PresignResponse>(
         `/api/interview/audio/presign?session_id=${sessionId}&turn_index=${turnIndex}`,
       );
+      if (!aliveRef.current) {
+        pendingSeekRef.current = null;
+        return;
+      }
       const el = new Audio(url);
       audioRef.current = el;
       el.onended = () => {
@@ -142,6 +149,16 @@ export function PlayAnswer({
         stopClock();
       };
       await el.play();
+      if (!aliveRef.current) {
+        el.pause();
+        el.onended = null;
+        el.onerror = null;
+        el.src = "";
+        el.load();
+        if (audioRef.current === el) audioRef.current = null;
+        pendingSeekRef.current = null;
+        return;
+      }
       const seek = pendingSeekRef.current;
       pendingSeekRef.current = null;
       if (seek !== null) el.currentTime = seek;

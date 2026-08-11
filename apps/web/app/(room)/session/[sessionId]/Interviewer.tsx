@@ -13,7 +13,15 @@ type Speech = ReturnType<typeof useSpeech>;
  * Renders nothing when the browser has no speech synthesis; the interview reads
  * fine silently, so an inert control would just be noise.
  */
-export function Interviewer({ speech, question }: { speech: Speech; question: string }) {
+export function Interviewer({
+  speech,
+  question,
+  micLive,
+}: {
+  speech: Speech;
+  question: string;
+  micLive: boolean;
+}) {
   if (!speech.supported) return null;
 
   // Square, like every other control in the redesign. No border: these sit
@@ -36,7 +44,8 @@ export function Interviewer({ speech, question }: { speech: Speech; question: st
       <button
         onClick={() => speech.speak(question)}
         aria-label="Replay the question"
-        disabled={speech.muted}
+        title={micLive ? "Not while the mic is live — it would land in your answer" : undefined}
+        disabled={speech.muted || micLive}
         className={btn}
       >
         <ReplayIcon />

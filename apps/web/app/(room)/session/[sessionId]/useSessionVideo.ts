@@ -193,6 +193,18 @@ export function useSessionVideo(sessionId: string, bitsPerSecond: number): Sessi
   // Start on mount, once per session.
   useEffect(() => {
     let cancelled = false;
+    let acquired: MediaStream | null = null;
+
+    const release = () => {
+      const media = acquired;
+      if (!media) return;
+      acquired = null;
+      media.getTracks().forEach((t) => t.stop());
+      if (streamRef.current === media) {
+        streamRef.current = null;
+        setStream(null);
+      }
+    };
 
     (async () => {
       if (typeof MediaRecorder === "undefined") return setState("failed");
@@ -208,8 +220,9 @@ export function useSessionVideo(sessionId: string, bitsPerSecond: number): Sessi
         if (!cancelled) setState(name === "NotAllowedError" ? "denied" : "failed");
         return;
       }
+      acquired = media;
       if (cancelled) {
-        media.getTracks().forEach((t) => t.stop());
+        release();
         return;
       }
       streamRef.current = media;
@@ -221,35 +234,51 @@ export function useSessionVideo(sessionId: string, bitsPerSecond: number): Sessi
           "/api/interview/video/start",
           { session_id: sessionId, mime_type: mimeType ?? "video/webm" },
         );
-        if (cancelled) return;
+        if (cancelled) {
+          release();
+          return;
+        }
         videoIdRef.current = started.video_id;
         partBytesRef.current = started.part_bytes;
         setVideoId(started.video_id);
       } catch (err) {
         console.warn("[video] could not start recording:", err);
+        release();
         if (!cancelled) setState("failed");
         return;
       }
 
-      const rec = new MediaRecorder(media, {
-        ...(mimeType ? { mimeType } : {}),
-        videoBitsPerSecond: bitsPerSecond,
-        audioBitsPerSecond: AUDIO_BITS_PER_SECOND,
-      });
-      rec.ondataavailable = (e) => {
-        if (!e.data.size) return;
-        bufferRef.current.push(e.data);
-        bufferedRef.current += e.data.size;
-        drain(false);
-      };
-      recorderRef.current = rec;
-      // The clock starts with the recorder, and every answer offset is measured
-      // against it. performance.now() rather than Date.now(): monotonic, so a
-      // clock adjustment mid-interview can't shift the offsets.
-      startedAtRef.current = performance.now();
-      rec.start(TIMESLICE_MS);
+      try {
+        const rec = new MediaRecorder(media, {
+          ...(mimeType ? { mimeType } : {}),
+          videoBitsPerSecond: bitsPerSecond,
+          audioBitsPerSecond: AUDIO_BITS_PER_SECOND,
+        });
+        rec.ondataavailable = (e) => {
+          if (!e.data.size) return;
+          bufferRef.current.push(e.data);
+          bufferedRef.current += e.data.size;
+          drain(false);
+        };
+        // The clock starts with the recorder, and every answer offset is measured
+        // against it. performance.now() rather than Date.now(): monotonic, so a
+        // clock adjustment mid-interview can't shift the offsets.
+        startedAtRef.current = performance.now();
+        rec.start(TIMESLICE_MS);
+        recorderRef.current = rec;
+      } catch (err) {
+        console.warn("[video] recorder unavailable:", err);
+        startedAtRef.current = null;
+        release();
+        if (!cancelled) setState("failed");
+        return;
+      }
       setState("recording");
-    })();
+    })().catch((err) => {
+      console.warn("[video] recording could not start:", err);
+      release();
+      if (!cancelled) setState("failed");
+    });
 
     return () => {
       cancelled = true;

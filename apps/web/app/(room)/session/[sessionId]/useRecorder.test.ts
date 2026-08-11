@@ -53,6 +53,29 @@ function installMediaStubs() {
   return track;
 }
 
+function gatedMedia() {
+  const tracks: Array<{ stop: ReturnType<typeof mock> }> = [];
+  const gates: Array<() => void> = [];
+  Object.defineProperty(globalThis.navigator, "mediaDevices", {
+    configurable: true,
+    value: {
+      getUserMedia: mock(async () => {
+        const track = { stop: mock(() => {}) };
+        tracks.push(track);
+        await new Promise<void>((resolve) => gates.push(resolve));
+        return { getTracks: () => [track] } as unknown as MediaStream;
+      }),
+    },
+  });
+  return {
+    tracks,
+    releaseAll: () => {
+      for (const open of gates.splice(0)) open();
+    },
+    live: () => tracks.filter((t) => t.stop.mock.calls.length === 0),
+  };
+}
+
 beforeEach(() => {
   installMediaStubs();
 });
@@ -144,4 +167,73 @@ test("the mic is released when the cap stops the recording", async () => {
   await waitFor(() => expect(result.current.state).toBe("stopped"));
   // A hot mic left open past the answer is a privacy problem, not a leak of tidiness.
   expect(track.stop).toHaveBeenCalled();
+});
+
+test("a microphone that arrives after unmount is stopped, never installed", async () => {
+  const media = gatedMedia();
+  const { result, unmount } = renderHook(() => useRecorder(60));
+
+  let pending!: Promise<void>;
+  await act(async () => {
+    pending = result.current.start();
+  });
+  expect(result.current.state).toBe("requesting");
+
+  unmount();
+  await act(async () => {
+    media.releaseAll();
+    await pending;
+  });
+
+  expect(media.tracks).toHaveLength(1);
+  expect(media.live()).toHaveLength(0);
+  expect(result.current.state).toBe("requesting");
+});
+
+test("a microphone that arrives after reset() is stopped, never installed", async () => {
+  const media = gatedMedia();
+  const { result } = renderHook(() => useRecorder(60));
+
+  let pending!: Promise<void>;
+  await act(async () => {
+    pending = result.current.start();
+  });
+  await act(async () => {
+    result.current.reset();
+  });
+  await act(async () => {
+    media.releaseAll();
+    await pending;
+  });
+
+  expect(media.live()).toHaveLength(0);
+  expect(result.current.state).toBe("idle");
+});
+
+test("two overlapping start() calls leave exactly one live microphone", async () => {
+  const media = gatedMedia();
+  const { result } = renderHook(() => useRecorder(60));
+
+  let first!: Promise<void>;
+  let second!: Promise<void>;
+  await act(async () => {
+    first = result.current.start();
+  });
+  await act(async () => {
+    second = result.current.start();
+  });
+  expect(media.tracks).toHaveLength(2);
+
+  await act(async () => {
+    media.releaseAll();
+    await Promise.all([first, second]);
+  });
+
+  await waitFor(() => expect(result.current.state).toBe("recording"));
+  expect(media.live()).toHaveLength(1);
+
+  await act(async () => {
+    result.current.reset();
+  });
+  expect(media.live()).toHaveLength(0);
 });
