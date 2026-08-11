@@ -12,6 +12,8 @@ import { ScoreBand } from "@/components/ScoreBand";
 import { Reveal } from "@/components/Reveal";
 import { Trend } from "./Trend";
 import { Readout } from "./Readout";
+import { DeliverySpark } from "./DeliverySpark";
+import { RetryChain } from "./RetryChain";
 
 export const metadata: Metadata = {
   title: "Dashboard",
@@ -47,7 +49,7 @@ export default async function DashboardPage() {
   const userId = await getUserId();
   if (!userId) redirect("/?auth=login&next=/dashboard");
 
-  const [{ stats, recent }, starred] = await Promise.all([
+  const [{ stats, recent, delivery_series, retry_chain }, starred] = await Promise.all([
     getDashboardData(userId),
     repo.listStarredQuestions(userId),
   ]);
@@ -140,6 +142,9 @@ export default async function DashboardPage() {
                 </div>
               </section>
             )}
+
+            <DeliverySpark series={delivery_series} />
+            <RetryChain chain={retry_chain} />
           </>
         ) : null}
 

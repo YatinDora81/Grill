@@ -3,42 +3,17 @@ import type {
   AnswerScores,
   DashboardData,
   DeliveryMetrics,
+  DeliveryPoint,
   InterviewConfig,
   RecentSession,
+  RetryChainHop,
 } from "@repo/types";
 import { notFound } from "@/lib/errors";
 import * as repo from "@/lib/db/repo";
 import { toUserDTO } from "@/lib/auth";
+import { PATTERN, worstDimension } from "@/lib/rubricPattern";
 
 const WEEK_MS = 7 * 864e5;
-
-/** The rubric, in the order `AnswerScores` declares it. */
-const DIMENSIONS = ["relevance", "correctness", "structure", "depth", "filler"] as const;
-type Dimension = (typeof DIMENSIONS)[number];
-
-/**
- * One honest sentence per rubric dimension — the dashboard's readout.
- *
- * Deliberately not an LLM call. The dashboard is force-dynamic and this runs on
- * every page view, and the project runs on free-tier quota; a template naming a
- * dimension we genuinely measured beats a generated sentence we can't afford.
- *
- * `filler` runs the same direction as every other dimension — 10 is crisp, 1 is
- * rambling — so it lands here for the same reason the others do: it is the
- * LOWEST average. It needs no inversion; flipping it would name the wrong habit.
- */
-const PATTERN: Record<Dimension, string> = {
-  relevance:
-    "The thing costing you the most is relevance — you answer a near-miss of the question rather than the question itself.",
-  correctness:
-    "The thing costing you the most is correctness — the substance is where you lose points, not the delivery.",
-  structure:
-    "The thing costing you the most is structure — your answers arrive as one long block instead of a shape an interviewer can follow.",
-  depth:
-    "The thing costing you the most is depth — you stop at the headline and leave the specifics that would prove it on the table.",
-  filler:
-    "The thing costing you the most is filler — the point is in there, but the ums and likes are burying it.",
-};
 
 /**
  * Below this there is no pattern, only a bad day. A weakness that shows up once
@@ -49,16 +24,7 @@ const PATTERN_MIN_SESSIONS = 3;
 /** The lowest-scoring rubric dimension across recent answers, as a sentence. */
 function derivePattern(scores: AnswerScores[], sessionCount: number): string | null {
   if (sessionCount < PATTERN_MIN_SESSIONS || scores.length === 0) return null;
-
-  let worst: Dimension | null = null;
-  let worstMean = Infinity;
-  for (const d of DIMENSIONS) {
-    const mean = scores.reduce((sum, s) => sum + s[d], 0) / scores.length;
-    if (mean < worstMean) {
-      worstMean = mean;
-      worst = d;
-    }
-  }
+  const worst = worstDimension(scores);
   return worst === null ? null : PATTERN[worst];
 }
 
@@ -72,6 +38,12 @@ function derivePattern(scores: AnswerScores[], sessionCount: number): string | n
 function fillerCount(raw: unknown): number | null {
   if (!raw || typeof raw !== "object") return null;
   const n = (raw as Partial<DeliveryMetrics>).filler_count;
+  return typeof n === "number" && Number.isFinite(n) ? n : null;
+}
+
+function wordsPerMinute(raw: unknown): number | null {
+  if (!raw || typeof raw !== "object") return null;
+  const n = (raw as Partial<DeliveryMetrics>).wpm;
   return typeof n === "number" && Number.isFinite(n) ? n : null;
 }
 
@@ -113,8 +85,9 @@ export async function getDashboardData(userId: string): Promise<DashboardData> {
   const countable = [...new Set([newest?.sessionId, oldest?.sessionId].filter(Boolean))] as string[];
 
   const unfinished = sessions.find((s) => s.status === "in_progress") ?? null;
+  const rematch = sessions.find((s) => s.retryOfId !== null) ?? null;
 
-  const [counts, rubric, progress] = await Promise.all([
+  const [counts, rubric, progress, chainRows] = await Promise.all([
     Promise.all(countable.map((id) => repo.countAnsweredTurns(userId, id))),
     // Skipped entirely below the threshold: the sentence would be suppressed
     // anyway, so a new user never pays for this read.
@@ -122,6 +95,9 @@ export async function getDashboardData(userId: string): Promise<DashboardData> {
       ? repo.listRecentAnswerScores(userId)
       : Promise.resolve([] as AnswerScores[]),
     unfinished ? repo.getSessionProgress(userId, unfinished.id) : Promise.resolve(null),
+    rematch
+      ? repo.listRetryChain(rematch.id, userId)
+      : Promise.resolve([] as repo.RetryChainSession[]),
   ]);
   const answered = new Map(countable.map((id, i) => [id, counts[i]!]));
 
@@ -133,6 +109,24 @@ export async function getDashboardData(userId: string): Promise<DashboardData> {
     if (fillers === null || turns === 0) return null;
     return Math.round((fillers / turns) * 10) / 10;
   };
+
+  const deliverySeries: DeliveryPoint[] = reports.map((r) => ({
+    session_id: r.sessionId,
+    date: r.session.createdAt.toISOString().slice(0, 10),
+    wpm: wordsPerMinute(r.deliveryMetrics),
+    fillers: fillerCount(r.deliveryMetrics),
+  }));
+
+  const hops: RetryChainHop[] = [];
+  for (const row of chainRows) {
+    if (row.overallScore === null) continue;
+    hops.push({
+      session_id: row.id,
+      name: row.name,
+      overall_score: row.overallScore,
+      date: row.createdAt.toISOString().slice(0, 10),
+    });
+  }
 
   const recent: RecentSession[] = sessions.map((s) => ({
     session_id: s.id,
@@ -164,5 +158,10 @@ export async function getDashboardData(userId: string): Promise<DashboardData> {
       top_pattern: derivePattern(rubric, reports.length),
     },
     recent,
+    delivery_series: deliverySeries,
+    retry_chain:
+      hops.length >= 2
+        ? { name: chainRows.find((r) => r.name !== null)?.name ?? null, hops }
+        : null,
   };
 }
