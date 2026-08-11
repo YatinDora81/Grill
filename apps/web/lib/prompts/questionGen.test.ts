@@ -1,6 +1,6 @@
 import { test, expect } from "bun:test";
 import type { InterviewConfig, Persona } from "@repo/types";
-import { PERSONAS, PERSONA_GUARDRAIL, PERSONA_META } from "@/lib/interviewMeta";
+import { PERSONAS, PERSONA_GUARDRAIL, PERSONA_META, drillTurnBudget } from "@/lib/interviewMeta";
 import { EVALUATION_SYSTEM, evaluationPrompt } from "./evaluation";
 import {
   culturalOnly,
@@ -311,6 +311,27 @@ test("a fixed primary only yields its turn when there is a spare question to spe
   );
   expect(done).not.toContain("The primaries for this interview are fixed");
   expect(done).toContain("lean toward:");
+});
+
+test("the drill's real turn budget reaches the follow-up branch at every primary", () => {
+  const fixed = ["Q one?", "Q two?", "Q three?"];
+  const total = drillTurnBudget(fixed.length);
+  const c = ctx({ mode: "starred", num_questions: total });
+
+  for (let answered = 1; answered < fixed.length; answered++) {
+    const history = fixed.slice(0, answered).map((q) => ({ question: q, answer: "…" }));
+    const nextIndex = history.length;
+    const turnsRemaining = total - (nextIndex + 1);
+    expect(followUpPrompt(c, history, turnsRemaining, { fixedQuestions: fixed })).toContain(
+      "you may spend this turn on ONE targeted follow-up",
+    );
+  }
+
+  const starved = fixed.length;
+  const opened = [{ question: "Q one?", answer: "…" }];
+  expect(followUpPrompt(c, opened, starved - 2, { fixedQuestions: fixed })).toContain(
+    "Every question left is spoken for",
+  );
 });
 
 test("no other interview shape sees a fixed list or a persona paragraph", () => {

@@ -24,6 +24,7 @@ import { questionResponseSchema, type QuestionResponse } from "@/lib/schemas";
 export async function questionInputs(
   ctx: SessionContext,
   userId: string,
+  opts: { requireStars?: boolean } = {},
 ): Promise<QuestionInputs> {
   const [askedBefore, weakSpots, stars] = await Promise.all([
     ctx.config.allow_repeats ? Promise.resolve([]) : repo.listAskedQuestions(userId),
@@ -32,7 +33,7 @@ export async function questionInputs(
   ]);
 
   const fixedQuestions = fixedFromStars(stars, ctx.config.starred_hashes);
-  if (ctx.config.mode === "starred" && fixedQuestions.length === 0) {
+  if (opts.requireStars && ctx.config.mode === "starred" && fixedQuestions.length === 0) {
     throw badRequest(
       "None of those saved questions are still starred — pick again from /starred.",
       "no_starred_questions",

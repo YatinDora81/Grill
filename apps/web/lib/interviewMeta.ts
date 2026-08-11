@@ -24,6 +24,10 @@ import type {
  */
 export const QUESTION_BOUNDS = { min: 3, max: 100 } as const;
 
+export function drillTurnBudget(starredCount: number): number {
+  return Math.min(starredCount * 2, QUESTION_BOUNDS.max);
+}
+
 /** The four difficulty modes the form offers, in pitch order. */
 export const DIFFICULTIES: readonly Difficulty[] = ["easy", "medium", "hard", "extreme"] as const;
 

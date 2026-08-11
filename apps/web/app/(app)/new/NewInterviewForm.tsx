@@ -20,6 +20,7 @@ import {
   PERSONA_META,
   QUESTION_BOUNDS,
   SOURCE_META,
+  drillTurnBudget,
   perAnswerCapSeconds,
 } from "@/lib/interviewMeta";
 import { Explain } from "@/components/Explain";
@@ -239,6 +240,8 @@ export function NewInterviewForm({
   );
   const [starredHashes, setStarredHashes] = useState<string[]>(initialStarredHashes);
   const [starredRows, setStarredRows] = useState<StarredRow[] | null>(null);
+  const [starredFailed, setStarredFailed] = useState(false);
+  const [starredReload, setStarredReload] = useState(0);
   const [topic, setTopic] = useState("");
   const [jobDescription, setJobDescription] = useState("");
   // Project mode: the material the interview reads (pasted text or an edited
@@ -278,13 +281,14 @@ export function NewInterviewForm({
   useEffect(() => {
     if (!initialStarredHashes.length) return;
     let live = true;
+    setStarredFailed(false);
     apiGet<{ starred: StarredRow[] }>("/api/starred")
       .then((res) => live && setStarredRows(res.starred))
-      .catch(() => live && setStarredRows([]));
+      .catch(() => live && setStarredFailed(true));
     return () => {
       live = false;
     };
-  }, [initialStarredHashes.length]);
+  }, [initialStarredHashes.length, starredReload]);
 
   useEffect(() => {
     if (fromDrillLink || initialMode) return;
@@ -311,7 +315,8 @@ export function NewInterviewForm({
     : null;
   const drillLost = drillQuestions ? starredHashes.length - drillQuestions.length : 0;
   const liveHashes = drillQuestions ? drillQuestions.map((r) => r.question_hash) : starredHashes;
-  const questionCount = drilling ? liveHashes.length : numQuestions;
+  const primaryCount = drilling ? liveHashes.length : numQuestions;
+  const questionCount = drilling ? drillTurnBudget(liveHashes.length) : numQuestions;
   // What the server will derive for this count. Cheap enough to just recompute.
   const answerCap = perAnswerCapSeconds(questionCount);
 
@@ -986,7 +991,20 @@ export function NewInterviewForm({
                   </p>
                   <ol className="px-5 pt-4 pb-5">
                     {drillQuestions === null ? (
-                      <li className={MONO_NOTE}>Reading your saved questions…</li>
+                      starredFailed ? (
+                        <li className="text-[13px] leading-relaxed text-weak">
+                          Couldn&rsquo;t read your saved questions.{" "}
+                          <button
+                            type="button"
+                            onClick={() => setStarredReload((n) => n + 1)}
+                            className="underlink hot"
+                          >
+                            try again
+                          </button>
+                        </li>
+                      ) : (
+                        <li className={MONO_NOTE}>Reading your saved questions…</li>
+                      )
                     ) : drillQuestions.length === 0 ? (
                       <li className="text-[13px] leading-relaxed text-weak">
                         None of those are still starred.{" "}
@@ -1020,13 +1038,13 @@ export function NewInterviewForm({
                 </div>
                 <Explain>
                   A drill asks <b>exactly these</b>, word for word, in this order. The question
-                  count is the length of the list, so the slider below is off — and the grading is
-                  the same rubric as any other interview.
+                  count is the length of the list plus room for a follow-up after each, so the
+                  slider below is off — and the grading is the same rubric as any other interview.
                 </Explain>
               </>
             )}
 
-            <div className={drilling ? "mt-9 opacity-55" : "mt-9"}>
+            <div className="mt-9">
               <div className="field-row">
                 <span id="wiz-draws-on" className="label">
                   What it draws on
@@ -1093,8 +1111,9 @@ export function NewInterviewForm({
 
               {drilling ? (
                 <p className="border border-line bg-paper-sunken px-5 py-4 text-[13px] leading-relaxed text-ink-soft">
-                  Fixed at <b className="font-semibold text-ember">{questionCount}</b> — one primary
-                  per starred question. Drop the drill above to set this yourself.
+                  Fixed at <b className="font-semibold text-ember">{primaryCount}</b> — one primary
+                  per starred question, plus room for a follow-up after each. Drop the drill above
+                  to set this yourself.
                 </p>
               ) : (
                 <>

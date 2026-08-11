@@ -17,6 +17,7 @@ import {
   QUESTION_BOUNDS,
   SOURCE_META,
   difficultyLabel,
+  drillTurnBudget,
   interviewLabel,
   perAnswerCapSeconds,
   personaBrief,
@@ -104,6 +105,28 @@ describe("perAnswerCapSeconds", () => {
     // answers are too short to be worth recording.
     expect(perAnswerCapSeconds(109)).toBe(ANSWER_CAP_MODEL.answerFloorS);
     expect(perAnswerCapSeconds(110)).toBeNull();
+  });
+});
+
+describe("drillTurnBudget", () => {
+  const MAX_STARS = 12;
+
+  test("buys every starred primary a turn it can spend on a follow-up", () => {
+    for (let stars = 1; stars <= MAX_STARS; stars++) {
+      expect(drillTurnBudget(stars)).toBeGreaterThan(stars);
+    }
+  });
+
+  test("keeps every drill size inside the bounds and scoreable", () => {
+    for (let stars = 1; stars <= MAX_STARS; stars++) {
+      const budget = drillTurnBudget(stars);
+      expect(budget).toBeLessThanOrEqual(QUESTION_BOUNDS.max);
+      expect(perAnswerCapSeconds(budget)).not.toBeNull();
+    }
+  });
+
+  test("never exceeds the question ceiling", () => {
+    expect(drillTurnBudget(QUESTION_BOUNDS.max)).toBe(QUESTION_BOUNDS.max);
   });
 });
 
