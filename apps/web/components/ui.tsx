@@ -26,7 +26,7 @@ const BUTTON_VARIANTS = {
   // both directions (5.68:1 and 5.17:1) because the light ember is an ink
   // rather than a lamp, so `text-paper` is still what knocks out of it.
   primary: "border-ink bg-ink text-paper hover:border-ember hover:bg-ember",
-  secondary: "border-line-strong bg-transparent text-ink hover:border-ember hover:text-ember",
+  secondary: "border-(--edge-control-strong) bg-transparent text-ink hover:border-ember hover:text-ember",
   ghost: "border-transparent bg-transparent text-ink-soft hover:text-ink",
   danger: "border-line bg-transparent text-ink-muted hover:border-weak hover:text-weak",
 } as const;

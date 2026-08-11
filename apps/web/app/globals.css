@@ -211,6 +211,14 @@
      surface it happens to share a value with today. On dark a hover lightens;
      on light it has to darken, while a static card still goes the other way. */
   --surface-hover: var(--color-paper-raised);
+  /* The rail's own fill, split off `--surface-hover` because the two sit on
+     different grounds and pull opposite ways: a row on a raised CARD wants a
+     value that keeps muted metadata legible, while a row on the SUNKEN rail
+     wants one that steps off a surface which is itself already darker than the
+     page. One value served both only while every surface was near-black.
+     Nothing muted is ever painted on this one — the rail pairs `hover:bg` with
+     `hover:text-ink` at every call site. */
+  --rail-hover: var(--color-paper-raised);
 
   /* Secondary type on the inverted `.trow` slab, which borrows
      `--color-line-strong` today and works only by coincidence. */
@@ -633,7 +641,14 @@
   --track-strong: #c3bcaa;
   /* Hover DARKENS here, where on dark it lightens. Same gesture, opposite
      sign — and the static raised card still goes the other way. */
-  --surface-hover: #e9e4d6;
+  /* Lifted one step off the value the ramp suggested: at #e9e4d6 the muted
+     metadata inside a hovered row measured 4.457:1, an AA failure that only
+     appears under the pointer. This clears it at 4.54 and still reads as a
+     step off the page (1.096). */
+  --surface-hover: #ebe6d8;
+  /* 1.12 off the rail where dark manages 1.066 — deliberately the stronger of
+     the two, because a low-contrast step reads weaker on a bright ground. */
+  --rail-hover: #e0dbce;
   /* Runs opposite to everything else in this block, because its ground does:
      it is secondary type on the reversed-out `.trow` panel. */
   --invert-ink-soft: #a9a294;
@@ -804,7 +819,7 @@
   --surface-recessed: #ebe6db;
   /* Quieter than the live ember bars, which inverting `--color-ink-muted`
      would not have been. */
-  --mic-idle: #c4bfb3;
+  --mic-idle: #948f83;
   --rule-quote: #d6d0c3;
   --rule-pending: #c3bcae;
   --fmark-fill: color-mix(in srgb, var(--color-ember) 8%, transparent);
@@ -883,6 +898,7 @@
   --edge-control: var(--color-line); --edge-control-strong: var(--color-line-strong);
   --edge-track: var(--color-line); --color-track: var(--color-line);
   --track-strong: var(--color-line-strong); --surface-hover: var(--color-paper-raised);
+  --rail-hover: var(--color-paper-raised);
   --stroke-ghost: var(--color-line-strong); --keylight-fade: transparent;
   --edge-mixed: color-mix(in srgb, var(--color-mixed) 35%, transparent);
   --ember-edge: color-mix(in srgb, var(--color-ember) 40%, transparent);
@@ -3759,7 +3775,7 @@
   gap: 14px 22px;
   margin-top: 26px;
   padding: 12px 16px;
-  border: 1px dashed var(--color-line-strong);
+  border: 1px dashed var(--stroke-dashed);
 }
 .vs-label {
   font-family: var(--font-mono);
@@ -3866,7 +3882,7 @@ a.vs-label:hover {
 .band {
   margin-top: 22px;
   padding-top: 18px;
-  border-top: 1px dashed var(--color-line-strong);
+  border-top: 1px dashed var(--stroke-dashed);
 }
 .band-scale {
   position: relative;
@@ -3926,7 +3942,7 @@ a.vs-label:hover {
 .dfoot {
   margin-top: 20px;
   padding-top: 14px;
-  border-top: 1px dashed var(--color-line-strong);
+  border-top: 1px dashed var(--stroke-dashed);
   font-family: var(--font-mono);
   font-size: 10.5px;
   line-height: 1.7;
@@ -4173,7 +4189,10 @@ a.vs-label:hover {
 .transcript {
   margin-top: 6px;
   padding: 6px 12px;
-  border-left: 2px solid var(--color-line-strong);
+  /* A 2px slab, not a hairline, so it takes the slab token: on the sheet a
+     divider value picked for a 1px rule turns this into a near-black bar that
+     out-weighs the card it sits inside. Same value on dark. */
+  border-left: 2px solid var(--track-strong);
   font-size: 13.5px;
   color: var(--color-ink-soft);
 }
@@ -5840,7 +5859,7 @@ a.vs-label:hover {
   margin-top: 8px;
   padding: 11px 13px;
   text-align: left;
-  border: 1px dashed var(--color-line-strong);
+  border: 1px dashed var(--stroke-dashed);
   background: var(--color-paper-sunken);
   cursor: pointer;
   transition:

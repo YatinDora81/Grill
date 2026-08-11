@@ -92,9 +92,16 @@ const GROUPS: { heading: string; items: Item[] }[] = [
 
    The fill: on the sheet a selected or hovered row has to take ON ink, while a
    static raised card still lifts off the page. One value cannot do both once
-   the ground flips, so `--surface-hover` is the half that reverses and
+   the ground flips, so `--rail-hover` is the half that reverses and
    `bg-paper-raised` — the account tile, the panels on the pages this rail
    leads to — is the half that does not.
+
+   `--rail-hover` and not `--surface-hover`, which is the same idea for rows on a
+   raised CARD: these sit on the SUNKEN rail, a surface already darker than the
+   page, so the two want different values the moment neither ground is black.
+   This one can also run darker than that one, because the rail pairs `hover:bg`
+   with `hover:text-ink` at every call site below — nothing muted is ever painted
+   on it, which is exactly the constraint that holds `--surface-hover` back.
 
    The alpha: a `/45` modifier fades toward whatever is behind it, which over
    cream means fading toward the stock. That is backwards for a marker whose
@@ -195,7 +202,7 @@ export function AppRail({ name, initials }: { name: string | null; initials: str
                     aria-current={active ? "step" : undefined}
                     className={`${ITEM} cursor-default ${
                       active
-                        ? "border-l-ember bg-(--surface-hover) text-ink"
+                        ? "border-l-ember bg-(--rail-hover) text-ink"
                         : "border-l-transparent text-(--color-ink-faintest)"
                     }`}
                   >
@@ -215,8 +222,8 @@ export function AppRail({ name, initials }: { name: string | null; initials: str
                   aria-current={active ? "page" : undefined}
                   className={`${ITEM} ${
                     active
-                      ? "border-l-ember bg-(--surface-hover) text-ink"
-                      : "border-l-transparent text-ink-muted hover:bg-(--surface-hover) hover:text-ink"
+                      ? "border-l-ember bg-(--rail-hover) text-ink"
+                      : "border-l-transparent text-ink-muted hover:bg-(--rail-hover) hover:text-ink"
                   }`}
                 >
                   <em className={`${NUM} ${active ? "text-ember" : "text-(--color-ink-faint)"}`}>
@@ -333,7 +340,7 @@ export function AppHeader({ initials }: { initials: string }) {
                    has to sit on the axis the eye scans across. */
                 className={`flex items-center gap-1.5 border-b-2 px-3.5 py-2 font-mono text-[0.66rem] tracking-[0.1em] whitespace-nowrap uppercase transition-colors ${
                   active
-                    ? "border-b-ember bg-(--surface-hover) text-ink"
+                    ? "border-b-ember bg-(--rail-hover) text-ink"
                     : "border-b-transparent text-ink-muted hover:text-ink"
                 }`}
               >
