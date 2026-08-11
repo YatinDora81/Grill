@@ -455,6 +455,15 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
                   {hotSeat}
                   <span className="meta">free · 8 questions · no card</span>
                 </div>
+
+                <p className="rv mt-5" data-io style={{ "--d": ".38s" } as CSSProperties}>
+                  <Link
+                    href="/sample"
+                    className="text-[0.88rem] text-ink-soft underline decoration-line-strong underline-offset-4 transition-colors hover:text-ink hover:decoration-ember"
+                  >
+                    or read a sample verdict →
+                  </Link>
+                </p>
               </div>
 
               <HeroRig />
