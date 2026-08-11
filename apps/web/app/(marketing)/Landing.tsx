@@ -745,6 +745,7 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
                   {n.label}
                 </a>
               ))}
+              <Link href="/tools/resume-vs-jd">Résumé vs JD</Link>
               {signedIn ? (
                 <Link href="/dashboard">Dashboard</Link>
               ) : (

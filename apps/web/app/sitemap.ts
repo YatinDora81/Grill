@@ -2,7 +2,7 @@ import type { MetadataRoute } from "next";
 import { config } from "@/lib/env";
 
 /**
- * Three entries, because three pages are public. Everything else is behind auth
+ * Four entries, because four pages are public. Everything else is behind auth
  * or keyed to one candidate's session.
  *
  * No `lastModified`: it would have to be stamped at build time, which reports
@@ -18,6 +18,11 @@ export default function sitemap(): MetadataRoute.Sitemap {
     },
     {
       url: `${config.site.url}/sample`,
+      changeFrequency: "monthly",
+      priority: 0.9,
+    },
+    {
+      url: `${config.site.url}/tools/resume-vs-jd`,
       changeFrequency: "monthly",
       priority: 0.9,
     },
