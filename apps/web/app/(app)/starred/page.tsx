@@ -1,13 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import type { QuestionType } from "@repo/types";
 import { getUserId } from "@/lib/auth";
 import * as repo from "@/lib/db/repo";
-import { cx } from "@/components/ui";
 import { Explain, ExplainBanner } from "@/components/Explain";
 import { Reveal } from "@/components/Reveal";
-import { Unstar } from "./Unstar";
+import { StarredSelection, type StarredItem } from "./StarredSelection";
 
 export const metadata: Metadata = {
   title: "Starred",
@@ -15,14 +13,6 @@ export const metadata: Metadata = {
 };
 // Stars change from the report page; never serve a stale collection.
 export const dynamic = "force-dynamic";
-
-const TYPE_LABEL: Record<QuestionType, string> = {
-  technical: "Technical",
-  cultural: "Cultural",
-  followup: "Follow-up",
-  // Legacy turns: `behavioral` and `cultural` always meant the same thing.
-  behavioral: "Cultural",
-};
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -45,6 +35,14 @@ export default async function StarredPage() {
   if (!userId) redirect("/?auth=login&next=/starred");
 
   const starred = await repo.listStarredQuestions(userId);
+  const items: StarredItem[] = starred.map((s) => ({
+    id: s.id,
+    question: s.question,
+    questionType: s.questionType,
+    questionHash: s.questionHash,
+    day: fmtDay(s.createdAt),
+    sessionId: s.turn?.sessionId ?? null,
+  }));
 
   return (
     <>
@@ -108,73 +106,11 @@ export default async function StarredPage() {
               go down as you drill them, not up.
             </Explain>
 
-            <ol className="ledger">
-              {starred.map((s) => (
-                <StarredRow key={s.id} item={s} />
-              ))}
-            </ol>
+            <StarredSelection items={items} />
           </section>
         )}
       </main>
     </>
-  );
-}
-
-/**
- * One kept question.
- *
- * NOT a `.row` link like the dashboard's ledger, and not for lack of trying: the
- * row owns a Remove button, and nesting a button inside a link gives keyboard and
- * screen-reader users a control they can reach but not operate predictably. So
- * the question sits as text and the two actions are their own square chips
- * beside it — which also lets the question wrap to as many lines as it needs
- * instead of being ellipsised into a single grid cell.
- */
-function StarredRow({
-  item: s,
-}: {
-  item: Awaited<ReturnType<typeof repo.listStarredQuestions>>[number];
-}) {
-  return (
-    <li className="flex flex-wrap items-start gap-x-5 gap-y-3 border-t border-line px-5 py-4 first:border-t-0">
-      {/* The star is the whole label for this list — it's the mark you put on
-          the question yourself, and it says "saved" faster than a chip does. */}
-      <span aria-hidden="true" className="shrink-0 text-[13px] leading-7 text-ember">
-        ★
-      </span>
-
-      <div className="min-w-0 flex-1 basis-[18rem]">
-        <p className="text-[1.02rem] leading-snug font-medium">{s.question}</p>
-        {/* Null once the interview it came from is deleted. The star is the
-            point; the link back is a bonus, so its absence is quiet. */}
-        {s.turn ? null : (
-          <p className="mt-2 font-mono text-[10px] tracking-[0.12em] uppercase text-ink-muted">
-            Interview deleted · the question is still yours
-          </p>
-        )}
-      </div>
-
-      <div className="ml-auto flex flex-wrap items-center gap-x-4 gap-y-2">
-        {/* Type and date as one mono string rather than a chip plus a date:
-            the reference keeps this column to a single quiet line so the
-            question is the only thing with weight in the row. */}
-        <span className="font-mono text-[10px] tracking-[0.14em] whitespace-nowrap uppercase text-ink-muted">
-          {TYPE_LABEL[s.questionType]} · {fmtDay(s.createdAt)}
-        </span>
-        {s.turn ? (
-          <Link
-            href={`/report/${s.turn.sessionId}`}
-            className={cx(
-              "border border-line px-3 py-2 font-mono text-[10px] tracking-[0.14em] uppercase text-ink-muted",
-              "transition-colors hover:border-ember hover:text-ember",
-            )}
-          >
-            See it in context
-          </Link>
-        ) : null}
-        <Unstar questionHash={s.questionHash} />
-      </div>
-    </li>
   );
 }
 

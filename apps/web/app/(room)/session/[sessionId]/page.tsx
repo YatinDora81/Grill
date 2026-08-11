@@ -120,6 +120,7 @@ export default async function SessionPage({
         questionType={questionType}
         maxSeconds={maxSeconds}
         maxBytes={config.audio.maxBytes}
+        persona={ctx.config.persona ?? null}
         videoBitrate={config.video.bitsPerSecond}
       />
     );

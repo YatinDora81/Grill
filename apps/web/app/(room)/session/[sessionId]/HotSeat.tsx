@@ -3,8 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
-import type { AnswerResponse, EndResponse, QuestionType } from "@repo/types";
+import type { AnswerResponse, EndResponse, Persona, QuestionType } from "@repo/types";
 import { apiPost, apiPostForm, ApiClientError } from "@/lib/apiClient";
+import { personaLabel } from "@/lib/interviewMeta";
 import { cx } from "@/components/ui";
 import { GrillToaster } from "@/components/toast";
 import { useSpeech } from "@/hooks/useSpeech";
@@ -25,6 +26,7 @@ interface Props {
   questionType: QuestionType;
   maxSeconds: number;
   maxBytes: number;
+  persona: Persona | null;
   /**
    * Threaded from the server page rather than imported: the config lives in
    * lib/env.ts, which is `server-only`, and importing it from a client component
@@ -410,6 +412,9 @@ export function HotSeat(props: Props) {
           <Progress answered={answered} total={props.numQuestions} />
 
           <div className="room-ctl">
+            <span className="border border-line px-2.5 py-1 font-mono text-[10px] tracking-[0.14em] whitespace-nowrap uppercase text-ink-muted max-sm:hidden">
+              {personaLabel(props.persona)}
+            </span>
             <RecDot state={video.state} />
             {video.stream && <CameraToggle on={pipOpen} onClick={() => setPipOpen((c) => !c)} />}
             <button onClick={quit} disabled={busy} className="underlink">

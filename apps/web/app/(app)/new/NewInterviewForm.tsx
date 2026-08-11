@@ -1,13 +1,23 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import type { Difficulty, ExclusiveMode, InterviewSource, StartResponse } from "@repo/types";
-import { apiPost, apiPostForm, ApiClientError } from "@/lib/apiClient";
+import type {
+  Difficulty,
+  ExclusiveMode,
+  InterviewSource,
+  Persona,
+  QuestionType,
+  StartResponse,
+} from "@repo/types";
+import { apiGet, apiPost, apiPostForm, ApiClientError } from "@/lib/apiClient";
 import {
   DIFFICULTIES,
   DIFFICULTY_META,
   MODE_META,
+  PERSONAS,
+  PERSONA_META,
   QUESTION_BOUNDS,
   SOURCE_META,
   perAnswerCapSeconds,
@@ -53,6 +63,23 @@ const STEPS: { n: WizardStep; label: string }[] = [
  * for often enough to deserve a shortcut.
  */
 const QUESTION_PRESETS = [5, 8, 12, 20];
+
+const PENDING_JD_KEY = "grill.pendingJd";
+const JD_MAX_CHARS = 20_000;
+
+const PERSONA_SAMPLE: Record<Persona, string> = {
+  neutral: "Why that tradeoff?",
+  friendly_screen: "That’s helpful — could you take me a level deeper on the migration?",
+  terse_staff: "Where does it fall over?",
+  bar_raiser: "You said it improved latency — by how much, measured where?",
+  skeptic: "And when that cache went stale — what did users see?",
+};
+
+interface StarredRow {
+  question: string;
+  question_type: QuestionType;
+  question_hash: string;
+}
 
 /** What /api/interview/project/extract returns for the imported repo. */
 interface RepoInfo {
@@ -142,6 +169,11 @@ const WBTN_GO = "border-ink bg-ink text-paper hover:border-ember hover:bg-ember"
 const WBTN_BACK = "border-line bg-transparent text-ink hover:border-ember hover:text-ember";
 const WBTN_SM = "min-h-[38px] gap-2 px-4 text-[10px]";
 
+const PCARD =
+  "relative flex cursor-pointer flex-col border p-3.5 transition-colors has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-[3px] has-[:focus-visible]:outline-ember";
+const PCARD_ON = "border-ember bg-ember-soft";
+const PCARD_OFF = "border-line-strong hover:bg-(--surface-hover)";
+
 const MONO_NOTE = "font-mono text-[10px] tracking-[0.18em] uppercase text-ink-muted";
 const FACT_ROW =
   "flex items-baseline justify-between gap-4 px-5 py-2.5 font-mono text-[11px] tracking-[0.08em] uppercase";
@@ -172,7 +204,11 @@ function article(n: number): "A" | "An" {
   return s.startsWith("8") ? "An" : "A";
 }
 
-export function NewInterviewForm() {
+export function NewInterviewForm({
+  initialStarredHashes = [],
+}: {
+  initialStarredHashes?: string[];
+}) {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -192,8 +228,11 @@ export function NewInterviewForm() {
   const [resumeText, setResumeText] = useState("");
   // An interview is either blended from sources or one exclusive mode. Both
   // states live here because picking one has to clear the other — see `pickMode`.
-  const [sources, setSources] = useState<InterviewSource[]>(["resume"]);
-  const [mode, setMode] = useState<ExclusiveMode | null>(null);
+  const fromDrillLink = initialStarredHashes.length > 0;
+  const [sources, setSources] = useState<InterviewSource[]>(fromDrillLink ? [] : ["resume"]);
+  const [mode, setMode] = useState<ExclusiveMode | null>(fromDrillLink ? "starred" : null);
+  const [starredHashes, setStarredHashes] = useState<string[]>(initialStarredHashes);
+  const [starredRows, setStarredRows] = useState<StarredRow[] | null>(null);
   const [topic, setTopic] = useState("");
   const [jobDescription, setJobDescription] = useState("");
   // Project mode: the material the interview reads (pasted text or an edited
@@ -206,9 +245,8 @@ export function NewInterviewForm() {
   const [importing, setImporting] = useState(false);
   const [role, setRole] = useState("");
   const [numQuestions, setNumQuestions] = useState(8);
-  // What the server will derive for this count. Cheap enough to just recompute.
-  const answerCap = perAnswerCapSeconds(numQuestions);
   const [difficulty, setDifficulty] = useState<Difficulty>("medium");
+  const [persona, setPersona] = useState<Persona>("neutral");
   // Off by default: this is a practice tool, so running the same résumé twice
   // must not produce the same interview twice.
   const [allowRepeats, setAllowRepeats] = useState(false);
@@ -229,6 +267,47 @@ export function NewInterviewForm() {
   const [extracting, setExtracting] = useState(false);
   const [fileName, setFileName] = useState("");
   const [dragging, setDragging] = useState(false);
+  const [carriedJd, setCarriedJd] = useState(false);
+
+  useEffect(() => {
+    if (!initialStarredHashes.length) return;
+    let live = true;
+    apiGet<{ starred: StarredRow[] }>("/api/starred")
+      .then((res) => live && setStarredRows(res.starred))
+      .catch(() => live && setStarredRows([]));
+    return () => {
+      live = false;
+    };
+  }, [initialStarredHashes.length]);
+
+  useEffect(() => {
+    if (fromDrillLink) return;
+    let handed = "";
+    try {
+      handed = sessionStorage.getItem(PENDING_JD_KEY) ?? "";
+      sessionStorage.removeItem(PENDING_JD_KEY);
+    } catch (err) {
+      console.warn("[new] could not read the job description handed over by the gap tool:", err);
+    }
+    const jd = handed.trim().slice(0, JD_MAX_CHARS);
+    if (!jd) return;
+    setJobDescription(jd);
+    setMode("jd");
+    setSources([]);
+    setCarriedJd(true);
+  }, [fromDrillLink]);
+
+  const drilling = mode === "starred";
+  const drillQuestions = starredRows
+    ? starredHashes
+        .map((h) => starredRows.find((r) => r.question_hash === h))
+        .filter((r): r is StarredRow => r !== undefined)
+    : null;
+  const drillLost = drillQuestions ? starredHashes.length - drillQuestions.length : 0;
+  const liveHashes = drillQuestions ? drillQuestions.map((r) => r.question_hash) : starredHashes;
+  const questionCount = drilling ? liveHashes.length : numQuestions;
+  // What the server will derive for this count. Cheap enough to just recompute.
+  const answerCap = perAnswerCapSeconds(questionCount);
 
   const hasResume = resumeText.trim().length > 0;
   const needsTopic = mode === "topic_only" || sources.includes("topic");
@@ -265,7 +344,16 @@ export function NewInterviewForm() {
       failed: !mode && sources.length === 0,
       message: "Pick what this interview should draw on.",
     },
-    { step: 1, failed: needsTopic && !topic.trim(), message: "Name the topic you want drilled on." },
+    {
+      step: 2,
+      failed: drilling && drillQuestions !== null && drillQuestions.length === 0,
+      message: "None of those saved questions are still starred — pick again from Starred.",
+    },
+    {
+      step: 1,
+      failed: needsTopic && !topic.trim(),
+      message: "Name the topic you want drilled on.",
+    },
     {
       step: 1,
       failed: needsJd && !jobDescription.trim(),
@@ -294,6 +382,7 @@ export function NewInterviewForm() {
   /** Ticking a source drops the exclusive mode — they can't coexist. */
   function toggleSource(s: InterviewSource) {
     setMode(null);
+    setStarredHashes([]);
     setSources((cur) =>
       cur.includes(s) ? cur.filter((x) => x !== s) : [...cur, s].sort(sourceOrder),
     );
@@ -301,6 +390,7 @@ export function NewInterviewForm() {
 
   /** Picking an exclusive mode clears the sources, and vice versa. */
   function pickMode(m: ExclusiveMode) {
+    setStarredHashes([]);
     if (mode === m) {
       // Clicking the active mode again releases it — otherwise the only way
       // back to a blended interview is to reload the page.
@@ -455,11 +545,13 @@ export function NewInterviewForm() {
         name: name.trim(),
         ...(role.trim() ? { role: role.trim() } : {}),
         config: {
-          num_questions: numQuestions,
+          num_questions: questionCount,
           difficulty,
           sources,
           mode,
           allow_repeats: allowRepeats,
+          ...(persona !== "neutral" ? { persona } : {}),
+          ...(drilling ? { starred_hashes: liveHashes } : {}),
           ...(needsTopic ? { topic: topic.trim() } : {}),
           ...(needsJd ? { job_description: jobDescription.trim() } : {}),
           ...(needsProject
@@ -594,7 +686,10 @@ export function NewInterviewForm() {
               >
                 {extracting ? (
                   <>
-                    <span className="mx-auto block size-6 animate-spin rounded-full border-2 border-ember/30 border-t-ember" aria-hidden="true" />
+                    <span
+                      className="mx-auto block size-6 animate-spin rounded-full border-2 border-ember/30 border-t-ember"
+                      aria-hidden="true"
+                    />
                     <p className="drop-t">Reading {fileName}…</p>
                   </>
                 ) : (
@@ -699,11 +794,16 @@ export function NewInterviewForm() {
                   id="jd"
                   className="input area"
                   rows={6}
-                  maxLength={20_000}
+                  maxLength={JD_MAX_CHARS}
                   value={jobDescription}
                   onChange={(e) => setJobDescription(e.target.value)}
                   placeholder="Senior Backend Engineer — you'll own our billing pipeline, work in Go and Postgres…"
                 />
+                {carriedJd && (
+                  <p className="mono-note" style={{ marginTop: 8 }}>
+                    carried over from the résumé-vs-JD checker · edit anything you want asked about
+                  </p>
+                )}
               </div>
             )}
 
@@ -853,10 +953,81 @@ export function NewInterviewForm() {
               </p>
             </div>
 
-            <div className="mt-9">
+            <PersonaPicker value={persona} onPick={setPersona} />
+
+            {drilling && (
+              <>
+                <div className="mt-9 border border-ember bg-ember-soft">
+                  <div className="flex flex-wrap items-baseline justify-between gap-x-5 gap-y-1 border-b border-(--edge-heat-strong) px-5 py-3.5">
+                    <p className="font-mono text-[0.6rem] tracking-[0.24em] uppercase text-ember">
+                      M&mdash;07 · {MODE_META.starred.label}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStarredHashes([]);
+                        setMode(null);
+                        setSources(["resume"]);
+                      }}
+                      className="underlink hot"
+                    >
+                      drop the drill
+                    </button>
+                  </div>
+                  <p className="px-5 pt-4 text-[13px] leading-relaxed text-ink-soft">
+                    {MODE_META.starred.blurb} Follow-ups stay adaptive; the rest of the brief below
+                    still applies.
+                  </p>
+                  <ol className="px-5 pt-4 pb-5">
+                    {drillQuestions === null ? (
+                      <li className={MONO_NOTE}>Reading your saved questions…</li>
+                    ) : drillQuestions.length === 0 ? (
+                      <li className="text-[13px] leading-relaxed text-weak">
+                        None of those are still starred.{" "}
+                        <Link href="/starred" className="underlink">
+                          pick again
+                        </Link>
+                      </li>
+                    ) : (
+                      drillQuestions.map((q, i) => (
+                        <li
+                          key={q.question_hash}
+                          className="grid grid-cols-[auto_1fr_auto] items-baseline gap-x-3.5 border-b border-(--edge-heat) py-2.5 last:border-b-0"
+                        >
+                          <span className="font-mono text-[11px] leading-6 tracking-[0.1em] text-ember tabular">
+                            {String(i + 1).padStart(2, "0")}
+                          </span>
+                          <span className="text-[14px] leading-relaxed text-ink">{q.question}</span>
+                          <span className="font-mono text-[9.5px] tracking-[0.12em] whitespace-nowrap uppercase text-ink-muted max-sm:hidden">
+                            {q.question_type === "followup" ? "follow-up" : q.question_type}
+                          </span>
+                        </li>
+                      ))
+                    )}
+                  </ol>
+                  {drillLost > 0 && drillQuestions && drillQuestions.length > 0 && (
+                    <p className={cx(MONO_NOTE, "border-t border-(--edge-heat) px-5 py-3")}>
+                      {drillLost} of them {drillLost === 1 ? "was" : "were"} unstarred since —
+                      dropped
+                    </p>
+                  )}
+                </div>
+                <Explain>
+                  A drill asks <b>exactly these</b>, word for word, in this order. The question
+                  count is the length of the list, so the slider below is off — and the grading is
+                  the same rubric as any other interview.
+                </Explain>
+              </>
+            )}
+
+            <div className={drilling ? "mt-9 opacity-55" : "mt-9"}>
               <div className="field-row">
-                <span id="wiz-draws-on" className="label">What it draws on</span>
-                <span className="hint">mix as many as you want</span>
+                <span id="wiz-draws-on" className="label">
+                  What it draws on
+                </span>
+                <span className="hint">
+                  {drilling ? "set by the drill" : "mix as many as you want"}
+                </span>
               </div>
               <p className="mb-3 text-[12.5px] leading-relaxed text-ink-muted">
                 These combine into one conversation — ticking two doesn&rsquo;t mean two interviews.
@@ -902,42 +1073,59 @@ export function NewInterviewForm() {
 
             <div className="mt-9">
               <div className="field-row">
-                <label className="label" htmlFor="num">
-                  Questions
-                </label>
+                {drilling ? (
+                  <span className="label">Questions</span>
+                ) : (
+                  <label className="label" htmlFor="num">
+                    Questions
+                  </label>
+                )}
                 <span className="hint tabular">
-                  {numQuestions} · ≈ {estimateMinutes(numQuestions)} min
+                  {questionCount} · ≈ {estimateMinutes(questionCount)} min
                 </span>
               </div>
 
-              <div className={cx(DIAL, "mb-3")} role="group" aria-label="Common question counts">
-                {QUESTION_PRESETS.map((n) => (
-                  <button
-                    key={n}
-                    type="button"
-                    aria-pressed={numQuestions === n}
-                    onClick={() => setNumQuestions(n)}
-                    className={cx(DIALB, numQuestions === n ? DIALB_ON : DIALB_OFF)}
+              {drilling ? (
+                <p className="border border-line bg-paper-sunken px-5 py-4 text-[13px] leading-relaxed text-ink-soft">
+                  Fixed at <b className="font-semibold text-ember">{questionCount}</b> — one primary
+                  per starred question. Drop the drill above to set this yourself.
+                </p>
+              ) : (
+                <>
+                  <div
+                    className={cx(DIAL, "mb-3")}
+                    role="group"
+                    aria-label="Common question counts"
                   >
-                    {n} · ≈{estimateMinutes(n)}m
-                  </button>
-                ))}
-              </div>
+                    {QUESTION_PRESETS.map((n) => (
+                      <button
+                        key={n}
+                        type="button"
+                        aria-pressed={numQuestions === n}
+                        onClick={() => setNumQuestions(n)}
+                        className={cx(DIALB, numQuestions === n ? DIALB_ON : DIALB_OFF)}
+                      >
+                        {n} · ≈{estimateMinutes(n)}m
+                      </button>
+                    ))}
+                  </div>
 
-              <input
-                id="num"
-                type="range"
-                className="range"
-                min={QUESTION_BOUNDS.min}
-                max={QUESTION_BOUNDS.max}
-                value={numQuestions}
-                onChange={(e) => setNumQuestions(Number(e.target.value))}
-                style={{ "--fill": `${rangePct}%` } as React.CSSProperties}
-              />
-              <div className="range-ends">
-                <span>{QUESTION_BOUNDS.min}</span>
-                <span>{QUESTION_BOUNDS.max}</span>
-              </div>
+                  <input
+                    id="num"
+                    type="range"
+                    className="range"
+                    min={QUESTION_BOUNDS.min}
+                    max={QUESTION_BOUNDS.max}
+                    value={numQuestions}
+                    onChange={(e) => setNumQuestions(Number(e.target.value))}
+                    style={{ "--fill": `${rangePct}%` } as React.CSSProperties}
+                  />
+                  <div className="range-ends">
+                    <span>{QUESTION_BOUNDS.min}</span>
+                    <span>{QUESTION_BOUNDS.max}</span>
+                  </div>
+                </>
+              )}
 
               {/* Display only — the start route derives and stores the real cap.
                   More questions means less time for each: say so here rather than
@@ -945,12 +1133,12 @@ export function NewInterviewForm() {
               <div className="tally">
                 <div>
                   <p className="dk">Questions</p>
-                  <p className="dv tabular">{numQuestions}</p>
+                  <p className="dv tabular">{questionCount}</p>
                 </div>
                 <div>
                   <p className="dk">Runtime</p>
                   <p className="dv tabular">
-                    ≈{estimateMinutes(numQuestions)}
+                    ≈{estimateMinutes(questionCount)}
                     <small>min</small>
                   </p>
                 </div>
@@ -973,7 +1161,7 @@ export function NewInterviewForm() {
                 // accept: /start refuses a count whose clips can't be scored
                 // inside the report's budget.
                 <p className="mt-4 text-[12px] leading-relaxed text-weak">
-                  At {numQuestions} questions there&rsquo;s no per-answer cap that lets the report
+                  At {questionCount} questions there&rsquo;s no per-answer cap that lets the report
                   build in time — the server will refuse this count. Bring it down.
                 </p>
               )}
@@ -1050,10 +1238,10 @@ export function NewInterviewForm() {
               </p>
               <p className="px-5 py-5 text-[15px] leading-relaxed text-ink">
                 {summarySentence({
-                  numQuestions,
+                  numQuestions: questionCount,
                   difficultyLabel: heat.label,
                   shapeLabel,
-                  minutes: estimateMinutes(numQuestions),
+                  minutes: estimateMinutes(questionCount),
                   answerCap,
                   role: role.trim(),
                 })}
@@ -1160,10 +1348,10 @@ export function NewInterviewForm() {
           </p>
           <p className="border-b border-line px-5 py-5 text-[15px] leading-relaxed text-ink">
             {summarySentence({
-              numQuestions,
+              numQuestions: questionCount,
               difficultyLabel: heat.label,
               shapeLabel,
-              minutes: estimateMinutes(numQuestions),
+              minutes: estimateMinutes(questionCount),
               answerCap,
               role: role.trim(),
             })}
@@ -1171,7 +1359,8 @@ export function NewInterviewForm() {
           <dl className="py-1.5">
             <Fact k="Draws on" v={shapeLabel || "—"} wrap />
             <Fact k="Difficulty" v={heat.label} />
-            <Fact k="Questions" v={String(numQuestions)} />
+            <Fact k="Questions" v={String(questionCount)} />
+            <Fact k="Interviewer" v={PERSONA_META[persona].label} />
             <Fact k="Per answer" v={answerCap !== null ? `${clock(answerCap)} max` : "—"} />
             <Fact k="Repeats" v={allowRepeats ? "Allowed" : "Off"} />
             <Fact k="Résumé" v={hasResume ? "Loaded" : needsProject ? "Optional" : "Not yet"} />
@@ -1252,6 +1441,60 @@ function summarySentence({
   );
 }
 
+function PersonaPicker({ value, onPick }: { value: Persona; onPick: (p: Persona) => void }) {
+  return (
+    <fieldset className="mt-9">
+      <legend className="sr-only">Interviewer persona</legend>
+      <div className="field-row">
+        <span className="label">Interviewer</span>
+        <span className="hint">voice, not grading</span>
+      </div>
+      <div className="mt-3 grid gap-3.5 sm:grid-cols-2">
+        {PERSONAS.map((p) => {
+          const on = value === p;
+          return (
+            <label key={p} className={cx(PCARD, on ? PCARD_ON : PCARD_OFF)}>
+              <input
+                type="radio"
+                name="persona"
+                value={p}
+                checked={on}
+                onChange={() => onPick(p)}
+                className="sr-only"
+              />
+              <span className="flex items-baseline justify-between gap-3">
+                <span className="font-display text-[16px] font-bold tracking-[0.01em]">
+                  {PERSONA_META[p].label}
+                </span>
+                {on && (
+                  <span className="font-mono text-[10px] tracking-[0.12em] uppercase text-ember">
+                    Selected
+                  </span>
+                )}
+              </span>
+              <span className="mt-0.5 mb-2.5 text-[13px] leading-relaxed text-ink-soft">
+                {PERSONA_META[p].tagline}
+              </span>
+              <span
+                className={cx(
+                  "mt-auto font-mono text-[12px] leading-relaxed",
+                  on ? "text-ink-soft" : "text-ink-muted",
+                )}
+              >
+                &ldquo;{PERSONA_SAMPLE[p]}&rdquo;
+              </span>
+            </label>
+          );
+        })}
+      </div>
+      <Explain>
+        Persona changes the <b>voice</b>, not the grading — every persona is scored on the same
+        rubric, and the sample line above is only how it sounds.
+      </Explain>
+    </fieldset>
+  );
+}
+
 /** Keeps the blend in a stable order however it was clicked together. */
 function sourceOrder(a: InterviewSource, b: InterviewSource): number {
   return SOURCES.indexOf(a) - SOURCES.indexOf(b);
@@ -1291,10 +1534,7 @@ function Pick({
       onClick={onClick}
       className={cx(PICK, selected && PICK_ON)}
     >
-      <span
-        className={cx(PICK_BOX, selected ? PICK_BOX_ON : PICK_BOX_OFF)}
-        aria-hidden="true"
-      >
+      <span className={cx(PICK_BOX, selected ? PICK_BOX_ON : PICK_BOX_OFF)} aria-hidden="true">
         {selected ? "✓" : null}
       </span>
       {/* Title and blurb run as one flowing block: the mono uppercase name and

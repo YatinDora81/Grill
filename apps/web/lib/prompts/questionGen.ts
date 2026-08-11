@@ -6,7 +6,7 @@ import type {
   QuestionType,
   SourceType,
 } from "@repo/types";
-import { DIFFICULTY_META, difficultyLabel } from "@/lib/interviewMeta";
+import { DIFFICULTY_META, difficultyLabel, personaBrief } from "@/lib/interviewMeta";
 
 export interface WeakSpot {
   question: string;
@@ -27,6 +27,7 @@ export interface QuestionInputs {
   askedBefore?: string[];
   /** Their worst-scored past answers — the point of `weak_spots`. */
   weakSpots?: WeakSpot[];
+  fixedQuestions?: string[];
 }
 
 /**
@@ -35,13 +36,15 @@ export interface QuestionInputs {
  * the brief just asked to be about people.
  */
 export function questionSystem(c: InterviewConfig): string {
+  const voice = personaBrief(c.persona);
+  const persona = voice ? `\n${voice}\n` : "";
   if (culturalOnly(c)) {
     return `You are a sharp, fair interviewer running a culture-fit / behavioural interview.
 Ask ONE question at a time about how this person works with people, takes feedback, handles
 pressure, and decides what kind of workplace they thrive in.
 Pitch every question at the stated difficulty, and follow the interview brief.
 Do not ask about systems, code, architecture, or résumé projects. Do not answer for the candidate.
-
+${persona}
 ${CULTURAL_QUALITY_BAR}
 
 Respond with JSON only — no prose, no code fences.`;
@@ -50,7 +53,7 @@ Respond with JSON only — no prose, no code fences.`;
 Ask ONE question at a time. Questions must be specific and grounded in the provided context.
 Pitch every question at the stated difficulty, and follow the interview brief.
 Do not answer for the candidate.
-
+${persona}
 ${TECHNICAL_QUALITY_BAR}
 
 Respond with JSON only — no prose, no code fences.`;
@@ -268,6 +271,7 @@ const MODE_OPENERS: Record<ExclusiveMode, readonly string[]> = {
   jd: RESUME_OPENERS,
   real: RESUME_OPENERS,
   weak_spots: RESUME_OPENERS,
+  starred: RESUME_OPENERS,
   project: PROJECT_OPENERS,
 };
 
@@ -277,6 +281,7 @@ const MODE_NEXT_AREAS: Record<ExclusiveMode, readonly string[]> = {
   jd: TECHNICAL_NEXT_AREAS,
   real: TECHNICAL_NEXT_AREAS,
   weak_spots: TECHNICAL_NEXT_AREAS,
+  starred: TECHNICAL_NEXT_AREAS,
   project: PROJECT_NEXT_AREAS,
 };
 
@@ -312,6 +317,8 @@ const MODE_BRIEF: Record<ExclusiveMode, (c: InterviewConfig) => string> = {
     "Run this like a real interview: it moves through stages, and you will be told which stage you are in.",
   weak_spots: () =>
     "This is a retry session. The candidate answered the questions below badly in earlier interviews; the point is to make them face that ground again — not to be gentle about it.",
+  starred: () =>
+    "This is a drill on questions the candidate saved for themselves because those questions caught them out. The primaries are fixed and listed below — ask them back word for word, in the order given. Facing the same question again is the whole point, so do not soften it, modernise it, or swap it for a better one of your own.",
   project: () =>
     "Interview them on THE PROJECT in the context below, as its builder. Every question must be " +
     "grounded in that project: why it is built the way it is, what that cost, where it breaks, what " +
@@ -558,6 +565,21 @@ attacks the same weakness, reworded and ideally sharper. Do not copy the wording
 ${weak.map((w) => `- Q: ${w.question}\n  Their weak answer: ${(w.transcript || "(no clear answer)").slice(0, 300)}`).join("\n")}\n`;
 }
 
+function fixedBlock(fixed: string[] | undefined): string {
+  if (!fixed?.length) return "";
+  return `\nThe primaries for this interview are fixed, in this order — ask each verbatim as the next
+primary question; your freedom is the follow-up after each answer, exactly as usual:
+${fixed.map((q, i) => `${i + 1}. ${q}`).join("\n")}
+These are exempt from every do-not-repeat rule above and below: they were chosen precisely
+because the candidate has faced them before.\n`;
+}
+
+function fixedLeft(fixed: string[] | undefined, history: { question: string }[]): string[] {
+  if (!fixed?.length) return [];
+  const asked = new Set(history.map((h) => h.question));
+  return fixed.filter((q) => !asked.has(q));
+}
+
 export function firstQuestionPrompt(
   s: SessionContext,
   inputs: QuestionInputs = {},
@@ -571,11 +593,13 @@ export function firstQuestionPrompt(
   const aim =
     mode === "weak_spots" && inputs.weakSpots?.length
       ? "Open on the weakest of the answers listed above."
-      : mode === "topic_only"
-        ? `Open on the core of the topic: ${s.config.topic}`
-        : mode === "real"
-          ? "" // the stage brief already says exactly what the opener is
-          : `Open on: ${angle}`;
+      : inputs.fixedQuestions?.length
+        ? "Ask fixed primary 1 above, word for word."
+        : mode === "topic_only"
+          ? `Open on the core of the topic: ${s.config.topic}`
+          : mode === "real"
+            ? "" // the stage brief already says exactly what the opener is
+            : `Open on: ${angle}`;
 
   // A `real` interview is the one case where the stock opener is the right
   // opener — its first stage IS "introduce yourself", and banning it there would
@@ -583,16 +607,18 @@ export function firstQuestionPrompt(
   const opener =
     mode === "real"
       ? "Follow the stage brief above."
-      : culturalOnly(s.config)
-        ? `Do not use a stock opener ("tell me about yourself", "walk me through your resume", "greatest strength").
+      : inputs.fixedQuestions?.length
+        ? "Do not reword it, do not soften it, and do not write an opener of your own."
+        : culturalOnly(s.config)
+          ? `Do not use a stock opener ("tell me about yourself", "walk me through your resume", "greatest strength").
 Go straight at a culture-fit angle — working style, values, conflict, feedback, or environment.`
-        : `Do not use a stock opener ("tell me about yourself", "walk me through your resume/background").
+          : `Do not use a stock opener ("tell me about yourself", "walk me through your resume/background").
 Go straight at something concrete.`;
 
   return `${contextBlock(s)}
 
 ${brief(s.config, !!inputs.weakSpots?.length)}
-${stage}${weakSpotBlock(inputs.weakSpots)}${askedBlock(inputs.askedBefore)}
+${stage}${weakSpotBlock(inputs.weakSpots)}${fixedBlock(inputs.fixedQuestions)}${askedBlock(inputs.askedBefore)}
 Ask the FIRST interview question.
 ${aim}
 ${opener}
@@ -627,17 +653,29 @@ export function followUpPrompt(
     .map((h, i) => `Q${i + 1}: ${h.question}\nA${i + 1}: ${h.answer || "(no clear answer)"}`)
     .join("\n\n");
 
+  const owed = fixedLeft(inputs.fixedQuestions, history);
+  const ask = owed.length
+    ? `Ask the NEXT question.
+${
+  turnsRemaining + 1 > owed.length
+    ? `If the last answer opens a worthwhile thread you may spend this turn on ONE targeted follow-up
+into something the candidate actually said; otherwise ask fixed primary 1 above, word for word.`
+    : `Every question left is spoken for: ask fixed primary 1 above, word for word, and do not follow up.`
+}
+Never reword, soften or replace a fixed primary. Never re-ask anything else already covered above.`
+    : `Ask the NEXT question. If the last answer opens a worthwhile thread, ask a targeted follow-up
+that digs into something the candidate actually said; otherwise move to a new area${areaHint}
+Never re-ask something already covered above, and don't rephrase a question they've answered.`;
+
   return `${contextBlock(s)}
 
 ${brief(s.config, !!inputs.weakSpots?.length)}
-${stage}${weakSpotBlock(inputs.weakSpots)}${askedBlock(inputs.askedBefore)}
+${stage}${weakSpotBlock(inputs.weakSpots)}${fixedBlock(owed)}${askedBlock(inputs.askedBefore)}
 Conversation so far:
 ${transcript}
 
 There are ${turnsRemaining} question(s) left after this one.
-Ask the NEXT question. If the last answer opens a worthwhile thread, ask a targeted follow-up
-that digs into something the candidate actually said; otherwise move to a new area${areaHint}
-Never re-ask something already covered above, and don't rephrase a question they've answered.
+${ask}
 ${culturalOnly(s.config) ? CULTURAL_THREAD : ""}${ONE_QUESTION}
 Return JSON: { "question": string, "question_type": ${typeUnionFor(s.config)} }`;
 }

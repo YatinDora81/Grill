@@ -1,5 +1,7 @@
 import { test, expect } from "bun:test";
-import type { InterviewConfig } from "@repo/types";
+import type { InterviewConfig, Persona } from "@repo/types";
+import { PERSONAS, PERSONA_GUARDRAIL, PERSONA_META } from "@/lib/interviewMeta";
+import { EVALUATION_SYSTEM, evaluationPrompt } from "./evaluation";
 import {
   culturalOnly,
   firstQuestionPrompt,
@@ -211,4 +213,117 @@ test("weak_spots with no scored history does not point at questions that aren't 
   });
   expect(withWeak).toContain("questions below");
   expect(withWeak).toContain("How did you shard the ledger?");
+});
+
+const NON_NEUTRAL: readonly Persona[] = PERSONAS.filter((p) => p !== "neutral");
+
+test("a persona is appended to the interviewer's voice, and neutral appends nothing", () => {
+  const neutral = questionSystem(ctx({ sources: ["resume"] }).config);
+  expect(questionSystem(ctx({ sources: ["resume"], persona: "neutral" }).config)).toBe(neutral);
+  expect(neutral).not.toContain("Voice:");
+  expect(neutral).not.toContain(PERSONA_GUARDRAIL);
+
+  expect(NON_NEUTRAL.length).toBe(4);
+  for (const p of NON_NEUTRAL) {
+    for (const shape of [{ sources: ["resume"] as const }, { mode: "cultural_only" as const }]) {
+      const system = questionSystem(ctx({ ...shape, persona: p }).config);
+      expect(system).toContain(PERSONA_META[p].prompt);
+      expect(system).toContain(PERSONA_GUARDRAIL);
+      expect(system.trimEnd().endsWith("Respond with JSON only — no prose, no code fences.")).toBe(
+        true,
+      );
+    }
+  }
+});
+
+test("scoring is persona-blind: the evaluation prompt is byte-identical across every persona", () => {
+  const q = "Why that shard key?";
+  const a = "Tenant id — it was the only even split we had.";
+  const baseline = evaluationPrompt(q, "technical", a);
+
+  for (const p of PERSONAS) {
+    const config = ctx({ sources: ["resume"], persona: p }).config;
+    expect(evaluationPrompt(q, "technical", a)).toBe(baseline);
+    expect(evaluationPrompt(q, "cultural", a)).toBe(evaluationPrompt(q, "cultural", a));
+    if (p !== "neutral") expect(questionSystem(config)).toContain(PERSONA_META[p].prompt);
+  }
+
+  expect(EVALUATION_SYSTEM).not.toContain("Voice:");
+  expect(EVALUATION_SYSTEM).not.toContain(PERSONA_GUARDRAIL);
+  for (const p of NON_NEUTRAL) {
+    expect(baseline).not.toContain(PERSONA_META[p].prompt);
+    expect(EVALUATION_SYSTEM).not.toContain(PERSONA_META[p].label);
+  }
+});
+
+test("a starred drill fixes its primaries, in order, exempt from the do-not-repeat ban", () => {
+  const fixed = [
+    "You said “we” — what did you own?",
+    "What happens to your cache design at ten times the load?",
+    "Defend the decision you'd undo.",
+  ];
+  const c = ctx({ mode: "starred", num_questions: fixed.length });
+
+  const first = firstQuestionPrompt(c, {
+    fixedQuestions: fixed,
+    askedBefore: ["Tell me about the migration you skipped."],
+  });
+  expect(first).toContain("The primaries for this interview are fixed, in this order");
+  fixed.forEach((q, i) => expect(first).toContain(`${i + 1}. ${q}`));
+  expect(first).toContain("Ask fixed primary 1 above, word for word.");
+  expect(first).not.toContain("Open on:");
+
+  const banned = first.slice(first.indexOf("Do NOT ask any of them again"));
+  expect(banned).toContain("Tell me about the migration you skipped.");
+  for (const q of fixed) expect(banned).not.toContain(q);
+});
+
+test("an asked fixed primary drops off the list and the rest keep their order", () => {
+  const fixed = ["Q one?", "Q two?", "Q three?"];
+  const c = ctx({ mode: "starred", num_questions: fixed.length });
+
+  const next = followUpPrompt(c, [{ question: "Q one?", answer: "I owned the schema." }], 1, {
+    fixedQuestions: fixed,
+  });
+  expect(next).toContain("1. Q two?");
+  expect(next).toContain("2. Q three?");
+  expect(next).not.toContain("1. Q one?");
+  expect(next).not.toContain("lean toward:");
+});
+
+test("a fixed primary only yields its turn when there is a spare question to spend", () => {
+  const fixed = ["Q one?", "Q two?"];
+  const c = ctx({ mode: "starred" });
+  const history = [{ question: "Q one?", answer: "…" }];
+
+  expect(followUpPrompt(c, history, 0, { fixedQuestions: fixed })).toContain(
+    "Every question left is spoken for",
+  );
+  expect(followUpPrompt(c, history, 3, { fixedQuestions: fixed })).toContain(
+    "you may spend this turn on ONE targeted follow-up",
+  );
+
+  const done = followUpPrompt(
+    c,
+    fixed.map((q) => ({ question: q, answer: "…" })),
+    2,
+    { fixedQuestions: fixed },
+  );
+  expect(done).not.toContain("The primaries for this interview are fixed");
+  expect(done).toContain("lean toward:");
+});
+
+test("no other interview shape sees a fixed list or a persona paragraph", () => {
+  for (const config of [
+    { sources: ["resume"] as const },
+    { mode: "real" as const },
+    { mode: "weak_spots" as const },
+    { mode: "cultural_only" as const },
+  ]) {
+    const first = firstQuestionPrompt(ctx(config), { askedBefore: ["Old question?"] });
+    const next = followUpPrompt(ctx(config), [{ question: "Q", answer: "A" }], 3, {});
+    expect(first).not.toContain("The primaries for this interview are fixed");
+    expect(next).not.toContain("The primaries for this interview are fixed");
+    expect(questionSystem(ctx(config).config)).not.toContain("Voice:");
+  }
 });

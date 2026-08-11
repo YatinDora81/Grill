@@ -17,10 +17,15 @@ export async function POST(req: Request) {
     // re-parsing it here would run the source/mode refinements a second time.
     const body = startRequestSchema.parse(await req.json());
 
+    const numQuestions =
+      body.config.mode === "starred" && body.config.starred_hashes?.length
+        ? body.config.starred_hashes.length
+        : body.config.num_questions;
+
     // Derived here and nowhere else. The form may show this number, but it is
     // never the client's to choose — a config arriving with its own
     // max_answer_seconds is overwritten below, not honoured.
-    const cap = perAnswerCapSeconds(body.config.num_questions);
+    const cap = perAnswerCapSeconds(numQuestions);
     if (cap === null) {
       // This many clips can't be analysed inside the report's 300s budget.
       // Refuse now: creating the interview would mean letting someone answer
@@ -30,7 +35,7 @@ export async function POST(req: Request) {
         "too_many_questions",
       );
     }
-    const config = { ...body.config, max_answer_seconds: cap };
+    const config = { ...body.config, num_questions: numQuestions, max_answer_seconds: cap };
 
     const session = await repo.createSession({
       userId,

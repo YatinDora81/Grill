@@ -8,7 +8,24 @@ export const metadata: Metadata = {
   description: "Set the brief — role, difficulty and source — and start a mock interview.",
 };
 
-export default function NewInterviewPage() {
+const HASH = /^[0-9a-f]{64}$/;
+const MAX_DRILL = 12;
+
+function drillHashes(raw: string | string[] | undefined): string[] {
+  const first = Array.isArray(raw) ? raw[0] : raw;
+  if (!first) return [];
+  return [...new Set(first.split(",").filter((h) => HASH.test(h)))].slice(0, MAX_DRILL);
+}
+
+export default async function NewInterviewPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const params = await searchParams;
+  const mode = Array.isArray(params.mode) ? params.mode[0] : params.mode;
+  const starredHashes = mode === "starred" ? drillHashes(params.h) : [];
+
   return (
     <>
       <Reveal threshold={0.1} />
@@ -50,7 +67,7 @@ export default function NewInterviewPage() {
           <ExplainBanner />
         </div>
 
-        <NewInterviewForm />
+        <NewInterviewForm initialStarredHashes={starredHashes} />
       </main>
     </>
   );
