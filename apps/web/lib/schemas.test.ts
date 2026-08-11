@@ -619,11 +619,16 @@ describe("the gap comparison the model returns", () => {
     [-12, 0],
     ["61", 61],
     [61.6, 62],
-    ["not a number", 0],
-    [null, 0],
-    [undefined, 0],
   ])("reads a match percent of %p as %i rather than failing the comparison", (given, expected) => {
     expect(parse({ match_percent: given }).match_percent).toBe(expected);
+  });
+
+  test.each([
+    ["missing", { ...OK, match_percent: undefined }],
+    ["misnamed", { summary: OK.summary, covered: OK.covered, gaps: OK.gaps, matchPercent: 61 }],
+    ["unreadable", { ...OK, match_percent: "not a number" }],
+  ])("refuses a comparison whose match percent is %s, rather than inventing 0%%", (_label, body) => {
+    expect(resumeGapResponseSchema.safeParse(body).success).toBe(false);
   });
 
   test("drops a malformed entry rather than throwing the whole comparison away", () => {

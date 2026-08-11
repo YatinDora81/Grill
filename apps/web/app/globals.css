@@ -3552,8 +3552,9 @@
    black is too thin to survive on cream: these two and the brief's `.chip-ok` /
    `.chip-req` are one idiom, and `--chip-edge` / `--chip-fill` let it be
    retuned in one place for every hue at once. The pair drops from 35% to the
-   shared 30% on dark — a difference nothing renders, since neither chip has a
-   call site. */
+   shared 30% on dark; `.chip-error` renders that edge on the karaoke filler
+   count, on the report and on the anonymous sample, and it reads on the light
+   stock too. */
 .app-root .chip-error {
   border-color: color-mix(in srgb, var(--color-weak) var(--chip-edge), transparent);
   background: color-mix(in srgb, var(--color-weak) var(--chip-fill), transparent);

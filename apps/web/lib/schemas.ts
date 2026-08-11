@@ -441,7 +441,6 @@ function keepingOnlyWellFormed<T>(item: z.ZodType<T>, cap: number) {
 export const resumeGapResponseSchema = z.object({
   match_percent: z.coerce
     .number()
-    .catch(0)
     .transform((n) => Math.min(100, Math.max(0, Math.round(n)))),
   summary: z
     .string()

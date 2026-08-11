@@ -62,7 +62,7 @@ export const metadata: Metadata = {
   publisher: SITE_NAME,
   // Private by default. Everything except the landing page and signup sits
   // behind auth or is a per-candidate URL, so the safe default is "don't index"
-  // and the two public pages opt back in — a new route added under (app) is
+  // and the four public pages opt back in — a new route added under (app) is
   // then unindexable by omission rather than by remembering. app/robots.ts
   // blocks the same paths at the crawler, before it ever fetches the HTML.
   robots: { index: false, follow: false },
@@ -74,7 +74,7 @@ export const metadata: Metadata = {
     description: SITE_DESCRIPTION,
     // No `url` here on purpose: openGraph merges wholesale into child segments,
     // so a root og:url would make every page claim to be "/" while its own
-    // canonical said otherwise. The two public pages set their own.
+    // canonical said otherwise. The four public pages set their own.
   },
   twitter: {
     card: "summary_large_image",
