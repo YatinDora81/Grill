@@ -43,6 +43,16 @@ export function updateUserName(id: string, name: string | null) {
   return prisma.user.update({ where: { id }, data: { name } });
 }
 
+export function updateUserProfile(
+  id: string,
+  patch: { name?: string | null; emailOnReport?: boolean },
+) {
+  return prisma.user.update({
+    where: { id },
+    data: { name: patch.name, emailOnReport: patch.emailOnReport },
+  });
+}
+
 export function updateUserPassword(id: string, passwordHash: string) {
   return prisma.user.update({ where: { id }, data: { passwordHash } });
 }
@@ -111,6 +121,49 @@ export function getRetryParent(session: { retryOfId: string | null }, userId: st
     where: { id: session.retryOfId, userId, ...aliveSession },
     include: { report: true },
   });
+}
+
+export const MAX_RETRY_CHAIN_HOPS = 10;
+
+export interface RetryChainSession {
+  id: string;
+  name: string | null;
+  overallScore: number | null;
+  createdAt: Date;
+}
+
+export async function listRetryChain(
+  sessionId: string,
+  userId: string,
+): Promise<RetryChainSession[]> {
+  const chain: RetryChainSession[] = [];
+  const seen = new Set<string>();
+  let cursor: string | null = sessionId;
+
+  while (cursor !== null && chain.length < MAX_RETRY_CHAIN_HOPS && !seen.has(cursor)) {
+    const id: string = cursor;
+    seen.add(id);
+    const row = await prisma.session.findFirst({
+      where: { id, userId, ...aliveSession },
+      select: {
+        id: true,
+        name: true,
+        createdAt: true,
+        retryOfId: true,
+        report: { select: { overallScore: true } },
+      },
+    });
+    if (!row) break;
+    chain.push({
+      id: row.id,
+      name: row.name,
+      overallScore: row.report?.overallScore ?? null,
+      createdAt: row.createdAt,
+    });
+    cursor = row.retryOfId;
+  }
+
+  return chain.reverse();
 }
 
 /** Fetch a session that belongs to this user (null otherwise). Soft-deleted rows are invisible. */
@@ -646,6 +699,7 @@ export function listUserSessions(userId: string, take = 10) {
       name: true,
       role: true,
       status: true,
+      retryOfId: true,
       report: { select: { overallScore: true } },
     },
   });
@@ -823,4 +877,84 @@ export async function invalidateUserResetTokens(userId: string): Promise<void> {
     where: { userId, usedAt: null },
     data: { usedAt: new Date() },
   });
+}
+
+// ── Report shares ─────────────────────────────────────────────────
+
+export function upsertReportShare(sessionId: string, tokenHash: string): Promise<{ id: string }> {
+  return prisma.reportShare.upsert({
+    where: { sessionId },
+    create: { sessionId, tokenHash },
+    update: { tokenHash, revokedAt: null, createdAt: new Date() },
+    select: { id: true },
+  });
+}
+
+export async function revokeReportShare(sessionId: string, userId: string): Promise<boolean> {
+  const { count } = await prisma.reportShare.updateMany({
+    where: { sessionId, revokedAt: null, session: { userId, ...aliveSession } },
+    data: { revokedAt: new Date() },
+  });
+  return count === 1;
+}
+
+export interface SharedReport {
+  sessionId: string;
+  name: string | null;
+  role: string | null;
+  createdAt: Date;
+  questionCount: number;
+  overallScore: number;
+  verdict: string;
+  categoryScores: unknown;
+  deliveryMetrics: unknown;
+  strengths: unknown;
+  weaknesses: unknown;
+}
+
+export async function getSharedReport(tokenHash: string): Promise<SharedReport | null> {
+  const share = await prisma.reportShare.findFirst({
+    where: {
+      tokenHash,
+      revokedAt: null,
+      session: { status: "completed", ...aliveSession },
+    },
+    select: {
+      session: {
+        select: {
+          id: true,
+          name: true,
+          role: true,
+          createdAt: true,
+          _count: { select: { turns: true } },
+          report: {
+            select: {
+              overallScore: true,
+              verdict: true,
+              categoryScores: true,
+              deliveryMetrics: true,
+              strengths: true,
+              weaknesses: true,
+            },
+          },
+        },
+      },
+    },
+  });
+  const session = share?.session;
+  if (!session?.report) return null;
+
+  return {
+    sessionId: session.id,
+    name: session.name,
+    role: session.role,
+    createdAt: session.createdAt,
+    questionCount: session._count.turns,
+    overallScore: session.report.overallScore,
+    verdict: session.report.verdict,
+    categoryScores: session.report.categoryScores,
+    deliveryMetrics: session.report.deliveryMetrics,
+    strengths: session.report.strengths,
+    weaknesses: session.report.weaknesses,
+  };
 }

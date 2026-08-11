@@ -1,4 +1,10 @@
-import type { Difficulty, ExclusiveMode, InterviewConfig, InterviewSource } from "@repo/types";
+import type {
+  Difficulty,
+  ExclusiveMode,
+  InterviewConfig,
+  InterviewSource,
+  Persona,
+} from "@repo/types";
 
 /**
  * How an interview describes itself — to the candidate picking one, and to the
@@ -129,6 +135,60 @@ export function difficultyLabel(d: Difficulty): string {
   return DIFFICULTY_META[d].label;
 }
 
+export interface PersonaMeta {
+  label: string;
+  tagline: string;
+  prompt: string;
+}
+
+export const PERSONA_META: Record<Persona, PersonaMeta> = {
+  neutral: { label: "Neutral", tagline: "Sharp, fair, no theater.", prompt: "" },
+  friendly_screen: {
+    label: "Friendly screen",
+    tagline: "Warm HR opener energy.",
+    prompt:
+      "Voice: warm and encouraging, first-round phone-screen register. Soften phrasing, never the substance — probe just as deep.",
+  },
+  terse_staff: {
+    label: "Terse staff eng",
+    tagline: "Five words where five suffice.",
+    prompt:
+      "Voice: minimal, dry, zero pleasantries. Questions are short and surgical. No filler, no praise.",
+  },
+  bar_raiser: {
+    label: "Bar-raiser",
+    tagline: "Evidence or it didn't happen.",
+    prompt:
+      "Voice: structured behavioral rigor. Push for specifics, ownership and measurable outcomes; ask for the data behind every claim.",
+  },
+  skeptic: {
+    label: "The skeptic",
+    tagline: "Assumes it broke in prod.",
+    prompt:
+      "Voice: politely unconvinced. Challenge premises and tradeoffs; ask what failed, what they'd undo, and why the alternative wasn't better. Professional, never insulting.",
+  },
+};
+
+export const PERSONAS: readonly Persona[] = [
+  "neutral",
+  "friendly_screen",
+  "terse_staff",
+  "bar_raiser",
+  "skeptic",
+] as const;
+
+export const PERSONA_GUARDRAIL =
+  "Persona changes tone and phrasing only — question difficulty, topic selection, and follow-up logic are unchanged; remain professional.";
+
+export function personaLabel(p: Persona | null | undefined): string {
+  return PERSONA_META[p ?? "neutral"].label;
+}
+
+export function personaBrief(p: Persona | null | undefined): string {
+  const { prompt } = PERSONA_META[p ?? "neutral"];
+  return prompt ? `${prompt}\n${PERSONA_GUARDRAIL}` : "";
+}
+
 /** How each source reads in the picker. These combine. */
 export const SOURCE_META: Record<InterviewSource, { label: string; blurb: string }> = {
   resume: { label: "Résumé", blurb: "Your own history — what you built, and what you'd rather skip." },
@@ -160,6 +220,10 @@ export const MODE_META: Record<ExclusiveMode, { label: string; blurb: string }> 
   weak_spots: {
     label: "Weak spots",
     blurb: "Re-asks the questions you scored worst on in past interviews, plus new ground.",
+  },
+  starred: {
+    label: "Starred drill",
+    blurb: "Your saved killers, asked back in order.",
   },
   project: {
     label: "Project",

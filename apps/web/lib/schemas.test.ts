@@ -12,10 +12,14 @@ mock.module("server-only", () => ({}));
 process.env.GEMINI_API_KEYS ||= "TEST__SPLIT__not-a-real-key";
 process.env.JWT_SECRET ||= "test-secret";
 
-const { DIFFICULTIES, QUESTION_BOUNDS } = await import("./interviewMeta");
+const { DIFFICULTIES, PERSONAS, QUESTION_BOUNDS } = await import("./interviewMeta");
 const {
+  GAP_JD_MAX_CHARS,
+  GAP_RESUME_MAX_CHARS,
   interviewConfigSchema,
   questionResponseSchema,
+  resumeGapRequestSchema,
+  resumeGapResponseSchema,
   startRequestSchema,
   storedConfigSchema,
 } = await import("./schemas");
@@ -391,6 +395,25 @@ describe("configs written under older shapes", () => {
     });
   });
 
+  test("leaves a row written before personas and starred drills otherwise untouched", () => {
+    const r = storedConfigSchema.safeParse({
+      mode: "topic",
+      topic: "Kafka",
+      difficulty: "senior",
+      num_questions: "5",
+    });
+    expect(r.success).toBe(true);
+    expect(r.data).toMatchObject({
+      num_questions: 5,
+      difficulty: "hard",
+      persona: "neutral",
+      sources: ["resume", "topic"],
+      mode: null,
+      topic: "Kafka",
+    });
+    expect(r.data!.starred_hashes).toBeUndefined();
+  });
+
   test("still rejects a stored row that migration cannot rescue", () => {
     // Migration is not a licence to accept anything: a row naming a source that
     // has never existed is corrupt, and reading it as valid would brief the
@@ -398,6 +421,226 @@ describe("configs written under older shapes", () => {
     expect(storedConfigSchema.safeParse({ sources: ["astrology"], mode: null }).success).toBe(false);
     expect(storedConfigSchema.safeParse("not a config").success).toBe(false);
     expect(storedConfigSchema.safeParse(null).success).toBe(false);
+  });
+});
+
+describe("the interviewer's persona", () => {
+  test("reads a config that never named one as neutral", () => {
+    expect(interviewConfigSchema.safeParse(cfg()).data!.persona).toBe("neutral");
+    expect(storedConfigSchema.safeParse(cfg()).data!.persona).toBe("neutral");
+    expect(
+      storedConfigSchema.safeParse({ mode: "topic", topic: "Kafka", difficulty: "senior" }).data!
+        .persona,
+    ).toBe("neutral");
+  });
+
+  test("round-trips every persona the picker offers", () => {
+    for (const persona of PERSONAS) {
+      expect(interviewConfigSchema.safeParse(cfg({ persona })).data!.persona).toBe(persona);
+      expect(storedConfigSchema.safeParse(cfg({ persona })).data!.persona).toBe(persona);
+    }
+  });
+
+  test("rejects a persona nobody wrote", () => {
+    expect(interviewConfigSchema.safeParse(cfg({ persona: "drill_sergeant" })).success).toBe(false);
+    expect(interviewConfigSchema.safeParse(cfg({ persona: null })).success).toBe(false);
+  });
+});
+
+describe("the starred drill", () => {
+  const HASH_A = "a".repeat(64);
+  const HASH_B = "b1".repeat(32);
+
+  function starred(over: Record<string, unknown> = {}) {
+    return cfg({ mode: "starred", sources: [], starred_hashes: [HASH_A], ...over });
+  }
+
+  test("keeps the hashes in the order they were picked, since that is the ask order", () => {
+    const r = interviewConfigSchema.safeParse(starred({ starred_hashes: [HASH_B, HASH_A] }));
+    expect(r.success).toBe(true);
+    expect(r.data!.starred_hashes).toEqual([HASH_B, HASH_A]);
+  });
+
+  test("rejects a starred drill with nothing to drill", () => {
+    const r = interviewConfigSchema.safeParse(cfg({ mode: "starred", sources: [] }));
+    expect(r.success).toBe(false);
+    expect(issuePaths(r)).toContain("starred_hashes");
+  });
+
+  test("rejects an empty selection, which is the same interview about nothing", () => {
+    const r = interviewConfigSchema.safeParse(starred({ starred_hashes: [] }));
+    expect(r.success).toBe(false);
+    expect(issuePaths(r)).toContain("starred_hashes");
+  });
+
+  test.each(["weak_spots", "real", "cultural_only"])(
+    "rejects saved questions carried by a %s interview",
+    (mode) => {
+      const r = interviewConfigSchema.safeParse(
+        cfg({ mode, sources: [], starred_hashes: [HASH_A] }),
+      );
+      expect(r.success).toBe(false);
+      expect(issuePaths(r)).toContain("starred_hashes");
+    },
+  );
+
+  test("rejects saved questions carried by a blended sources interview", () => {
+    const r = interviewConfigSchema.safeParse(
+      cfg({ mode: null, sources: ["resume"], starred_hashes: [HASH_A] }),
+    );
+    expect(r.success).toBe(false);
+    expect(issuePaths(r)).toContain("starred_hashes");
+  });
+
+  test.each([["A".repeat(64)], ["a".repeat(63)], ["z".repeat(64)], [""]])(
+    "rejects %s, which is not a question hash the repo ever produced",
+    (hash) => {
+      expect(interviewConfigSchema.safeParse(starred({ starred_hashes: [hash] })).success).toBe(
+        false,
+      );
+    },
+  );
+
+  test("drills at most twelve saved questions in one sitting", () => {
+    const twelve = Array.from({ length: 12 }, (_, i) => i.toString(16).padStart(64, "0"));
+    expect(interviewConfigSchema.safeParse(starred({ starred_hashes: twelve })).success).toBe(true);
+
+    const thirteen = Array.from({ length: 13 }, (_, i) => i.toString(16).padStart(64, "0"));
+    const over = interviewConfigSchema.safeParse(starred({ starred_hashes: thirteen }));
+    expect(over.success).toBe(false);
+    expect(issuePaths(over)).toContain("starred_hashes");
+  });
+
+  test("leaves the question count alone — matching it to the selection is service work", () => {
+    const r = interviewConfigSchema.safeParse(
+      starred({ starred_hashes: [HASH_A, HASH_B], num_questions: 8 }),
+    );
+    expect(r.success).toBe(true);
+    expect(r.data!.num_questions).toBe(8);
+  });
+
+  test("still reads back a stored starred drill unchanged", () => {
+    const r = storedConfigSchema.safeParse({
+      mode: "starred",
+      starred_hashes: [HASH_A, HASH_B],
+      num_questions: 2,
+    });
+    expect(r.success).toBe(true);
+    expect(r.data!.sources).toEqual([]);
+    expect(r.data!.starred_hashes).toEqual([HASH_A, HASH_B]);
+  });
+});
+
+describe("the résumé-vs-JD gap request", () => {
+  test("takes a job description at the cap and refuses one past it", () => {
+    expect(resumeGapRequestSchema.safeParse({ jd: "a".repeat(GAP_JD_MAX_CHARS) }).success).toBe(
+      true,
+    );
+    expect(resumeGapRequestSchema.safeParse({ jd: "a".repeat(GAP_JD_MAX_CHARS + 1) }).success).toBe(
+      false,
+    );
+  });
+
+  test("refuses a blank job description, which has nothing to compare against", () => {
+    expect(resumeGapRequestSchema.safeParse({ jd: "   " }).success).toBe(false);
+    expect(resumeGapRequestSchema.safeParse({}).success).toBe(false);
+  });
+
+  test("reads the empty résumé field of a file upload as absent, not as a blank paste", () => {
+    const missing = resumeGapRequestSchema.safeParse({ jd: "Senior Go role", resume_text: null });
+    expect(missing.success).toBe(true);
+    expect(missing.data!.resume_text).toBeUndefined();
+
+    const empty = resumeGapRequestSchema.safeParse({ jd: "Senior Go role", resume_text: "" });
+    expect(empty.success).toBe(true);
+    expect(empty.data!.resume_text).toBeUndefined();
+  });
+
+  test("takes a pasted résumé at the cap and refuses one past it", () => {
+    const jd = "Senior Go role";
+    expect(
+      resumeGapRequestSchema.safeParse({ jd, resume_text: "a".repeat(GAP_RESUME_MAX_CHARS) })
+        .success,
+    ).toBe(true);
+    expect(
+      resumeGapRequestSchema.safeParse({ jd, resume_text: "a".repeat(GAP_RESUME_MAX_CHARS + 1) })
+        .success,
+    ).toBe(false);
+  });
+});
+
+describe("the gap comparison the model returns", () => {
+  const COVERED = { requirement: "React + TypeScript, 3 yrs", evidence: "Built Grill on Next.js." };
+  const GAP = {
+    requirement: "Observability / on-call",
+    why_it_matters: "They page whoever shipped it.",
+    how_to_close: "Add Sentry to Grill, write the incident story.",
+  };
+  const OK = {
+    match_percent: 61,
+    summary: "Worth applying, with prep.",
+    covered: [COVERED],
+    gaps: [GAP],
+  };
+
+  function parse(over: Record<string, unknown>) {
+    const r = resumeGapResponseSchema.safeParse({ ...OK, ...over });
+    expect(r.success).toBe(true);
+    return r.data!;
+  }
+
+  test("passes a well-formed comparison through untouched", () => {
+    expect(parse({})).toEqual(OK);
+  });
+
+  test.each([
+    [140, 100],
+    [101, 100],
+    [-12, 0],
+    ["61", 61],
+    [61.6, 62],
+    ["not a number", 0],
+    [null, 0],
+    [undefined, 0],
+  ])("reads a match percent of %p as %i rather than failing the comparison", (given, expected) => {
+    expect(parse({ match_percent: given }).match_percent).toBe(expected);
+  });
+
+  test("drops a malformed entry rather than throwing the whole comparison away", () => {
+    const r = parse({
+      covered: [COVERED, { requirement: "no evidence" }, "nonsense", null, 7],
+      gaps: [GAP, { requirement: "half", why_it_matters: "an item" }],
+    });
+    expect(r.covered).toEqual([COVERED]);
+    expect(r.gaps).toEqual([GAP]);
+  });
+
+  test("reads a missing or non-array list as an empty one", () => {
+    const r = resumeGapResponseSchema.safeParse({ match_percent: 10, summary: "Thin." });
+    expect(r.success).toBe(true);
+    expect(r.data!.covered).toEqual([]);
+    expect(r.data!.gaps).toEqual([]);
+    expect(parse({ covered: "none" }).covered).toEqual([]);
+  });
+
+  test("caps each list at twelve, however many the model felt like listing", () => {
+    const many = Array.from({ length: 40 }, (_, i) => ({ ...COVERED, requirement: `req ${i}` }));
+    expect(parse({ covered: many }).covered).toHaveLength(12);
+  });
+
+  test("truncates a runaway summary or line instead of spending a retry on it", () => {
+    const r = parse({
+      summary: "x".repeat(2_000),
+      covered: [{ requirement: "r".repeat(500), evidence: "e".repeat(900) }],
+    });
+    expect(r.summary).toHaveLength(600);
+    expect(r.covered[0]!.requirement).toHaveLength(240);
+    expect(r.covered[0]!.evidence).toHaveLength(400);
+  });
+
+  test("still refuses a comparison with no summary, which is worth the one retry", () => {
+    expect(resumeGapResponseSchema.safeParse({ ...OK, summary: "   " }).success).toBe(false);
+    expect(resumeGapResponseSchema.safeParse({ ...OK, summary: undefined }).success).toBe(false);
   });
 });
 

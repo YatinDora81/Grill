@@ -1,15 +1,26 @@
 import { describe, expect, test } from "bun:test";
-import type { Difficulty, ExclusiveMode, InterviewConfig, InterviewSource } from "@repo/types";
+import type {
+  Difficulty,
+  ExclusiveMode,
+  InterviewConfig,
+  InterviewSource,
+  Persona,
+} from "@repo/types";
 import {
   ANSWER_CAP_MODEL,
   DIFFICULTIES,
   DIFFICULTY_META,
   MODE_META,
+  PERSONA_GUARDRAIL,
+  PERSONA_META,
+  PERSONAS,
   QUESTION_BOUNDS,
   SOURCE_META,
   difficultyLabel,
   interviewLabel,
   perAnswerCapSeconds,
+  personaBrief,
+  personaLabel,
 } from "./interviewMeta";
 
 /**
@@ -28,10 +39,18 @@ const ALL_MODES: ExclusiveMode[] = [
   "jd",
   "real",
   "weak_spots",
+  "starred",
   "project",
 ];
 const ALL_SOURCES: InterviewSource[] = ["resume", "topic", "cultural"];
 const ALL_DIFFICULTIES: Difficulty[] = ["easy", "medium", "hard", "extreme"];
+const ALL_PERSONAS: Persona[] = [
+  "neutral",
+  "friendly_screen",
+  "terse_staff",
+  "bar_raiser",
+  "skeptic",
+];
 
 describe("perAnswerCapSeconds", () => {
   /**
@@ -154,5 +173,54 @@ describe("interviewLabel", () => {
     // both, the label must still name the mode — that is what the interviewer
     // was briefed with.
     expect(interviewLabel(cfg({ mode: "real", sources: ["resume"] }))).toBe("Real interview");
+  });
+
+  test("names the starred drill, the newest mode", () => {
+    expect(interviewLabel(cfg({ mode: "starred", starred_hashes: ["a".repeat(64)] }))).toBe(
+      "Starred drill",
+    );
+  });
+});
+
+describe("personas", () => {
+  test("offers every persona, neutral first", () => {
+    expect([...PERSONAS]).toEqual(ALL_PERSONAS);
+    expect(Object.keys(PERSONA_META).sort()).toEqual([...ALL_PERSONAS].sort());
+  });
+
+  test("gives every persona a label and a tagline the picker can paint", () => {
+    for (const p of ALL_PERSONAS) {
+      expect(PERSONA_META[p].label.length).toBeGreaterThan(0);
+      expect(PERSONA_META[p].tagline.length).toBeGreaterThan(0);
+    }
+  });
+
+  test("says nothing at all for neutral, which is the absence of a voice", () => {
+    expect(PERSONA_META.neutral.prompt).toBe("");
+    expect(personaBrief("neutral")).toBe("");
+    expect(personaBrief(undefined)).toBe("");
+    expect(personaBrief(null)).toBe("");
+  });
+
+  test("never hands a voice to the prompt without the tone-only guardrail", () => {
+    for (const p of ALL_PERSONAS.filter((x) => x !== "neutral")) {
+      const brief = personaBrief(p);
+      expect(brief).toContain(PERSONA_META[p].prompt);
+      expect(brief).toContain(PERSONA_GUARDRAIL);
+      expect(brief.indexOf(PERSONA_GUARDRAIL)).toBeGreaterThan(0);
+    }
+  });
+
+  test("keeps the guardrail naming everything a persona may not move", () => {
+    expect(PERSONA_GUARDRAIL).toContain("tone");
+    expect(PERSONA_GUARDRAIL).toContain("difficulty");
+    expect(PERSONA_GUARDRAIL).toContain("topic selection");
+    expect(PERSONA_GUARDRAIL).toContain("follow-up");
+  });
+
+  test("reads a session that predates the field as neutral", () => {
+    expect(personaLabel(undefined)).toBe("Neutral");
+    expect(personaLabel(null)).toBe("Neutral");
+    expect(personaLabel("skeptic")).toBe("The skeptic");
   });
 });

@@ -29,7 +29,8 @@ export const resetPasswordSchema = z.object({
 });
 
 export const updateProfileSchema = z.object({
-  name: z.string().trim().min(1).max(80).nullable(),
+  name: z.string().trim().min(1).max(80).nullable().optional(),
+  email_on_report: z.boolean().optional(),
 });
 
 export const changePasswordSchema = z.object({
@@ -49,9 +50,17 @@ export const exclusiveModeSchema = z.enum([
   "jd",
   "real",
   "weak_spots",
+  "starred",
   "project",
 ]);
 export const difficultySchema = z.enum(["easy", "medium", "hard", "extreme"]);
+export const personaSchema = z.enum([
+  "neutral",
+  "friendly_screen",
+  "terse_staff",
+  "bar_raiser",
+  "skeptic",
+]);
 
 /** Legacy: the single-mode union that `sources` + `mode` replaced. */
 export const interviewModeSchema = z.enum([
@@ -154,6 +163,7 @@ const interviewConfigShape = z.object({
     .max(QUESTION_BOUNDS.max)
     .default(config.interview.defaultNumQuestions),
   difficulty: difficultySchema.default("medium"),
+  persona: personaSchema.default("neutral"),
   sources: z.array(interviewSourceSchema).max(3).default([]),
   mode: exclusiveModeSchema.nullable().default(null),
   topic: z.string().trim().max(2_000).optional(),
@@ -165,6 +175,7 @@ const interviewConfigShape = z.object({
   // higher ceiling than job_description.
   project_context: z.string().trim().max(24_000).optional(),
   project_repo_url: z.string().trim().url().max(500).optional(),
+  starred_hashes: z.array(z.string().regex(/^[0-9a-f]{64}$/)).min(1).max(12).optional(),
   allow_repeats: z.coerce.boolean().default(false),
   // Optional, and must stay that way: sessions written before the cap existed
   // have no value here, and requiring one would make their room page and their
@@ -216,6 +227,20 @@ export const interviewConfigSchema = interviewConfigShape.superRefine((v, ctx) =
       message: "Describe the project, or import a GitHub repo.",
     });
   }
+  if (v.mode === "starred" && !v.starred_hashes?.length) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["starred_hashes"],
+      message: "Pick at least one saved question to drill.",
+    });
+  }
+  if (v.starred_hashes?.length && v.mode !== "starred") {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["starred_hashes"],
+      message: "Saved questions are only asked back by a starred drill.",
+    });
+  }
 });
 
 /** Reads a config off a session row, whatever shape it was written in. */
@@ -262,6 +287,23 @@ export const starSchema = z.object({ turn_id: z.string().uuid() });
 /** sha256, lowercase hex — the shape repo.questionHash produces. */
 export const unstarSchema = z.object({ question_hash: z.string().regex(/^[a-f0-9]{64}$/) });
 
+// ── Résumé vs JD gap tool ─────────────────────────────────────────
+
+export const GAP_JD_MAX_CHARS = 8_000;
+export const GAP_RESUME_MAX_CHARS = 15_000;
+
+export const resumeGapRequestSchema = z.object({
+  jd: z
+    .string()
+    .trim()
+    .min(1, "Paste the job description you want to be measured against.")
+    .max(GAP_JD_MAX_CHARS),
+  resume_text: z.preprocess(
+    (v) => (v === null || v === "" ? undefined : v),
+    z.string().trim().min(1).max(GAP_RESUME_MAX_CHARS).optional(),
+  ),
+});
+
 // ── Session video ─────────────────────────────────────────────────
 
 export const videoStartSchema = z.object({
@@ -306,6 +348,11 @@ export const turnRefSchema = z.object({
 });
 
 export const sessionIdSchema = z.object({ session_id: z.string().uuid() });
+
+// ── Report shares ─────────────────────────────────────────────────
+export const shareSessionParamsSchema = z.object({ sessionId: z.string().uuid() });
+
+export const shareTokenSchema = z.string().trim().min(32).max(200).regex(/^[A-Za-z0-9_-]+$/);
 
 // ── LLM JSON responses ────────────────────────────────────────────
 export const questionResponseSchema = z.object({
@@ -355,5 +402,56 @@ export const reportResponseSchema = z.object({
   question_feedback: z.array(questionFeedbackSchema).default([]),
 });
 
+const GAP_SUMMARY_MAX_CHARS = 600;
+const GAP_LINE_MAX_CHARS = 400;
+const GAP_LIST_MAX_ITEMS = 12;
+
+const gapLine = (max: number) =>
+  z
+    .string()
+    .trim()
+    .min(1)
+    .transform((s) => s.slice(0, max));
+
+const coveredItemSchema = z.object({
+  requirement: gapLine(240),
+  evidence: gapLine(GAP_LINE_MAX_CHARS),
+});
+
+const gapItemSchema = z.object({
+  requirement: gapLine(240),
+  why_it_matters: gapLine(GAP_LINE_MAX_CHARS),
+  how_to_close: gapLine(GAP_LINE_MAX_CHARS),
+});
+
+function keepingOnlyWellFormed<T>(item: z.ZodType<T>, cap: number) {
+  return z
+    .array(z.unknown())
+    .catch([])
+    .transform((raw) =>
+      raw
+        .flatMap((v) => {
+          const parsed = item.safeParse(v);
+          return parsed.success ? [parsed.data] : [];
+        })
+        .slice(0, cap),
+    );
+}
+
+export const resumeGapResponseSchema = z.object({
+  match_percent: z.coerce
+    .number()
+    .catch(0)
+    .transform((n) => Math.min(100, Math.max(0, Math.round(n)))),
+  summary: z
+    .string()
+    .trim()
+    .min(1)
+    .transform((s) => s.slice(0, GAP_SUMMARY_MAX_CHARS)),
+  covered: keepingOnlyWellFormed(coveredItemSchema, GAP_LIST_MAX_ITEMS),
+  gaps: keepingOnlyWellFormed(gapItemSchema, GAP_LIST_MAX_ITEMS),
+});
+
 export type QuestionResponse = z.infer<typeof questionResponseSchema>;
 export type ReportResponse = z.infer<typeof reportResponseSchema>;
+export type ResumeGapParsed = z.infer<typeof resumeGapResponseSchema>;

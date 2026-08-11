@@ -58,6 +58,7 @@ export type ExclusiveMode =
   | "real"
   /** Re-asks the questions they scored worst on, mixed with new ones. */
   | "weak_spots"
+  | "starred"
   /**
    * Grilled on a project they built — pasted write-up or an imported GitHub
    * digest. Brings its own material (`project_context`), so the résumé is
@@ -88,6 +89,9 @@ export type InterviewStage =
   | "depth"
   /** "Do you have any questions for us?" — every interview ends here. */
   | "closing";
+
+export type Persona = "neutral" | "friendly_screen" | "terse_staff" | "bar_raiser" | "skeptic";
+
 export type SessionStatus =
   | "in_progress"
   | "generating_report"
@@ -104,6 +108,7 @@ export interface InterviewConfig {
    * Replaces the old years-of-experience slider and the junior/mid/senior buckets.
    */
   difficulty: Difficulty;
+  persona?: Persona;
   /**
    * What to draw questions from, blended. Non-empty exactly when `mode` is null
    * — an exclusive mode brings its own material, so the two are never both set.
@@ -126,6 +131,7 @@ export interface InterviewConfig {
    * Display and prompt garnish only — never re-fetched at interview time.
    */
   project_repo_url?: string;
+  starred_hashes?: string[];
   /**
    * Off by default. When off, every question this user has already been asked
    * is handed to the model as a do-not-reuse list — this is a repeat-practice
@@ -342,10 +348,31 @@ export interface RecentSession {
   progress: { answered: number; total: number | null; last_activity: string } | null;
 }
 
+export interface DeliveryPoint {
+  session_id: string;
+  date: string;
+  wpm: number | null;
+  fillers: number | null;
+}
+
+export interface RetryChainHop {
+  session_id: string;
+  name: string | null;
+  overall_score: number;
+  date: string;
+}
+
+export interface RetryChain {
+  name: string | null;
+  hops: RetryChainHop[];
+}
+
 export interface DashboardData {
   user: User;
   stats: DashboardStats;
   recent: RecentSession[];
+  delivery_series: DeliveryPoint[];
+  retry_chain: RetryChain | null;
 }
 
 /** Result of the Python acoustic service (apps/audio). */
@@ -360,4 +387,11 @@ export interface TranscriptWord {
   word: string;
   start: number;
   end: number;
+}
+
+export interface ResumeGapResponse {
+  match_percent: number;
+  summary: string;
+  covered: { requirement: string; evidence: string }[];
+  gaps: { requirement: string; why_it_matters: string; how_to_close: string }[];
 }
