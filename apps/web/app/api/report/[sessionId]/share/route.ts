@@ -21,7 +21,9 @@ export async function POST(_req: Request, { params }: { params: Promise<{ sessio
 
     const session = await repo.getSession(sessionId, userId);
     if (!session) throw notFound("Session not found.", "unknown_session");
-    if (session.status !== "completed") {
+
+    const report = await repo.getReportBySession(sessionId);
+    if (!report) {
       throw badRequest("This interview has no finished report to share yet.", "no_report");
     }
 
