@@ -50,6 +50,20 @@ export function esc(value: string): string {
     .replace(/'/g, "&#39;");
 }
 
+export interface Palette {
+  paper: string;
+  paperRaised: string;
+  paperSunken: string;
+  ink: string;
+  inkSoft: string;
+  inkMuted: string;
+  line: string;
+  lineStrong: string;
+  ember: string;
+  emberSoft: string;
+  emberGlow?: string;
+}
+
 /** Mirrors the `@theme` block in app/globals.css. Keep in sync by hand. */
 export const theme = {
   paper: "#0e0e0e",
@@ -117,7 +131,7 @@ const T = 'role="presentation" width="100%" cellpadding="0" cellspacing="0" bord
 const T_RESET = "width:100%;border-collapse:collapse";
 
 /** A filled row of a given height — the portable way to draw a bar or a gap. */
-function bar(height: number, color: string): string {
+export function Bar(height: number, color: string): string {
   return `<table ${T} style="${T_RESET}"><tr><td height="${height}" bgcolor="${color}" style="height:${height}px;font-size:1px;line-height:${height}px;background-color:${color}">&nbsp;</td></tr></table>`;
 }
 
@@ -142,8 +156,8 @@ export function HeatBar(height = 3): string {
 }
 
 /** Small mono uppercase label — the same one the app puts above every section. */
-export function Eyebrow(html: string): string {
-  return `<p style="margin:0 0 14px;font-family:${theme.mono};font-size:10px;letter-spacing:0.22em;text-transform:uppercase;color:${theme.ember}">${html}</p>`;
+export function Eyebrow(html: string, p: Palette = theme): string {
+  return `<p style="margin:0 0 14px;font-family:${theme.mono};font-size:10px;letter-spacing:0.22em;text-transform:uppercase;color:${p.ember}">${html}</p>`;
 }
 
 /**
@@ -154,12 +168,17 @@ export function Eyebrow(html: string): string {
  * is loose by default, and without the pull the line reads as a banner rather
  * than as a headline.
  */
-export function Heading(html: string): string {
-  return `<h1 style="margin:0 0 16px;font-family:${theme.display};font-size:31px;font-weight:800;line-height:33px;letter-spacing:-0.015em;text-transform:uppercase;color:${theme.ink}">${html}</h1>`;
+export function Heading(html: string, p: Palette = theme): string {
+  return `<h1 style="margin:0 0 16px;font-family:${theme.display};font-size:31px;font-weight:800;line-height:33px;letter-spacing:-0.015em;text-transform:uppercase;color:${p.ink}">${html}</h1>`;
 }
 
-export function Text(html: string, tone: "ink" | "soft" | "muted" = "soft", size = 15): string {
-  const color = tone === "ink" ? theme.ink : tone === "muted" ? theme.inkMuted : theme.inkSoft;
+export function Text(
+  html: string,
+  tone: "ink" | "soft" | "muted" = "soft",
+  size = 15,
+  p: Palette = theme,
+): string {
+  const color = tone === "ink" ? p.ink : tone === "muted" ? p.inkMuted : p.inkSoft;
   // An explicit px line-height, not a unitless ratio: Outlook resolves unitless
   // line-heights against its own default font size, not ours.
   return `<p style="margin:0 0 14px;font-family:${theme.sans};font-size:${size}px;line-height:${Math.round(size * 1.6)}px;color:${color}">${html}</p>`;
@@ -170,15 +189,15 @@ export function Text(html: string, tone: "ink" | "soft" | "muted" = "soft", size
  * against the label. The app teaches the whole product as a numbered sequence;
  * the mail that pulls someone back into it should read the same way.
  */
-export function Steps(items: string[]): string {
+export function Steps(items: string[], p: Palette = theme): string {
   const rows = items
     .map((label, i) => {
       const n = String(i + 1).padStart(2, "0");
       const pad = i === 0 ? "0" : "9px";
       return (
         `<tr>` +
-        `<td width="30" valign="top" style="width:30px;padding:${pad} 0 0;font-family:${theme.mono};font-size:11px;line-height:21px;color:${theme.ember}">${n}</td>` +
-        `<td valign="top" style="padding:${pad} 0 0;font-family:${theme.sans};font-size:14px;line-height:21px;color:${theme.inkSoft}">${label}</td>` +
+        `<td width="30" valign="top" style="width:30px;padding:${pad} 0 0;font-family:${theme.mono};font-size:11px;line-height:21px;color:${p.ember}">${n}</td>` +
+        `<td valign="top" style="padding:${pad} 0 0;font-family:${theme.sans};font-size:14px;line-height:21px;color:${p.inkSoft}">${label}</td>` +
         `</tr>`
       );
     })
@@ -190,18 +209,18 @@ export function Steps(items: string[]): string {
  * A mono pill — the app's `.chip`. Used for the one fact people scan for before
  * they read anything else: how long this link has left.
  */
-export function Chip(html: string): string {
-  return `<span style="display:inline-block;padding:6px 12px;border:1px solid ${theme.lineStrong};font-family:${theme.mono};font-size:10px;letter-spacing:0.14em;text-transform:uppercase;color:${theme.inkSoft}">${html}</span>`;
+export function Chip(html: string, p: Palette = theme): string {
+  return `<span style="display:inline-block;padding:6px 12px;border:1px solid ${p.lineStrong};font-family:${theme.mono};font-size:10px;letter-spacing:0.14em;text-transform:uppercase;color:${p.inkSoft}">${html}</span>`;
 }
 
 /**
  * An aside with the ember left-edge the app puts on anything that needs reading
  * before it's acted on (`.resume`, the dashboard readout).
  */
-export function Panel(html: string): string {
+export function Panel(html: string, p: Palette = theme): string {
   return (
     `<table ${T} style="${T_RESET}"><tr>` +
-    `<td style="padding:14px 16px;border-left:2px solid ${theme.ember};background-color:${theme.emberSoft}">${html}</td>` +
+    `<td style="padding:14px 16px;border-left:2px solid ${p.ember};background-color:${p.emberSoft}">${html}</td>` +
     `</tr></table>`
   );
 }
@@ -219,20 +238,20 @@ export function Panel(html: string): string {
  * `UrlFallback`): a fair number of clients render the anchor but never linkify
  * it.
  */
-export function Button(href: string, label: string): string {
+export function Button(href: string, label: string, p: Palette = theme): string {
   const url = esc(href);
   const text = esc(label);
   return (
     `<!--[if mso]>` +
-    `<v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${url}" style="height:50px;v-text-anchor:middle;width:280px;" arcsize="0%" stroke="f" fillcolor="${theme.ember}">` +
+    `<v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${url}" style="height:50px;v-text-anchor:middle;width:280px;" arcsize="0%" stroke="f" fillcolor="${p.ember}">` +
     `<w:anchorlock/>` +
-    `<center style="color:${theme.paper};font-family:Arial,sans-serif;font-size:13px;font-weight:bold;letter-spacing:0.1em;">${text.toUpperCase()}</center>` +
+    `<center style="color:${p.paper};font-family:Arial,sans-serif;font-size:13px;font-weight:bold;letter-spacing:0.1em;">${text.toUpperCase()}</center>` +
     `</v:roundrect>` +
     `<![endif]-->` +
     `<!--[if !mso]><!-->` +
     // `color` is restated even though it's on the parent: several clients force
     // their own link colour onto any <a> that doesn't set one.
-    `<a href="${url}" style="display:inline-block;padding:16px 30px;background-color:${theme.ember};font-family:${theme.sans};font-size:13px;font-weight:700;line-height:18px;letter-spacing:0.1em;text-transform:uppercase;color:${theme.paper};text-decoration:none">${text}</a>` +
+    `<a href="${url}" style="display:inline-block;padding:16px 30px;background-color:${p.ember};font-family:${theme.sans};font-size:13px;font-weight:700;line-height:18px;letter-spacing:0.1em;text-transform:uppercase;color:${p.paper};text-decoration:none">${text}</a>` +
     `<!--<![endif]-->`
   );
 }
@@ -241,21 +260,21 @@ export function Button(href: string, label: string): string {
  * The same link as plain text, in a sunken box so it reads as something to copy
  * rather than something to read.
  */
-export function UrlFallback(href: string): string {
+export function UrlFallback(href: string, p: Palette = theme): string {
   const url = esc(href);
   return (
     `<table ${T} style="${T_RESET}"><tr>` +
     // A reset URL is longer than 600px of Georgia; without `word-break` it either
     // forces the whole table wider than the viewport or gets clipped.
-    `<td style="padding:12px 14px;border:1px solid ${theme.line};background-color:${theme.paperSunken};font-family:${theme.mono};font-size:12px;line-height:19px;word-break:break-all">` +
-    `<a href="${url}" style="color:${theme.emberGlow};text-decoration:none">${url}</a>` +
+    `<td style="padding:12px 14px;border:1px solid ${p.line};background-color:${p.paperSunken};font-family:${theme.mono};font-size:12px;line-height:19px;word-break:break-all">` +
+    `<a href="${url}" style="color:${p.emberGlow ?? p.ember};text-decoration:none">${url}</a>` +
     `</td></tr></table>`
   );
 }
 
 /** A hairline rule. A filled 1px row, because <hr> is styled differently everywhere. */
-export function Rule(): string {
-  return bar(1, theme.line);
+export function Rule(p: Palette = theme): string {
+  return Bar(1, p.line);
 }
 
 export interface EmailLayoutOptions {
@@ -265,6 +284,9 @@ export interface EmailLayoutOptions {
   body: string;
   /** Footer fine print. Defaults to the "wasn't you? ignore it" line. */
   footnote?: string;
+  palette?: Palette;
+  coil?: string;
+  scheme?: "dark" | "light";
 }
 
 /**
@@ -274,11 +296,18 @@ export interface EmailLayoutOptions {
  * more predictably with it than with the HTML5 one — and the `xmlns:v` / `xmlns:o`
  * namespaces on <html> are what make the VML button above legal markup to it.
  */
-export function renderEmail({ preview, body, footnote }: EmailLayoutOptions): string {
+export function renderEmail({
+  preview,
+  body,
+  footnote,
+  palette: p = theme,
+  coil = HeatBar(3),
+  scheme = "dark",
+}: EmailLayoutOptions): string {
   const home = esc(config.site.url);
   const defaultFootnote =
     `You&rsquo;re getting this because this address was entered at ` +
-    `<a href="${home}" style="color:${theme.inkSoft};text-decoration:underline">grill</a>. ` +
+    `<a href="${home}" style="color:${p.inkSoft};text-decoration:underline">grill</a>. ` +
     `If that wasn&rsquo;t you, nothing has happened to any account and you can ignore this email.`;
 
   return (
@@ -291,19 +320,19 @@ export function renderEmail({ preview, body, footnote }: EmailLayoutOptions): st
     // Grill is a dark room by design. Without these, Gmail and Outlook dark mode
     // "helpfully" invert the palette — which lands cream text on a near-white
     // card and turns the ember into a muddy blue.
-    `<meta name="color-scheme" content="dark" />` +
-    `<meta name="supported-color-schemes" content="dark" />` +
+    `<meta name="color-scheme" content="${scheme}" />` +
+    `<meta name="supported-color-schemes" content="${scheme}" />` +
     // Word renders at 96dpi only if told to; without this the VML button and all
     // the pixel paddings come out about a third too large on Outlook/Windows.
     `<!--[if mso]><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml><![endif]-->` +
     `</head>` +
-    `<body style="margin:0;padding:0;width:100%;background-color:${theme.paper};-webkit-text-size-adjust:100%">` +
-    `<div style="display:none;overflow:hidden;max-height:0;max-width:0;opacity:0;font-size:1px;line-height:1px;color:${theme.paper}">${esc(preview)}${PREHEADER_PAD}</div>` +
+    `<body style="margin:0;padding:0;width:100%;background-color:${p.paper};-webkit-text-size-adjust:100%">` +
+    `<div style="display:none;overflow:hidden;max-height:0;max-width:0;opacity:0;font-size:1px;line-height:1px;color:${p.paper}">${esc(preview)}${PREHEADER_PAD}</div>` +
     // The page background is set on this table as well as on <body>: several
     // webmail clients drop the <body> element entirely and re-host the markup
     // inside their own, taking our background with it — which would leave
     // cream-on-white and an unreadable email.
-    `<table ${T} bgcolor="${theme.paper}" style="${T_RESET};background-color:${theme.paper}"><tr>` +
+    `<table ${T} bgcolor="${p.paper}" style="${T_RESET};background-color:${p.paper}"><tr>` +
     `<td align="center" style="padding:36px 12px 44px">` +
     // Outlook ignores max-width and would render the column at window width, so
     // it gets a real 600px table via conditional comment. Everyone else takes the
@@ -313,19 +342,19 @@ export function renderEmail({ preview, body, footnote }: EmailLayoutOptions): st
     // ── masthead ──────────────────────────────────────────────────────────
     `<tr><td style="padding:0 2px 16px">` +
     `<table ${T} style="${T_RESET}"><tr>` +
-    `<td align="left" style="font-family:${theme.display};font-size:23px;font-weight:700;letter-spacing:-0.02em;color:${theme.ink}">` +
-    `<a href="${home}" style="color:${theme.ink};text-decoration:none">grill<span style="color:${theme.ember}">.</span></a>` +
+    `<td align="left" style="font-family:${theme.display};font-size:23px;font-weight:700;letter-spacing:-0.02em;color:${p.ink}">` +
+    `<a href="${home}" style="color:${p.ink};text-decoration:none">grill<span style="color:${p.ember}">.</span></a>` +
     `</td>` +
-    `<td align="right" style="font-family:${theme.mono};font-size:9px;letter-spacing:0.2em;text-transform:uppercase;color:${theme.inkMuted}">practice under heat</td>` +
+    `<td align="right" style="font-family:${theme.mono};font-size:9px;letter-spacing:0.2em;text-transform:uppercase;color:${p.inkMuted}">practice under heat</td>` +
     `</tr></table>` +
     `</td></tr>` +
     // ── the coil, then the card ───────────────────────────────────────────
-    `<tr><td style="font-size:0;line-height:0">${HeatBar(3)}</td></tr>` +
-    `<tr><td style="padding:30px 30px 32px;border:1px solid ${theme.line};border-top:none;background-color:${theme.paperRaised}">${body}</td></tr>` +
+    `<tr><td style="font-size:0;line-height:0">${coil}</td></tr>` +
+    `<tr><td style="padding:30px 30px 32px;border:1px solid ${p.line};border-top:none;background-color:${p.paperRaised}">${body}</td></tr>` +
     // ── footer ────────────────────────────────────────────────────────────
-    `<tr><td style="padding:26px 2px 0">${Rule()}</td></tr>` +
+    `<tr><td style="padding:26px 2px 0">${Rule(p)}</td></tr>` +
     `<tr><td style="padding:14px 2px 0">` +
-    `<p style="margin:0;font-family:${theme.sans};font-size:12px;line-height:19px;color:${theme.inkMuted}">${footnote ?? defaultFootnote}</p>` +
+    `<p style="margin:0;font-family:${theme.sans};font-size:12px;line-height:19px;color:${p.inkMuted}">${footnote ?? defaultFootnote}</p>` +
     `</td></tr>` +
     `</table>` +
     `<!--[if mso]></td></tr></table><![endif]-->` +

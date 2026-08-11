@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Reveal } from "@/components/Reveal";
 import { ExplainBanner } from "@/components/Explain";
+import { exclusiveModeSchema } from "@/lib/schemas";
 import { NewInterviewForm } from "./NewInterviewForm";
 
 export const metadata: Metadata = {
@@ -23,8 +24,11 @@ export default async function NewInterviewPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const params = await searchParams;
-  const mode = Array.isArray(params.mode) ? params.mode[0] : params.mode;
+  const raw = Array.isArray(params.mode) ? params.mode[0] : params.mode;
+  const asked = exclusiveModeSchema.safeParse(raw);
+  const mode = asked.success ? asked.data : null;
   const starredHashes = mode === "starred" ? drillHashes(params.h) : [];
+  const initialMode = mode === "starred" ? null : mode;
 
   return (
     <>
@@ -67,7 +71,7 @@ export default async function NewInterviewPage({
           <ExplainBanner />
         </div>
 
-        <NewInterviewForm initialStarredHashes={starredHashes} />
+        <NewInterviewForm initialStarredHashes={starredHashes} initialMode={initialMode} />
       </main>
     </>
   );

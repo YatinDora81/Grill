@@ -74,6 +74,7 @@ export function ProfileForm({ user, emailOnReport }: { user: User; emailOnReport
   }
 
   async function toggleMail() {
+    if (savingMail) return;
     const wanted = !mailOn;
     setMailOn(wanted);
     setSavingMail(true);
@@ -187,7 +188,7 @@ export function ProfileForm({ user, emailOnReport }: { user: User; emailOnReport
             role="switch"
             aria-checked={mailOn}
             aria-label="Email me when a verdict is ready"
-            disabled={savingMail}
+            aria-busy={savingMail}
             onClick={toggleMail}
             className="switch"
           />

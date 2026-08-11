@@ -5,6 +5,10 @@ const SITE = "https://grill.yatindora.in";
 mock.module("server-only", () => ({}));
 mock.module("@/lib/env", () => ({ config: { site: { url: SITE } } }));
 
+const layout = await import("./layout");
+const renderEmail = mock(layout.renderEmail);
+mock.module("./layout", () => ({ ...layout, renderEmail }));
+
 const { renderReportReadyEmail } = await import("./reportReady");
 
 const INPUT = {
@@ -99,6 +103,21 @@ test("an unnamed session still renders", () => {
   expect(html).toContain("Report ready");
   expect(text).toContain("REPORT READY");
   expect(html).toContain("Hire-able &mdash; 72");
+});
+
+test("the shell comes from templates/layout.ts, not a private copy", () => {
+  renderEmail.mockClear();
+  mail();
+  expect(renderEmail).toHaveBeenCalledTimes(1);
+  const opts = renderEmail.mock.calls[0]![0];
+  expect(opts.scheme).toBe("light");
+  expect(opts.palette?.paper).toBe("#f4f0e6");
+});
+
+test("the shell's markup is the layout's, so a fix there reaches this mail too", () => {
+  const marker = "<!--[if mso]>SHELL_MOVED<![endif]-->";
+  renderEmail.mockImplementationOnce((opts) => layout.renderEmail(opts) + marker);
+  expect(mail().html).toContain(marker);
 });
 
 test("a rough score keeps its own word", () => {

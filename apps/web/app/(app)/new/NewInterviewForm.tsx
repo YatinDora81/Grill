@@ -206,8 +206,10 @@ function article(n: number): "A" | "An" {
 
 export function NewInterviewForm({
   initialStarredHashes = [],
+  initialMode = null,
 }: {
   initialStarredHashes?: string[];
+  initialMode?: ExclusiveMode | null;
 }) {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -229,8 +231,12 @@ export function NewInterviewForm({
   // An interview is either blended from sources or one exclusive mode. Both
   // states live here because picking one has to clear the other — see `pickMode`.
   const fromDrillLink = initialStarredHashes.length > 0;
-  const [sources, setSources] = useState<InterviewSource[]>(fromDrillLink ? [] : ["resume"]);
-  const [mode, setMode] = useState<ExclusiveMode | null>(fromDrillLink ? "starred" : null);
+  const [sources, setSources] = useState<InterviewSource[]>(
+    initialMode || fromDrillLink ? [] : ["resume"],
+  );
+  const [mode, setMode] = useState<ExclusiveMode | null>(
+    initialMode ?? (fromDrillLink ? "starred" : null),
+  );
   const [starredHashes, setStarredHashes] = useState<string[]>(initialStarredHashes);
   const [starredRows, setStarredRows] = useState<StarredRow[] | null>(null);
   const [topic, setTopic] = useState("");
@@ -281,7 +287,7 @@ export function NewInterviewForm({
   }, [initialStarredHashes.length]);
 
   useEffect(() => {
-    if (fromDrillLink) return;
+    if (fromDrillLink || initialMode) return;
     let handed = "";
     try {
       handed = sessionStorage.getItem(PENDING_JD_KEY) ?? "";
@@ -295,7 +301,7 @@ export function NewInterviewForm({
     setMode("jd");
     setSources([]);
     setCarriedJd(true);
-  }, [fromDrillLink]);
+  }, [fromDrillLink, initialMode]);
 
   const drilling = mode === "starred";
   const drillQuestions = starredRows
