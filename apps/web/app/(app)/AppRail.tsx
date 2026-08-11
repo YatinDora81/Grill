@@ -1,30 +1,25 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ExplainToggle } from "@/components/ExplainToggle";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { LogoutButton } from "./LogoutButton";
-import { STEP_BUILDING, STEP_EVENT } from "./appStep";
 
 /**
  * Persistent numbered navigation for the signed-in shell.
  *
- * The problem it solves: the app is five screens that happen in an order, and
- * the old topbar showed three of them with no hint that the other two existed or
- * that any of it was a sequence. Numbering says "you go 02 → 03 → 04 → 05 in one
- * sitting" without a word of instruction.
+ * Every row here is a link. The rail used to also carry the three steps that
+ * have no address of their own — the hot seat, the build screen and the report —
+ * as inert dimmed markers, on the theory that a numbered 01→05 sequence teaches
+ * the shape of the trip. In practice they read as broken menu items: `03 Hot
+ * seat` could never light at all, since the rail is not rendered inside the
+ * (room) group, and none of the three could be clicked. A nav column is where
+ * people click, so rows that never respond belong somewhere else or nowhere.
  *
- * Three of those five are not addressable. The hot seat and the build screen
- * only exist inside a session, and the report lives at /report/[sessionId] with
- * no static index. Rather than invent hrefs that 404, they render as inert
- * markers — dimmed, not clickable, present only to show the shape of the trip.
- * `05 Report` still lights up when you are actually on one.
- *
- * The hot seat itself is in the (room) group and deliberately renders no
- * navigation at all: mid-interview the only exits should be Pause and Finish
- * early, and a stray click on "Dashboard" must not be able to end a recording.
+ * The hot seat is in the (room) group and deliberately renders no navigation:
+ * mid-interview the only exits should be Pause and Finish early, and a stray
+ * click on "Dashboard" must not be able to end a recording.
  *
  * LAYOUT: the desktop rail is `fixed` and lives OUTSIDE `.app-root`, which
  * reserves space for it with padding. That is not incidental — `.app-root` is a
@@ -44,17 +39,7 @@ import { STEP_BUILDING, STEP_EVENT } from "./appStep";
 interface Item {
   n: string;
   label: string;
-  /** Absent for the steps that only exist inside a session. */
-  href?: string;
-  /** Route prefix that should light this item up even without an href. */
-  match?: string;
-  hint?: string;
-  /**
-   * Lit while <body data-step> says the build screen is up, instead of by route.
-   * `report` is the inverse: it has to go dark for that stretch, or the two light
-   * together at the one address they share.
-   */
-  step?: "building" | "report";
+  href: string;
 }
 
 const GROUPS: { heading: string; items: Item[] }[] = [
@@ -66,50 +51,23 @@ const GROUPS: { heading: string; items: Item[] }[] = [
     ],
   },
   {
-    heading: "In flight",
-    items: [
-      { n: "03", label: "Hot seat", hint: "Starts when you begin a session" },
-      { n: "04", label: "Building", step: "building", hint: "While your report is being written" },
-    ],
-  },
-  {
     heading: "Results",
-    items: [
-      {
-        n: "05",
-        label: "Report",
-        match: "/report",
-        step: "report",
-        hint: "Opens from a finished session",
-      },
-      { n: "★", label: "Saved questions", href: "/starred" },
-    ],
+    items: [{ n: "\u2605", label: "Saved questions", href: "/starred" }],
   },
 ];
 
-/* Every fill and every faint ink step in the rows below is a TOKEN rather than
-   `bg-paper-raised` or `text-ink-muted/45`, for one reason each.
-
-   The fill: on the sheet a selected or hovered row has to take ON ink, while a
-   static raised card still lifts off the page. One value cannot do both once
-   the ground flips, so `--rail-hover` is the half that reverses and
-   `bg-paper-raised` — the account tile, the panels on the pages this rail
-   leads to — is the half that does not.
+/* The fill below is a TOKEN rather than `bg-paper-raised`: on the sheet a
+   selected or hovered row has to take ON ink, while a static raised card still
+   lifts off the page. One value cannot do both once the ground flips, so
+   `--rail-hover` is the half that reverses and `bg-paper-raised` — the account
+   tile, the panels on the pages this rail leads to — is the half that does not.
 
    `--rail-hover` and not `--surface-hover`, which is the same idea for rows on a
    raised CARD: these sit on the SUNKEN rail, a surface already darker than the
    page, so the two want different values the moment neither ground is black.
    This one can also run darker than that one, because the rail pairs `hover:bg`
    with `hover:text-ink` at every call site below — nothing muted is ever painted
-   on it, which is exactly the constraint that holds `--surface-hover` back.
-
-   The alpha: a `/45` modifier fades toward whatever is behind it, which over
-   cream means fading toward the stock. That is backwards for a marker whose
-   whole job is to stay readable as the inert half of a pair, so the two faint
-   steps collapse to solid ink there. Both carry the dark values these classes
-   had, with one exception: the inert numeral was `/40` and now rides the `/45`
-   step. The pair is one marker in two parts, and five points of alpha was
-   never what told them apart. */
+   on it, which is exactly the constraint that holds `--surface-hover` back. */
 const ITEM =
   "grid grid-cols-[26px_minmax(0,1fr)] items-center gap-2 border-l-2 px-5 py-3 font-mono text-[0.73rem] tracking-[0.1em] uppercase transition-colors";
 const NUM = "text-[0.66rem] not-italic";
@@ -143,28 +101,6 @@ export function AppRail({ name, initials }: { name: string | null; initials: str
    */
   const isActive = (path: string) => pathname === path || pathname.startsWith(`${path}/`);
 
-  /**
-   * Whether the build screen is currently up. Starts false and is corrected on
-   * mount for the same reason the explain toggle is: the server cannot know, and
-   * rendering from the DOM would be a hydration mismatch.
-   */
-  const [building, setBuilding] = useState(false);
-  useEffect(() => {
-    const sync = () => setBuilding(document.body.dataset.step === STEP_BUILDING);
-    sync();
-    window.addEventListener(STEP_EVENT, sync);
-    return () => window.removeEventListener(STEP_EVENT, sync);
-  }, []);
-
-  const activeFor = (item: Item) => {
-    // The two steps that share /report/[sessionId] are decided by the marker, not
-    // the path — one is lit exactly when the other is not.
-    if (item.step === "building") return building;
-    const path = item.href ?? item.match;
-    if (!path) return false;
-    return isActive(path) && !(item.step === "report" && building);
-  };
-
   return (
     <nav
       aria-label="Sections"
@@ -193,28 +129,7 @@ export function AppRail({ name, initials }: { name: string | null; initials: str
               {group.heading}
             </div>
             {group.items.map((item) => {
-              const active = activeFor(item);
-              if (!item.href) {
-                return (
-                  <div
-                    key={item.label}
-                    title={item.hint}
-                    aria-current={active ? "step" : undefined}
-                    className={`${ITEM} cursor-default ${
-                      active
-                        ? "border-l-ember bg-(--rail-hover) text-ink"
-                        : "border-l-transparent text-(--color-ink-faintest)"
-                    }`}
-                  >
-                    <em
-                      className={`${NUM} ${active ? "text-ember" : "text-(--color-ink-faintest)"}`}
-                    >
-                      {item.n}
-                    </em>
-                    <span className="truncate">{item.label}</span>
-                  </div>
-                );
-              }
+              const active = isActive(item.href);
               return (
                 <Link
                   key={item.href}
@@ -326,14 +241,12 @@ export function AppHeader({ initials }: { initials: string }) {
         aria-label="Sections"
         className="flex gap-1 overflow-x-auto px-3 pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
-        {GROUPS.flatMap((g) => g.items)
-          .filter((i) => i.href)
-          .map((item) => {
-            const active = isActive(item.href!);
+        {GROUPS.flatMap((g) => g.items).map((item) => {
+            const active = isActive(item.href);
             return (
               <Link
                 key={item.href}
-                href={item.href!}
+                href={item.href}
                 aria-current={active ? "page" : undefined}
                 /* Square, and the active mark is a bottom edge rather than the
                    rail's left one — the row runs horizontally here, so the edge

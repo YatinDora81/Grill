@@ -8,7 +8,6 @@ import { apiGet, apiPost, ApiClientError } from "@/lib/apiClient";
 import type { ReportStatusResponse } from "@/app/api/report/[sessionId]/status/route";
 import { Button, Card, cx, ErrorNote, Spinner } from "@/components/ui";
 import { Explain, ExplainBanner } from "@/components/Explain";
-import { STEP_BUILDING, STEP_EVENT } from "../../appStep";
 import { DeleteInterviewButton } from "./DeleteInterviewButton";
 
 /** Gap between polls. Builds take ~30s, so this is ~12 cheap requests. */
@@ -129,22 +128,6 @@ export function FinishReport({ sessionId }: { sessionId: string }) {
   const startedAt = useRef(Date.now());
   const [now, setNow] = useState(() => Date.now());
   const failed = useRef(false);
-
-  /**
-   * Tell the rail which step is really on screen. The build screen and the
-   * finished report share one URL, so the pathname can't tell them apart and the
-   * rail lit `05 Report` while the user sat watching `04 Building` — see
-   * STEP_EVENT. The cleanup is what handles the handover: when the report lands
-   * this component unmounts, the marker clears, and 05 lights on its own.
-   */
-  useEffect(() => {
-    document.body.dataset.step = STEP_BUILDING;
-    window.dispatchEvent(new Event(STEP_EVENT));
-    return () => {
-      delete document.body.dataset.step;
-      window.dispatchEvent(new Event(STEP_EVENT));
-    };
-  }, []);
 
   const kick = useCallback(async () => {
     try {
