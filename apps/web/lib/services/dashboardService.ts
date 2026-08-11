@@ -44,7 +44,7 @@ function fillerCount(raw: unknown): number | null {
 function wordsPerMinute(raw: unknown): number | null {
   if (!raw || typeof raw !== "object") return null;
   const n = (raw as Partial<DeliveryMetrics>).wpm;
-  return typeof n === "number" && Number.isFinite(n) ? n : null;
+  return typeof n === "number" && Number.isFinite(n) && n > 0 ? n : null;
 }
 
 /** `num_questions` off a session's stored config. Null, never a guess, when the
