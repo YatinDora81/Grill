@@ -21,8 +21,11 @@ export async function GET() {
 export async function PATCH(req: Request) {
   try {
     const userId = await requireUserId();
-    const { name } = updateProfileSchema.parse(await req.json());
-    const user = await repo.updateUserName(userId, name);
+    const { name, email_on_report } = updateProfileSchema.parse(await req.json());
+    const user = await repo.updateUserProfile(userId, {
+      name,
+      emailOnReport: email_on_report,
+    });
     return json(toUserDTO(user) satisfies User);
   } catch (err) {
     return errorResponse(err);

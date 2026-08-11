@@ -6,6 +6,7 @@ import toast from "react-hot-toast";
 import type { User } from "@repo/types";
 import { apiPost, ApiClientError } from "@/lib/apiClient";
 import { GrillToaster } from "@/components/toast";
+import { Explain } from "@/components/Explain";
 
 async function apiPatch<T>(path: string, payload: unknown): Promise<T> {
   const res = await fetch(path, {
@@ -24,12 +25,15 @@ async function apiPatch<T>(path: string, payload: unknown): Promise<T> {
   return body as T;
 }
 
-export function ProfileForm({ user }: { user: User }) {
+export function ProfileForm({ user, emailOnReport }: { user: User; emailOnReport: boolean }) {
   const router = useRouter();
 
   const [name, setName] = useState(user.name ?? "");
   const [savingName, setSavingName] = useState(false);
   const [nameError, setNameError] = useState("");
+
+  const [mailOn, setMailOn] = useState(emailOnReport);
+  const [savingMail, setSavingMail] = useState(false);
 
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
@@ -66,6 +70,21 @@ export function ProfileForm({ user }: { user: User }) {
       setNameError(err instanceof ApiClientError ? err.message : "Couldn't save that.");
     } finally {
       setSavingName(false);
+    }
+  }
+
+  async function toggleMail() {
+    const wanted = !mailOn;
+    setMailOn(wanted);
+    setSavingMail(true);
+    try {
+      await apiPatch<User>("/api/profile", { email_on_report: wanted });
+      toast.success(wanted ? "We'll email you" : "Emails off");
+    } catch (err) {
+      setMailOn(!wanted);
+      toast.error(err instanceof ApiClientError ? err.message : "Couldn't save that.");
+    } finally {
+      setSavingMail(false);
     }
   }
 
@@ -153,6 +172,30 @@ export function ProfileForm({ user }: { user: User }) {
             </button>
           </div>
         </form>
+
+        <div className="switch-row">
+          <div>
+            <span className="switch-l">Email me when a verdict is ready</span>
+            <p className="switch-d">
+              {mailOn
+                ? "One email per report — the score, and the one thing to fix first."
+                : "Reports still build; you'll just find them yourself."}
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={mailOn}
+            aria-label="Email me when a verdict is ready"
+            disabled={savingMail}
+            onClick={toggleMail}
+            className="switch"
+          />
+        </div>
+        <Explain>
+          Sent once, when the report finishes building — <b>not</b> when the interview ends. The
+          report is built by a queue behind you, so the email is what tells you it landed.
+        </Explain>
       </section>
 
       <section className="card" aria-label="Your password">

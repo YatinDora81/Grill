@@ -152,7 +152,7 @@ export default async function ProfilePage() {
           </div>
         </section>
 
-        <ProfileForm user={toUserDTO(user)} />
+        <ProfileForm user={toUserDTO(user)} emailOnReport={user.emailOnReport} />
 
         <p className="fineprint rv" data-io>
           Every session, recording and report is scoped to <b>this account</b> — nobody else can

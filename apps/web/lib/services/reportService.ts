@@ -1,13 +1,18 @@
 import "server-only";
+import { after } from "next/server";
 import type { Session, Turn } from "@repo/db";
 import type { AcousticMetrics, AnswerScores, DeliveryMetrics, TranscriptWord } from "@repo/types";
 import { generateJson } from "@/lib/clients/llmJson";
 import { ANSWER_CAP_MODEL } from "@/lib/interviewMeta";
 import { REPORT_SYSTEM, reportPrompt, type ReportTurn } from "@/lib/prompts/report";
-import { reportResponseSchema } from "@/lib/schemas";
+import { reportResponseSchema, type ReportResponse } from "@/lib/schemas";
 import * as repo from "@/lib/db/repo";
 import { getAudio } from "@/lib/storage/objectStore";
 import { config } from "@/lib/env";
+import { BAND_LABEL, scoreBand } from "@/components/ui";
+import { PATTERN, isAnswerScores, worstDimension } from "@/lib/rubricPattern";
+import { mailConfigured, sendMail } from "@/lib/mail/mailer";
+import { renderReportReadyEmail } from "@/lib/mail/templates/reportReady";
 import {
   textDeliveryMetrics,
   analyzeAcoustics,
@@ -73,6 +78,50 @@ export async function computeDelivery(turns: Turn[]): Promise<DeliveryMetrics> {
   return combineDelivery(text, aggregateAcoustics(acoustics));
 }
 
+function honestLine(turns: Turn[], report: ReportResponse): string {
+  const rubric = turns.flatMap((t) => {
+    const s = scores(t);
+    return isAnswerScores(s) ? [s] : [];
+  });
+
+  const worst = worstDimension(rubric);
+  if (worst) return PATTERN[worst];
+
+  const weakness = report.weaknesses[0]?.point?.trim();
+  return weakness || report.verdict;
+}
+
+function queueReportReadyMail(session: Session, score: number, headline: string): void {
+  if (!mailConfigured()) return;
+
+  const send = async () => {
+    try {
+      const user = await repo.getUserById(session.userId);
+      if (!user?.emailOnReport) return;
+      await sendMail({
+        to: user.email,
+        ...renderReportReadyEmail({
+          sessionName: session.name,
+          score,
+          band: BAND_LABEL[scoreBand(score)],
+          headline,
+          reportUrl: `${config.site.url}/report/${session.id}`,
+          rematchUrl: `${config.site.url}/new?mode=weak_spots`,
+        }),
+      });
+    } catch (err) {
+      console.error(`[reportService] report-ready mail for ${session.id} failed:`, err);
+    }
+  };
+
+  try {
+    after(send);
+  } catch (err) {
+    console.error(`[reportService] could not defer report-ready mail for ${session.id}:`, err);
+    void send();
+  }
+}
+
 /**
  * Build and persist the final report (Grill §end flow steps 1-5).
  * Caller owns the status guard + generating_report/completed/error transitions.
@@ -96,7 +145,7 @@ export async function buildAndSaveReport(session: Session) {
     temperature: 0.4,
   });
 
-  return repo.createReport({
+  const report = await repo.createReport({
     sessionId: session.id,
     overallScore: Math.round(value.overall_score),
     verdict: value.verdict,
@@ -110,4 +159,8 @@ export async function buildAndSaveReport(session: Session) {
     questionFeedback: value.question_feedback,
     raw: { report: value, raw_text: raw },
   });
+
+  queueReportReadyMail(session, report.overallScore, honestLine(turns, value));
+
+  return report;
 }
