@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import type { AnswerScores, QuestionFeedback, QuestionType } from "@repo/types";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { AnswerScores, QuestionFeedback, QuestionType, TranscriptWord } from "@repo/types";
 import { scoreTone } from "@/components/ui";
 import { Explain } from "@/components/Explain";
-import { PlayAnswer } from "./PlayAnswer";
+import { KaraokeTranscript } from "./KaraokeTranscript";
+import { PlayAnswer, type PlayAnswerHandle } from "./PlayAnswer";
 import { StarQuestion } from "./StarQuestion";
 import { VideoPlayer } from "./VideoPlayer";
 
@@ -14,6 +15,7 @@ export interface ReplayTurn {
   question: string;
   question_type: QuestionType;
   transcript: string | null;
+  transcript_words: TranscriptWord[] | null;
   has_audio: boolean;
   /** The session recording this answer is in, if there was a camera. */
   video_id: string | null;
@@ -58,11 +60,13 @@ export function Replay({
   sessionId,
   turns,
   defaultOpenIndex,
+  readOnly = false,
 }: {
   sessionId: string;
   turns: ReplayTurn[];
   /** Usually the report's best answer. Null when there isn't one. */
   defaultOpenIndex: number | null;
+  readOnly?: boolean;
 }) {
   const [open, setOpen] = useState<Set<number>>(
     () => new Set(defaultOpenIndex !== null ? [defaultOpenIndex] : []),
@@ -127,83 +131,125 @@ export function Replay({
     // as the rows belonging to nothing.
     <section>
       <div style={{ marginTop: 8 }}>
-        {turns.map((t) => {
-          const isOpen = open.has(t.turn_index);
-          const n = t.turn_index + 1;
-          return (
-            <div className="turn" key={t.turn_index} id={`turn-${t.turn_index}`} data-open={isOpen}>
-              <button
-                type="button"
-                className="turn-head"
-                onClick={() => toggle(t.turn_index)}
-                aria-expanded={isOpen}
-              >
-                <span className="turn-n" aria-hidden="true">
-                  {String(n).padStart(2, "0")}
-                </span>
-                <span className="turn-q">{t.question}</span>
-                <span className={"turn-type" + (t.question_type === "followup" ? " followup" : "")}>
-                  {TYPE_LABEL[t.question_type]}
-                </span>
-                {/* A square that says +/− rather than a rotating chevron: the
-                    row is one of a stack of squares, and the glyph states open
-                    or shut instead of implying a direction to travel in. */}
-                <span
-                  className={
-                    "grid size-6 flex-none place-items-center border text-[0.8rem] leading-none transition-colors " +
-                    (isOpen ? "border-ember/40 text-ember" : "border-line text-ink-muted")
-                  }
-                  aria-hidden="true"
-                >
-                  {isOpen ? "–" : "+"}
-                </span>
-              </button>
-
-              {isOpen && (
-                <div className="turn-body">
-                  <div>
-                    <p className="tr-label">You said</p>
-                    <p className="transcript">
-                      {t.transcript ? `“${t.transcript}”` : "No answer recorded."}
-                    </p>
-                  </div>
-
-                  {t.scores ? <Rubric scores={t.scores} /> : null}
-
-                  <Improvements items={t.feedback?.improvements ?? []} />
-                  <PossibleAnswers items={t.feedback?.possible_answers ?? []} />
-
-                  {/* Only where a recording actually covers this answer. A denied
-                      camera, or a session from before video existed, simply has
-                      no player rather than a broken one. */}
-                  {t.video_id && t.video_offset_ms !== null ? (
-                    <VideoPlayer
-                      videoId={t.video_id}
-                      offsetMs={t.video_offset_ms}
-                      turnNumber={n}
-                      expiresInDays={t.video_expires_in_days}
-                    />
-                  ) : null}
-
-                  <div className="turn-actions">
-                    {t.has_audio ? (
-                      <PlayAnswer sessionId={sessionId} turnIndex={t.turn_index} />
-                    ) : (
-                      <span className="mono-note">typed answer</span>
-                    )}
-                    <StarQuestion
-                      turnId={t.turn_id}
-                      questionHash={t.question_hash}
-                      initial={t.starred}
-                    />
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-        })}
+        {turns.map((t) => (
+          <Turn
+            key={t.turn_index}
+            turn={t}
+            sessionId={sessionId}
+            isOpen={open.has(t.turn_index)}
+            onToggle={() => toggle(t.turn_index)}
+            readOnly={readOnly}
+          />
+        ))}
       </div>
     </section>
+  );
+}
+
+function Turn({
+  turn: t,
+  sessionId,
+  isOpen,
+  onToggle,
+  readOnly,
+}: {
+  turn: ReplayTurn;
+  sessionId: string;
+  isOpen: boolean;
+  onToggle: () => void;
+  readOnly: boolean;
+}) {
+  const n = t.turn_index + 1;
+
+  const [seconds, setSeconds] = useState<number | null>(null);
+  const playerRef = useRef<PlayAnswerHandle | null>(null);
+  const onTime = useCallback((s: number | null) => setSeconds(s), []);
+  const onSeek = useCallback((s: number) => playerRef.current?.seekTo(s), []);
+
+  return (
+    <div className="turn" id={`turn-${t.turn_index}`} data-open={isOpen}>
+      <button type="button" className="turn-head" onClick={onToggle} aria-expanded={isOpen}>
+        <span className="turn-n" aria-hidden="true">
+          {String(n).padStart(2, "0")}
+        </span>
+        <span className="turn-q">{t.question}</span>
+        <span className={"turn-type" + (t.question_type === "followup" ? " followup" : "")}>
+          {TYPE_LABEL[t.question_type]}
+        </span>
+        {/* A square that says +/− rather than a rotating chevron: the
+            row is one of a stack of squares, and the glyph states open
+            or shut instead of implying a direction to travel in. */}
+        <span
+          className={
+            "grid size-6 flex-none place-items-center border text-[0.8rem] leading-none transition-colors " +
+            (isOpen ? "border-ember/40 text-ember" : "border-line text-ink-muted")
+          }
+          aria-hidden="true"
+        >
+          {isOpen ? "–" : "+"}
+        </span>
+      </button>
+
+      {isOpen && (
+        <div className="turn-body">
+          <div>
+            <p className="tr-label">You said</p>
+            {t.transcript_words ? (
+              <div className="mt-1.5 border-l-2 border-(--track-strong) pl-3">
+                <KaraokeTranscript
+                  words={t.transcript_words}
+                  currentTime={seconds}
+                  onSeek={t.has_audio ? onSeek : undefined}
+                />
+              </div>
+            ) : (
+              <p className="transcript">
+                {t.transcript ? `“${t.transcript}”` : "No answer recorded."}
+              </p>
+            )}
+          </div>
+
+          {t.scores ? <Rubric scores={t.scores} /> : null}
+
+          <Improvements items={t.feedback?.improvements ?? []} />
+          <PossibleAnswers items={t.feedback?.possible_answers ?? []} />
+
+          {/* Only where a recording actually covers this answer. A denied
+              camera, or a session from before video existed, simply has
+              no player rather than a broken one. */}
+          {t.video_id && t.video_offset_ms !== null ? (
+            <VideoPlayer
+              videoId={t.video_id}
+              offsetMs={t.video_offset_ms}
+              turnNumber={n}
+              expiresInDays={t.video_expires_in_days}
+            />
+          ) : null}
+
+          {t.has_audio || !readOnly ? (
+            <div className="turn-actions">
+              {t.has_audio ? (
+                <PlayAnswer
+                  sessionId={sessionId}
+                  turnIndex={t.turn_index}
+                  onTime={t.transcript_words ? onTime : undefined}
+                  seekRef={playerRef}
+                />
+              ) : (
+                <span className="mono-note">typed answer</span>
+              )}
+              {readOnly ? null : (
+                <StarQuestion
+                  turnId={t.turn_id}
+                  questionHash={t.question_hash}
+                  initial={t.starred}
+                />
+              )}
+            </div>
+          ) : null}
+        </div>
+      )}
+    </div>
   );
 }
 

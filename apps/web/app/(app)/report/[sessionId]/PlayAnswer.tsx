@@ -1,8 +1,19 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
 import type { PresignResponse } from "@repo/types";
 import { apiGet } from "@/lib/apiClient";
+
+export interface PlayAnswerHandle {
+  seekTo(seconds: number): void;
+}
 
 /**
  * Plays back a turn's recording. The URL is presigned on demand and short-lived,
@@ -13,14 +24,48 @@ export function PlayAnswer({
   sessionId,
   turnIndex,
   label = "play",
+  onTime,
+  seekRef,
 }: {
   sessionId: string;
   turnIndex: number;
   /** "play" in the replay; "play answer" where it stands on its own. */
   label?: string;
+  onTime?: (seconds: number | null) => void;
+  seekRef?: RefObject<PlayAnswerHandle | null>;
 }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [state, setState] = useState<"idle" | "loading" | "playing" | "error">("idle");
+
+  const frameRef = useRef<number | null>(null);
+  const onTimeRef = useRef(onTime);
+  const pendingSeekRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    onTimeRef.current = onTime;
+  }, [onTime]);
+
+  const stopClock = useCallback(() => {
+    if (frameRef.current !== null) {
+      cancelAnimationFrame(frameRef.current);
+      frameRef.current = null;
+    }
+    onTimeRef.current?.(null);
+  }, []);
+
+  const startClock = useCallback(() => {
+    if (!onTimeRef.current || frameRef.current !== null) return;
+    const tick = () => {
+      const el = audioRef.current;
+      if (!el) {
+        frameRef.current = null;
+        return;
+      }
+      onTimeRef.current?.(el.currentTime);
+      frameRef.current = requestAnimationFrame(tick);
+    };
+    frameRef.current = requestAnimationFrame(tick);
+  }, []);
 
   useEffect(() => {
     // Don't leave audio playing after the component goes away — collapsing a
@@ -28,13 +73,40 @@ export function PlayAnswer({
     return () => {
       audioRef.current?.pause();
       audioRef.current = null;
+      stopClock();
     };
-  }, []);
+  }, [stopClock]);
+
+  async function play(el: HTMLAudioElement) {
+    try {
+      await el.play();
+      setState("playing");
+      startClock();
+    } catch {
+      setState("error");
+      stopClock();
+    }
+  }
+
+  useImperativeHandle(seekRef, () => ({
+    seekTo(seconds: number) {
+      const el = audioRef.current;
+      if (!el) {
+        pendingSeekRef.current = seconds;
+        void toggle();
+        return;
+      }
+      el.currentTime = seconds;
+      onTimeRef.current?.(seconds);
+      if (el.paused) void play(el);
+    },
+  }));
 
   async function toggle() {
     if (state === "playing") {
       audioRef.current?.pause();
       setState("idle");
+      stopClock();
       return;
     }
     setState("loading");
@@ -44,12 +116,24 @@ export function PlayAnswer({
       );
       const el = new Audio(url);
       audioRef.current = el;
-      el.onended = () => setState("idle");
-      el.onerror = () => setState("error");
+      el.onended = () => {
+        setState("idle");
+        stopClock();
+      };
+      el.onerror = () => {
+        setState("error");
+        stopClock();
+      };
       await el.play();
+      const seek = pendingSeekRef.current;
+      pendingSeekRef.current = null;
+      if (seek !== null) el.currentTime = seek;
       setState("playing");
+      startClock();
     } catch {
+      pendingSeekRef.current = null;
       setState("error");
+      stopClock();
     }
   }
 

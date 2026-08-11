@@ -7,25 +7,7 @@ import "server-only";
 import type { AcousticMetrics, DeliveryMetrics, TranscriptWord } from "@repo/types";
 import { config } from "@/lib/env";
 import { fetchWithTimeout } from "@/lib/clients/http";
-
-/**
- * Only words that are ~always fillers. Words like "actually", "basically",
- * "literally", "right", "sort of" and "kind of" were deliberately removed: they
- * are ordinary vocabulary ("that's right", "it literally doubled", "sort of
- * request") and counting them inflated filler_count well past reality. Since the
- * count is handed to the report LLM as a measured fact, over-counting is not a
- * harmless rounding error — it produces a dishonest delivery verdict.
- */
-const FILLER_WORDS = ["um", "uh", "uhh", "umm", "erm", "hmm", "mhm", "you know", "i mean"];
-
-/**
- * "like" is the most common real filler in speech, so we can't just drop it —
- * but most occurrences are legitimate. Count it only where a filler is plausible
- * and a literal reading isn't: skip comparative/verb uses ("I'd like to", "looks
- * like a", "like this"). Errs toward under-counting, which is the safer bias.
- */
-const LIKE_LITERAL_BEFORE = /\b(would|'d|do|does|did|really|don't|didn't|feel|feels|felt|look|looks|looked|sound|sounds|sounded|seem|seems|seemed|smell|taste|act|acts|much|just)$/;
-const LIKE_LITERAL_AFTER = /^\s+(to|this|that|these|those|it|them|him|her|us|me|you|a|an|the|my|your|our|their|his|its|what|how|when|where|why|who|which)\b/;
+import { FILLER_WORDS, LIKE_LITERAL_AFTER, LIKE_LITERAL_BEFORE } from "@/lib/fillers";
 
 export function countFillers(transcript: string): number {
   const text = ` ${transcript.toLowerCase()} `;

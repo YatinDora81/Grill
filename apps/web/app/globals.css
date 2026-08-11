@@ -7103,3 +7103,17 @@ a.vs-label:hover {
     gap: 0.3rem 0.9rem;
   }
 }
+
+.karaoke-now {
+  animation: g-karaoke-pulse 1.2s ease-in-out infinite;
+}
+@keyframes g-karaoke-pulse {
+  50% {
+    text-decoration-color: var(--color-ember-hot);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .karaoke-now {
+    animation: none;
+  }
+}

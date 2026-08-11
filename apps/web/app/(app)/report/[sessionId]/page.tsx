@@ -8,6 +8,7 @@ import type {
   Difficulty,
   InterviewConfig,
   Report as ReportDTO,
+  TranscriptWord,
 } from "@repo/types";
 import { getUserId } from "@/lib/auth";
 import * as repo from "@/lib/db/repo";
@@ -526,6 +527,7 @@ export default async function ReportPage({
                 question: t.question,
                 question_type: t.questionType,
                 transcript: t.transcript,
+                transcript_words: parseTranscriptWords(t.transcriptWords),
                 has_audio: Boolean(t.audioKey),
                 video_id: videoId,
                 video_offset_ms: t.videoOffsetMs,
@@ -569,6 +571,19 @@ function verdictTier(verdict: string): string {
   if (verdict.length >= VERDICT_LONG_FROM) return "verdict-long";
   if (verdict.length >= VERDICT_MID_FROM) return "verdict-mid";
   return "";
+}
+
+function parseTranscriptWords(value: unknown): TranscriptWord[] | null {
+  if (!Array.isArray(value) || value.length === 0) return null;
+  const words: TranscriptWord[] = [];
+  for (const item of value) {
+    if (typeof item !== "object" || item === null) return null;
+    const { word, start, end } = item as Record<string, unknown>;
+    if (typeof word !== "string") return null;
+    if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+    words.push({ word, start: start as number, end: end as number });
+  }
+  return words;
 }
 
 function SectionHead({ title, note }: { title: string; note: string }) {
