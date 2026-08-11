@@ -40,6 +40,7 @@ export function PlayAnswer({
   const frameRef = useRef<number | null>(null);
   const onTimeRef = useRef(onTime);
   const pendingSeekRef = useRef<number | null>(null);
+  const loadingRef = useRef(false);
 
   useEffect(() => {
     onTimeRef.current = onTime;
@@ -93,7 +94,7 @@ export function PlayAnswer({
       const el = audioRef.current;
       if (!el) {
         pendingSeekRef.current = seconds;
-        void toggle();
+        if (!loadingRef.current) void toggle();
         return;
       }
       el.currentTime = seconds;
@@ -103,12 +104,14 @@ export function PlayAnswer({
   }));
 
   async function toggle() {
+    if (loadingRef.current) return;
     if (state === "playing") {
       audioRef.current?.pause();
       setState("idle");
       stopClock();
       return;
     }
+    loadingRef.current = true;
     setState("loading");
     try {
       const { url } = await apiGet<PresignResponse>(
@@ -134,6 +137,8 @@ export function PlayAnswer({
       pendingSeekRef.current = null;
       setState("error");
       stopClock();
+    } finally {
+      loadingRef.current = false;
     }
   }
 
