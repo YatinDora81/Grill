@@ -21,6 +21,7 @@ model User {
 
   sessions            Session[]
   starred             StarredQuestion[]
+  questionSets        QuestionSet[]
   passwordResetTokens PasswordResetToken[]
 
   @@map("users")
@@ -87,6 +88,17 @@ enum QuestionType {
   @@map("question_type")
 }
 
+/// What a question-bank set draws from. Mirrors the interview sources on
+/// purpose (résumé / topic / cultural) but is its own enum: the bank is a
+/// separate feature and must be free to grow sources the interview never has.
+enum QuestionSetSource {
+  resume
+  topic
+  cultural
+
+  @@map("question_set_source")
+}
+
 model Session {
   id          String        @id @default(uuid()) @db.Uuid
   userId      String        @map("user_id") @db.Uuid
@@ -150,6 +162,15 @@ model Session {
   /// questions askable again.
   deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
 
+  /// Set when this interview was started FROM a question-bank set: its turns
+  /// were copied verbatim from that set up front, and — exactly like a retry —
+  /// the answer loop serves them in order and never generates. There is no
+  /// separate "type" column: a session is set-backed precisely when this is set.
+  /// SetNull, not Cascade: deleting a set must not delete the interviews (and
+  /// their reports) that were run on it — those are the user's own work.
+  questionSetId String?      @map("question_set_id") @db.Uuid
+  questionSet   QuestionSet? @relation(fields: [questionSetId], references: [id], onDelete: SetNull)
+
   user   User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   turns  Turn[]
   report Report?
@@ -162,7 +183,71 @@ model Session {
   /// The audio sweep's only query: old enough to expire, not yet purged.
   @@index([audioPurgedAt, createdAt])
   @@index([userId, deletedAt])
+  /// "Practised n×" on the bank pages: sessions per set, cheap.
+  @@index([questionSetId])
   @@map("sessions")
+}
+
+/// A generated batch of questions with no interview attached — the question
+/// bank. Deliberately separate from Session/Turn: reading a set is not an
+/// interview, produces no transcript, no scores and no report. The only bridge
+/// between the two worlds is Session.questionSetId, written when the user
+/// chooses to RUN an interview on a set — at which point the set's items are
+/// copied into brand-new Turn rows (same mechanism as a retry) and the set
+/// itself is never mutated. A set can seed any number of interviews, at any
+/// time, without the interviews touching it back.
+model QuestionSet {
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @map("user_id") @db.Uuid
+
+  /// The user's own name for the set — how they find it again.
+  name   String
+  source QuestionSetSource
+  /// What the generation read: the résumé text for `resume`, the topic line
+  /// for `topic`, and "" for `cultural` (which brings no material). Kept so a
+  /// set's provenance is inspectable and so an interview started from it can
+  /// hand the report the same grounding the questions came from.
+  sourceText String  @map("source_text")
+  role       String?
+  /// "easy" | "medium" | "hard" | "extreme" — the same union the interview
+  /// config stores in its JSON. A string column rather than a new enum so the
+  /// two can never disagree about what a difficulty is called.
+  difficulty String
+  /// How many questions were requested. The items are the truth of how many
+  /// exist; this is what the user asked for, kept for display.
+  count Int
+
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  /// Soft delete, same contract as Session: user-facing reads treat the set as
+  /// gone, interviews already run from it keep their questionSetId until a hard
+  /// delete SetNulls it.
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  user     User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items    QuestionSetItem[]
+  sessions Session[]
+
+  @@index([userId, deletedAt])
+  @@map("question_sets")
+}
+
+/// One question in a set, in reading order. Item rows are written once at
+/// generation and never edited — an interview run on the set copies them into
+/// its own turns rather than referencing them, so the set stays a stable
+/// document however many times it is drilled.
+model QuestionSetItem {
+  id    String @id @default(uuid()) @db.Uuid
+  setId String @map("set_id") @db.Uuid
+
+  itemIndex    Int          @map("item_index")
+  question     String
+  questionType QuestionType @map("question_type")
+
+  set QuestionSet @relation(fields: [setId], references: [id], onDelete: Cascade)
+
+  @@unique([setId, itemIndex])
+  @@index([setId])
+  @@map("question_set_items")
 }
 
 /// A question the user liked, kept as a collection.

@@ -395,3 +395,68 @@ export interface ResumeGapResponse {
   covered: { requirement: string; evidence: string }[];
   gaps: { requirement: string; why_it_matters: string; how_to_close: string }[];
 }
+
+// ── Question bank ─────────────────────────────────────────────────
+// A generated batch of questions with NO interview attached. Reading a set
+// never records anything; the one bridge to the interview world is
+// StartFromSet, which copies the set's items into a brand-new session's turns
+// (the retry mechanism) — the set itself is never mutated by being drilled.
+
+/**
+ * What a set draws from. Mirrors the interview sources on purpose — a set is
+ * meant to feel like "the questions an interview WOULD ask", minus the
+ * interview — but it is its own union so the two features can drift apart.
+ */
+export type QuestionSetSource = "resume" | "topic" | "cultural";
+
+export interface GenerateQuestionSetRequest {
+  /** Required — how the set is found again among fifty others. */
+  name: string;
+  source: QuestionSetSource;
+  /**
+   * The material: résumé text for `resume`, the topic line for `topic`.
+   * Ignored (and stored as "") for `cultural`, which brings no material.
+   */
+  source_text?: string;
+  role?: string;
+  difficulty: Difficulty;
+  /** Bounded by `QUESTION_SET_BOUNDS` in apps/web/lib/interviewMeta.ts. */
+  count: number;
+}
+
+export interface QuestionSetItemDTO {
+  item_index: number;
+  question: string;
+  question_type: QuestionType;
+}
+
+export interface QuestionSetSummary {
+  id: string;
+  name: string;
+  source: QuestionSetSource;
+  role: string | null;
+  difficulty: Difficulty;
+  /** How many items the set actually holds. */
+  count: number;
+  created_at: string;
+  /** Interviews run on this set so far (soft-deleted ones excluded). */
+  times_practised: number;
+}
+
+export interface QuestionSetDetail extends QuestionSetSummary {
+  items: QuestionSetItemDTO[];
+}
+
+export interface QuestionSetListResponse {
+  sets: QuestionSetSummary[];
+}
+
+/** POST /api/questions — the generated set, in full. */
+export interface GenerateQuestionSetResponse {
+  set: QuestionSetDetail;
+}
+
+export interface DeleteQuestionSetResponse {
+  set_id: string;
+  deleted: true;
+}
