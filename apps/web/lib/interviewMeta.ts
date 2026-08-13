@@ -4,6 +4,7 @@ import type {
   InterviewConfig,
   InterviewSource,
   Persona,
+  QuestionSetSource,
 } from "@repo/types";
 
 /**
@@ -24,12 +25,33 @@ import type {
  */
 export const QUESTION_BOUNDS = { min: 3, max: 100 } as const;
 
+/**
+ * Bounds for a question-bank set — the batch generator, not the interview.
+ *
+ * The floor is 1 because a set is a document, not a session: a single question
+ * is a legitimate thing to generate and read. The ceiling is what one request
+ * can generate reliably (the batch runs in chunks; see questionBankService) and
+ * it deliberately stays inside the range `perAnswerCapSeconds` accepts, so that
+ * EVERY set can later be run as an interview — a set the report could never
+ * score would be a set with a dead "practise this" button.
+ */
+export const QUESTION_SET_BOUNDS = { min: 1, max: 30 } as const;
+
 export function drillTurnBudget(starredCount: number): number {
   return Math.min(starredCount * 2, QUESTION_BOUNDS.max);
 }
 
 /** The four difficulty modes the form offers, in pitch order. */
 export const DIFFICULTIES: readonly Difficulty[] = ["easy", "medium", "hard", "extreme"] as const;
+
+/**
+ * Reads a difficulty off a stored string column, falling back rather than
+ * throwing — the question bank stores difficulty as text (see the schema note
+ * on QuestionSet), and a row written by a future deploy must not 500 a page.
+ */
+export function coerceDifficulty(d: string): Difficulty {
+  return (DIFFICULTIES as readonly string[]).includes(d) ? (d as Difficulty) : "medium";
+}
 
 /**
  * Per-answer time cap, derived from question count.
@@ -268,5 +290,39 @@ export function retryName(parentName: string | null): string {
   const suffix = next === 1 ? " (retry)" : ` (retry ${next})`;
   // Trim the base rather than the suffix: "Backend screen (re" tells you
   // nothing, and which retry this is, is the whole point of the name.
+  return base.slice(0, NAME_MAX - suffix.length).trimEnd() + suffix;
+}
+
+/** How each question-set source reads in the bank's picker and lists. */
+export const SET_SOURCE_META: Record<
+  QuestionSetSource,
+  { label: string; blurb: string }
+> = {
+  resume: {
+    label: "Résumé",
+    blurb: "Grounded in your own history — the questions your CV invites.",
+  },
+  topic: {
+    label: "Topic",
+    blurb: "A pure drill on a subject you name. No résumé involved.",
+  },
+  cultural: {
+    label: "Cultural",
+    blurb: "Working style, conflict, feedback, values. No material needed.",
+  },
+};
+
+/**
+ * Names the interview a question set spawns.
+ *
+ * Like `retryName`, this is derived rather than asked for — running a set is
+ * one click on the set page, and a form demanding a name would put a gate in
+ * front of a drill the user has already decided to take. `takeNumber` counts
+ * the interviews already run on the set, so the second run reads
+ * "… — take 2" and the dashboard can tell them apart.
+ */
+export function setInterviewName(setName: string | null, takeNumber: number): string {
+  const base = setName?.trim() || "Question set";
+  const suffix = takeNumber <= 1 ? " — interview" : ` — take ${takeNumber}`;
   return base.slice(0, NAME_MAX - suffix.length).trimEnd() + suffix;
 }

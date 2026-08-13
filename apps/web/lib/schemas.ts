@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { Difficulty, InterviewSource } from "@repo/types";
-import { QUESTION_BOUNDS } from "./interviewMeta";
+import { QUESTION_BOUNDS, QUESTION_SET_BOUNDS } from "./interviewMeta";
 import { config } from "./env";
 
 // ── Auth ──────────────────────────────────────────────────────────
@@ -287,6 +287,61 @@ export const starSchema = z.object({ turn_id: z.string().uuid() });
 /** sha256, lowercase hex — the shape repo.questionHash produces. */
 export const unstarSchema = z.object({ question_hash: z.string().regex(/^[a-f0-9]{64}$/) });
 
+// ── Question bank ─────────────────────────────────────────────────
+
+export const questionSetSourceSchema = z.enum(["resume", "topic", "cultural"]);
+
+/** A topic is a line, not a document — same ceiling the interview topic has. */
+const SET_TOPIC_MAX_CHARS = 2_000;
+
+/**
+ * POST /api/questions. The material requirement is conditional on the source —
+ * enforced here rather than in the form so the API can't be handed a résumé
+ * set with no résumé — and `cultural` deliberately requires nothing.
+ */
+export const createQuestionSetSchema = z
+  .object({
+    // No default, same reasoning as the interview name: a set the user can't
+    // find again is a set that may as well not exist.
+    name: z.string().trim().min(1, "Give this set a name.").max(80),
+    source: questionSetSourceSchema,
+    source_text: z.string().max(20_000).default(""),
+    role: z.string().trim().max(200).optional(),
+    difficulty: difficultySchema,
+    count: z.coerce
+      .number()
+      .int()
+      .min(QUESTION_SET_BOUNDS.min)
+      .max(QUESTION_SET_BOUNDS.max),
+  })
+  .superRefine((v, ctx) => {
+    if (v.source === "resume" && !v.source_text.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["source_text"],
+        message: "A résumé is required for a résumé set.",
+      });
+    }
+    if (v.source === "topic") {
+      const topic = v.source_text.trim();
+      if (!topic) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["source_text"],
+          message: "Name the topic to generate questions on.",
+        });
+      } else if (topic.length > SET_TOPIC_MAX_CHARS) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["source_text"],
+          message: `A topic is a subject line, not a document — keep it under ${SET_TOPIC_MAX_CHARS} characters.`,
+        });
+      }
+    }
+  });
+
+export const setIdParamsSchema = z.object({ setId: z.string().uuid() });
+
 // ── Résumé vs JD gap tool ─────────────────────────────────────────
 
 export const GAP_JD_MAX_CHARS = 8_000;
@@ -363,6 +418,39 @@ export const questionResponseSchema = z.object({
     .enum(["technical", "cultural", "followup", "behavioral"])
     .transform((v) => (v === "behavioral" ? "cultural" : v)),
 });
+
+/**
+ * One item of a question-bank batch. Wider on the way in than the bank ever
+ * writes: `behavioral` folds into `cultural` for the usual reason, and
+ * `followup` folds into `technical` because a bank question stands alone —
+ * there is no answer for it to follow up on, so the label would be a lie the
+ * moment the set is read outside the conversation that never happened.
+ */
+const batchQuestionSchema = z.object({
+  question: z.string().trim().min(1),
+  question_type: z
+    .enum(["technical", "cultural", "followup", "behavioral"])
+    .transform((v) => (v === "behavioral" ? "cultural" : v === "followup" ? "technical" : v)),
+});
+
+/**
+ * A generation chunk. Malformed items are dropped rather than failing the
+ * batch — the service tops the set up to the requested count anyway, so one
+ * bad element costs one slot of one chunk, not a whole regeneration.
+ */
+export const questionBatchResponseSchema = z.object({
+  questions: z
+    .array(z.unknown())
+    .min(1)
+    .transform((raw) =>
+      raw.flatMap((v) => {
+        const parsed = batchQuestionSchema.safeParse(v);
+        return parsed.success ? [parsed.data] : [];
+      }),
+    ),
+});
+
+export type BatchQuestion = z.infer<typeof batchQuestionSchema>;
 
 export const answerScoresSchema = z.object({
   relevance: z.coerce.number().min(0).max(10),

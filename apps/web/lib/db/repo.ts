@@ -15,6 +15,7 @@ import type { Session } from "@repo/db";
 import type {
   AnswerScores,
   InterviewConfig,
+  QuestionSetSource,
   QuestionType,
   SessionStatus,
   SourceType,
@@ -64,6 +65,8 @@ export interface CreateSessionInput {
   config: InterviewConfig;
   /** Set to re-run an earlier session on identical questions. */
   retryOfId?: string | null;
+  /** Set when this interview runs a question-bank set's questions verbatim. */
+  questionSetId?: string | null;
 }
 
 export function createSession(input: CreateSessionInput) {
@@ -77,6 +80,7 @@ export function createSession(input: CreateSessionInput) {
       config: json(input.config),
       status: "in_progress",
       retryOfId: input.retryOfId ?? null,
+      questionSetId: input.questionSetId ?? null,
     },
   });
 }
@@ -293,6 +297,148 @@ export function getTurnForUser(turnId: string, userId: string) {
     where: { id: turnId, session: { userId, ...aliveSession } },
     select: { id: true, question: true, questionType: true },
   });
+}
+
+// ── Question bank (always user-scoped) ────────────────────────────
+
+/** Same contract as `aliveSession`, for sets. */
+const aliveSet = { deletedAt: null } as const;
+
+export interface CreateQuestionSetInput {
+  userId: string;
+  name: string;
+  source: QuestionSetSource;
+  sourceText: string;
+  role: string | null;
+  difficulty: string;
+  items: { question: string; questionType: QuestionType }[];
+}
+
+/**
+ * Persist a fully generated set — the set row and every item, atomically.
+ * One transaction because a set with half its questions is not a smaller set,
+ * it's a broken one: `count` would disagree with the items, and the "run an
+ * interview" path copies items by index and trusts them to be 0..n-1.
+ */
+export function createQuestionSetWithItems(input: CreateQuestionSetInput) {
+  return prisma.$transaction(async (tx) => {
+    const set = await tx.questionSet.create({
+      data: {
+        userId: input.userId,
+        name: input.name,
+        source: input.source,
+        sourceText: input.sourceText,
+        role: input.role,
+        difficulty: input.difficulty,
+        count: input.items.length,
+      },
+    });
+    await tx.questionSetItem.createMany({
+      data: input.items.map((q, i) => ({
+        setId: set.id,
+        itemIndex: i,
+        question: q.question,
+        questionType: q.questionType,
+      })),
+    });
+    return set;
+  });
+}
+
+/**
+ * The user's sets, newest first, each carrying its live item count and how
+ * many interviews have been run on it (soft-deleted interviews excluded — a
+ * deleted run should stop counting as practice, same as everywhere else).
+ */
+export function listQuestionSets(userId: string) {
+  return prisma.questionSet.findMany({
+    where: { userId, ...aliveSet },
+    orderBy: { createdAt: "desc" },
+    include: {
+      _count: {
+        select: {
+          items: true,
+          sessions: { where: { deletedAt: null } },
+        },
+      },
+    },
+  });
+}
+
+export function getQuestionSet(id: string, userId: string) {
+  return prisma.questionSet.findFirst({
+    where: { id, userId, ...aliveSet },
+    include: {
+      _count: {
+        select: { sessions: { where: { deletedAt: null } } },
+      },
+    },
+  });
+}
+
+/** A set's questions, in reading order. */
+export function getQuestionSetItems(setId: string) {
+  return prisma.questionSetItem.findMany({
+    where: { setId },
+    orderBy: { itemIndex: "asc" },
+  });
+}
+
+/**
+ * Soft-delete a set. Interviews already run from it are untouched — they hold
+ * their own copies of the questions (see copySetQuestionsInto), so nothing
+ * they replay or report on lives in these rows.
+ */
+export async function softDeleteQuestionSet(id: string, userId: string): Promise<boolean> {
+  const { count } = await prisma.questionSet.updateMany({
+    where: { id, userId, ...aliveSet },
+    data: { deletedAt: new Date() },
+  });
+  return count === 1;
+}
+
+/**
+ * Interviews run on this set, newest first — the set page's "your runs" list.
+ * Report presence rides along so a completed run can link straight to it.
+ */
+export function listSetSessions(setId: string, userId: string) {
+  return prisma.session.findMany({
+    where: { questionSetId: setId, userId, ...aliveSession },
+    orderBy: { createdAt: "desc" },
+    select: {
+      id: true,
+      name: true,
+      status: true,
+      createdAt: true,
+      report: { select: { overallScore: true } },
+    },
+  });
+}
+
+/**
+ * Copy a set's questions into a session's turns, verbatim and in order — the
+ * exact mechanism a retry uses (`copyQuestionsInto`), pointed at the bank.
+ * New Turn rows with new ids: the interview owns its copies, so the set can be
+ * deleted, re-read or re-run without either side noticing the other.
+ */
+export async function copySetQuestionsInto(
+  targetSessionId: string,
+  setId: string,
+): Promise<number> {
+  const items = await getQuestionSetItems(setId);
+  if (!items.length) return 0;
+  const { count } = await prisma.turn.createMany({
+    data: items.map((q, i) => ({
+      sessionId: targetSessionId,
+      // Re-numbered from 0 rather than trusting itemIndex: the room's
+      // "answered everything" check assumes 0-based contiguous turns, and this
+      // is the one place that invariant is cheap to guarantee.
+      turnIndex: i,
+      question: q.question,
+      questionType: q.questionType,
+    })),
+  });
+  return count;
 }
 
 // ── Session video ─────────────────────────────────────────────────
