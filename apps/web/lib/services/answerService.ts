@@ -85,7 +85,11 @@ export async function processAnswer(input: AnswerInput): Promise<AnswerResponse>
   // A retry's questions were copied up front and must not change — the whole
   // point is that both runs face identical material, so generating here would
   // destroy the comparison. Just hand back the one already sitting there.
-  if (session.retryOfId) {
+  // A question-set interview is the same shape for the same reason: its turns
+  // ARE the set, copied verbatim at start, and the promise to the user is
+  // "an interview on exactly these questions" — generating one here would
+  // break it, so it takes the same fixed path.
+  if (session.retryOfId || session.questionSetId) {
     const existing = turns.find((t) => t.turnIndex === nextIndex);
     if (!existing) {
       // Fewer copied questions than num_questions says: trust the questions,

@@ -60,10 +60,12 @@ export const config = {
     "/report/:path*",
     "/profile/:path*",
     "/starred/:path*",
+    "/questions/:path*",
     "/api/interview/:path*",
     "/api/report/:path*",
     "/api/starred/:path*",
     "/api/profile/:path*",
+    "/api/questions/:path*",
     "/api/dashboard",
   ],
 };
