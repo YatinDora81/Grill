@@ -48,6 +48,7 @@ const GROUPS: { heading: string; items: Item[] }[] = [
     items: [
       { n: "01", label: "Dashboard", href: "/dashboard" },
       { n: "02", label: "New session", href: "/new" },
+      { n: "03", label: "Question bank", href: "/questions" },
     ],
   },
   {
