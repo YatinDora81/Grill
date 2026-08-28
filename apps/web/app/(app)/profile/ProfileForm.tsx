@@ -25,7 +25,15 @@ async function apiPatch<T>(path: string, payload: unknown): Promise<T> {
   return body as T;
 }
 
-export function ProfileForm({ user, emailOnReport }: { user: User; emailOnReport: boolean }) {
+export function ProfileForm({
+  user,
+  emailOnReport,
+  emailDigest,
+}: {
+  user: User;
+  emailOnReport: boolean;
+  emailDigest: boolean;
+}) {
   const router = useRouter();
 
   const [name, setName] = useState(user.name ?? "");
@@ -34,6 +42,9 @@ export function ProfileForm({ user, emailOnReport }: { user: User; emailOnReport
 
   const [mailOn, setMailOn] = useState(emailOnReport);
   const [savingMail, setSavingMail] = useState(false);
+
+  const [digestOn, setDigestOn] = useState(emailDigest);
+  const [savingDigest, setSavingDigest] = useState(false);
 
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
@@ -81,6 +92,22 @@ export function ProfileForm({ user, emailOnReport }: { user: User; emailOnReport
       toast.error(err instanceof ApiClientError ? err.message : "Couldn't save that.");
     } finally {
       setSavingMail(false);
+    }
+  }
+
+  async function toggleDigest() {
+    if (savingDigest) return;
+    const wanted = !digestOn;
+    setDigestOn(wanted);
+    setSavingDigest(true);
+    try {
+      await apiPatch<User>("/api/profile", { email_digest: wanted });
+      toast.success(wanted ? "We'll nudge you weekly" : "Digest off");
+    } catch (err) {
+      setDigestOn(!wanted);
+      toast.error(err instanceof ApiClientError ? err.message : "Couldn't save that.");
+    } finally {
+      setSavingDigest(false);
     }
   }
 
@@ -183,6 +210,30 @@ export function ProfileForm({ user, emailOnReport }: { user: User; emailOnReport
         <Explain>
           Sent once, when the report finishes building — <b>not</b> when the interview ends. The
           report is built by a queue behind you, so the email is what tells you it landed.
+        </Explain>
+
+        <div className="switch-row">
+          <div>
+            <span className="switch-l">Email me the weekly drill digest</span>
+            <p className="switch-d">
+              {digestOn
+                ? "One email a week, and only when cards are due — it carries the question you're most overdue on."
+                : "Cards still come due; the deck just waits at Drill until you open it."}
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={digestOn}
+            aria-label="Email me the weekly drill digest"
+            aria-busy={savingDigest}
+            onClick={toggleDigest}
+            className="switch"
+          />
+        </div>
+        <Explain>
+          At most one every seven days, and never for an empty deck — <b>nothing due, no email</b>.
+          Turning it off stops the nudge; it does not stop your cards from coming back.
         </Explain>
       </section>
 

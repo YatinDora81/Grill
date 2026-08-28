@@ -7,6 +7,7 @@ import { json } from "@/lib/http";
 import { drainReports } from "@/lib/services/reportQueue";
 import { purgeExpiredVideos } from "@/lib/services/videoService";
 import { purgeExpiredAudio } from "@/lib/services/audioService";
+import { sendDrillDigests } from "@/lib/services/drillService";
 
 const DRAIN_BUDGET_MS = 240_000;
 
@@ -37,5 +38,18 @@ export async function GET(req: Request) {
     console.error("[cron] audio purge failed:", err);
   }
 
-  return json({ swept: outcomes.length, purged, purged_audio: purgedAudio, ...tally });
+  let digests = 0;
+  try {
+    digests = await sendDrillDigests();
+  } catch (err) {
+    console.error("[cron] drill digest failed:", err);
+  }
+
+  return json({
+    swept: outcomes.length,
+    purged,
+    purged_audio: purgedAudio,
+    digests,
+    ...tally,
+  });
 }

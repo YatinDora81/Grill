@@ -2,6 +2,9 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
+import type { DrillQueueResponse } from "@repo/types";
+import { apiGet } from "@/lib/apiClient";
 import { ExplainToggle } from "@/components/ExplainToggle";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { LogoutButton } from "./LogoutButton";
@@ -12,6 +15,8 @@ interface Item {
   href: string;
 }
 
+const DRILL = "/drill";
+
 const GROUPS: { heading: string; items: Item[] }[] = [
   {
     heading: "Practice",
@@ -19,6 +24,7 @@ const GROUPS: { heading: string; items: Item[] }[] = [
       { n: "01", label: "Dashboard", href: "/dashboard" },
       { n: "02", label: "New session", href: "/new" },
       { n: "03", label: "Question bank", href: "/questions" },
+      { n: "04", label: "Drill", href: DRILL },
     ],
   },
   {
@@ -27,18 +33,68 @@ const GROUPS: { heading: string; items: Item[] }[] = [
   },
 ];
 
-/* The fill below is a TOKEN rather than `bg-paper-raised`: on the sheet a
-   selected or hovered row has to take ON ink, while a static raised card still
-   lifts off the page. One value cannot do both once the ground flips, so
-   `--rail-hover` is the half that reverses and `bg-paper-raised` — the account
-   tile, the panels on the pages this rail leads to — is the half that does not.
+let dueCards: number | null = null;
+let dueRequest: Promise<number> | null = null;
+let dueEpoch = 0;
 
-   `--rail-hover` and not `--surface-hover`, which is the same idea for rows on a
-   raised CARD: these sit on the SUNKEN rail, a surface already darker than the
-   page, so the two want different values the moment neither ground is black.
-   This one can also run darker than that one, because the rail pairs `hover:bg`
-   with `hover:text-ink` at every call site below — nothing muted is ever painted
-   on it, which is exactly the constraint that holds `--surface-hover` back. */
+function forgetDueCards() {
+  dueCards = null;
+  dueRequest = null;
+  dueEpoch += 1;
+}
+
+function loadDueCards(): Promise<number> {
+  if (dueCards !== null) return Promise.resolve(dueCards);
+  const epoch = dueEpoch;
+  dueRequest ??= apiGet<DrillQueueResponse>("/api/drill?limit=1")
+    .then((queue) => queue.due_total)
+    .catch(() => 0)
+    .then((count) => {
+      if (epoch !== dueEpoch) return dueCards ?? count;
+      dueCards = count;
+      dueRequest = null;
+      return count;
+    });
+  return dueRequest;
+}
+
+function useDueCards(): number {
+  const pathname = usePathname();
+  const [due, setDue] = useState(dueCards ?? 0);
+  const wasDrilling = useRef(false);
+
+  useEffect(() => {
+    let alive = true;
+    const drilling = pathname === DRILL || pathname.startsWith(`${DRILL}/`);
+    if (wasDrilling.current && !drilling) forgetDueCards();
+    wasDrilling.current = drilling;
+
+    void loadDueCards().then((count) => {
+      if (alive) setDue(count);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [pathname]);
+
+  return due;
+}
+
+function ItemLabel({ item, due }: { item: Item; due: number }) {
+  const badge = item.href === DRILL && due > 0;
+  return (
+    <span className="flex min-w-0 items-center gap-2">
+      <span className="truncate">{item.label}</span>
+      {badge ? (
+        <em className="tabular flex-none border border-ember/40 px-1.5 py-0.5 text-[0.6rem] leading-none not-italic text-ember">
+          {due > 99 ? "99+" : due}
+          <span className="sr-only"> due</span>
+        </em>
+      ) : null}
+    </span>
+  );
+}
+
 const ITEM =
   "grid grid-cols-[26px_minmax(0,1fr)] items-center gap-2 border-l-2 px-5 py-3 font-mono text-[0.73rem] tracking-[0.1em] uppercase transition-colors";
 const NUM = "text-[0.66rem] not-italic";
@@ -56,6 +112,7 @@ function Initials({ initials }: { initials: string }) {
 
 export function AppRail({ name, initials }: { name: string | null; initials: string }) {
   const pathname = usePathname();
+  const due = useDueCards();
 
   const isActive = (path: string) => pathname === path || pathname.startsWith(`${path}/`);
 
@@ -95,7 +152,7 @@ export function AppRail({ name, initials }: { name: string | null; initials: str
                   <em className={`${NUM} ${active ? "text-ember" : "text-(--color-ink-faint)"}`}>
                     {item.n}
                   </em>
-                  <span className="truncate">{item.label}</span>
+                  <ItemLabel item={item} due={due} />
                 </Link>
               );
             })}
@@ -122,6 +179,7 @@ export function AppRail({ name, initials }: { name: string | null; initials: str
 
 export function AppHeader({ initials }: { initials: string }) {
   const pathname = usePathname();
+  const due = useDueCards();
   const isActive = (path: string) => pathname === path || pathname.startsWith(`${path}/`);
 
   return (
@@ -167,7 +225,7 @@ export function AppHeader({ initials }: { initials: string }) {
                 <em className={`${NUM} ${active ? "text-ember" : "text-(--color-ink-faint)"}`}>
                   {item.n}
                 </em>
-                {item.label}
+                <ItemLabel item={item} due={due} />
               </Link>
             );
           })}

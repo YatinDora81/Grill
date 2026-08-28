@@ -1,11 +1,21 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AnswerScores, QuestionFeedback, QuestionType, TranscriptWord } from "@repo/types";
+import type {
+  AnswerScores,
+  AwaySegment,
+  QuestionFeedback,
+  QuestionType,
+  StarBreakdown,
+  TranscriptWord,
+} from "@repo/types";
 import { scoreTone } from "@/components/ui";
 import { Explain } from "@/components/Explain";
+import { AddToDrill } from "./AddToDrill";
+import { AwayStrip } from "./AwayStrip";
 import { KaraokeTranscript } from "./KaraokeTranscript";
 import { PlayAnswer, type PlayAnswerHandle } from "./PlayAnswer";
+import { StarBar } from "./StarBar";
 import { StarQuestion } from "./StarQuestion";
 import { VideoPlayer } from "./VideoPlayer";
 
@@ -24,6 +34,9 @@ export interface ReplayTurn {
   starred: boolean;
   feedback: QuestionFeedback | null;
   scores: AnswerScores | null;
+  star: StarBreakdown | null;
+  away_segments: AwaySegment[] | null;
+  take_ms: number | null;
 }
 
 const TYPE_LABEL: Record<QuestionType, string> = {
@@ -171,9 +184,19 @@ function Turn({
                 {t.transcript ? `“${t.transcript}”` : "No answer recorded."}
               </p>
             )}
+
+            {t.away_segments && t.take_ms ? (
+              <AwayStrip
+                segments={t.away_segments}
+                totalMs={t.take_ms}
+                onSeek={t.has_audio ? onSeek : undefined}
+              />
+            ) : null}
           </div>
 
           {t.scores ? <Rubric scores={t.scores} /> : null}
+
+          <StarBar breakdown={t.star} />
 
           <Improvements items={t.feedback?.improvements ?? []} />
           <PossibleAnswers items={t.feedback?.possible_answers ?? []} />
@@ -201,11 +224,14 @@ function Turn({
                 <span className="mono-note">typed answer</span>
               )}
               {readOnly ? null : (
-                <StarQuestion
-                  turnId={t.turn_id}
-                  questionHash={t.question_hash}
-                  initial={t.starred}
-                />
+                <>
+                  <StarQuestion
+                    turnId={t.turn_id}
+                    questionHash={t.question_hash}
+                    initial={t.starred}
+                  />
+                  <AddToDrill turnId={t.turn_id} />
+                </>
               )}
             </div>
           ) : null}
@@ -305,9 +331,7 @@ function CopyTake({ text }: { text: string }) {
           await navigator.clipboard.writeText(text);
           setCopied(true);
           setTimeout(() => setCopied(false), 1600);
-        } catch {
-          /* clipboard denied — the text is right there to select */
-        }
+        } catch {}
       }}
     >
       {copied ? "copied ✓" : "copy"}

@@ -11,6 +11,7 @@ import type {
 import { notFound } from "@/lib/errors";
 import * as repo from "@/lib/db/repo";
 import { toUserDTO } from "@/lib/auth";
+import { drillStats } from "@/lib/services/drillService";
 import { PATTERN, worstDimension } from "@/lib/rubricPattern";
 
 const WEEK_MS = 7 * 864e5;
@@ -64,7 +65,7 @@ export async function getDashboardData(userId: string): Promise<DashboardData> {
   const unfinished = sessions.find((s) => s.status === "in_progress") ?? null;
   const rematch = sessions.find((s) => s.retryOfId !== null) ?? null;
 
-  const [counts, rubric, progress, chainRows] = await Promise.all([
+  const [counts, rubric, progress, chainRows, drill] = await Promise.all([
     Promise.all(countable.map((id) => repo.countAnsweredTurns(userId, id))),
     reports.length >= PATTERN_MIN_SESSIONS
       ? repo.listRecentAnswerScores(userId)
@@ -73,6 +74,7 @@ export async function getDashboardData(userId: string): Promise<DashboardData> {
     rematch
       ? repo.listRetryChain(rematch.id, userId)
       : Promise.resolve([] as repo.RetryChainSession[]),
+    drillStats(userId, user.timezone),
   ]);
   const answered = new Map(countable.map((id, i) => [id, counts[i]!]));
 
@@ -130,6 +132,8 @@ export async function getDashboardData(userId: string): Promise<DashboardData> {
       fillers_per_answer: perAnswer(newest),
       fillers_per_answer_first: perAnswer(oldest),
       top_pattern: derivePattern(rubric, reports.length),
+      streak_days: drill.streak_days,
+      cards_due: drill.cards_due,
     },
     recent,
     delivery_series: deliverySeries,

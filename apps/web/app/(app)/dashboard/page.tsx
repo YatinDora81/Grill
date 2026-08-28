@@ -83,6 +83,8 @@ export default async function DashboardPage() {
 
         {resumable ? <ResumeBar session={resumable} /> : null}
 
+        <DrillStrip cardsDue={stats.cards_due} streakDays={stats.streak_days} />
+
         {scored ? (
           <>
             <Kpis stats={stats} />
@@ -214,16 +216,48 @@ function ResumeBar({ session: s }: { session: RecentSession }) {
   );
 }
 
-/**
- * Three numbers, not four.
- *
- * Average and best were two more ways of saying "how you're doing" next to a
- * chart that already says it. What's left is the verdict you'd quote, how much
- * work is behind it, and the one delivery habit the reports actually count.
- *
- * The verdict cell is given the widest track and the largest numeral because it
- * carries the score band underneath it; the other two are footnotes to it.
- */
+function DrillStrip({ cardsDue, streakDays }: { cardsDue: number; streakDays: number }) {
+  if (cardsDue === 0 && streakDays === 0) return null;
+
+  const detail = [
+    cardsDue > 0 ? `${cardsDue} question${cardsDue === 1 ? "" : "s"} due` : "nothing due right now",
+    streakDays > 0 ? `${streakDays}-day streak` : null,
+    "about a minute each",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  return (
+    <div className="rv mb-9" data-io>
+      <Link
+        href="/drill"
+        className="grid grid-cols-[auto_1fr] items-center gap-x-5 gap-y-3 border border-line px-6 py-5 transition-colors hover:border-ember sm:grid-cols-[auto_1fr_auto]"
+      >
+        <span className="font-mono text-[0.6rem] tracking-[0.18em] whitespace-nowrap text-ink-muted uppercase">
+          Daily drill
+        </span>
+        <span className="min-w-0">
+          <span className="block truncate font-display text-[1.04rem] font-bold tracking-[-0.01em] uppercase">
+            {cardsDue > 0 ? "The questions that caught you out" : "Deck clear"}
+          </span>
+          <span className="mt-1.5 block font-mono text-[0.63rem] tracking-[0.1em] text-ink-muted uppercase">
+            {detail}
+          </span>
+        </span>
+        <span className={cx(TAG, "border-line text-ink-soft", "col-span-2 sm:col-span-1")}>
+          Open the deck →
+        </span>
+      </Link>
+      <Explain className="mt-3">
+        Answers you scored badly on, and questions you starred, come back here on a spaced schedule
+        — a day later, then three, then a week, for as long as you keep getting them right. The
+        streak counts calendar days you drilled, in your own timezone.{" "}
+        <b>It is a habit counter, not a score.</b>
+      </Explain>
+    </div>
+  );
+}
+
 const KPI_CELL =
   "border-t border-line px-6 py-6 first:border-t-0 sm:border-t-0 sm:border-l sm:first:border-l-0";
 const KPI_KEY = "font-mono text-[0.6rem] tracking-[0.2em] text-ink-muted uppercase";

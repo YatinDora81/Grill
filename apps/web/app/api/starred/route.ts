@@ -6,6 +6,7 @@ import { json, errorResponse } from "@/lib/http";
 import { starSchema, unstarSchema } from "@/lib/schemas";
 import { requireUserId } from "@/lib/auth";
 import * as repo from "@/lib/db/repo";
+import { addDrillCard } from "@/lib/services/drillService";
 
 export async function GET() {
   try {
@@ -36,6 +37,11 @@ export async function POST(req: Request) {
     if (!turn) throw notFound("Question not found.", "unknown_turn");
 
     const row = await repo.starQuestion(userId, turn);
+
+    await addDrillCard(userId, turn).catch((err) =>
+      console.warn("[drill] card from star skipped:", err),
+    );
+
     return json({ ok: true, question_hash: row.questionHash });
   } catch (err) {
     return errorResponse(err);

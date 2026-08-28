@@ -19,15 +19,26 @@ interface ReportRow {
 }
 
 let reportRows: ReportRow[] = [];
+let userTimezone: string | null = null;
 
 mock.module("@/lib/db/repo", () => ({
-  getUserById: async () => ({ id: "u1", email: "a@b.c", name: "A" }),
+  getUserById: async () => ({ id: "u1", email: "a@b.c", name: "A", timezone: userTimezone }),
   listUserReportsWithDelivery: async () => reportRows,
   listUserSessions: async () => [],
   countAnsweredTurns: async () => 4,
   listRecentAnswerScores: async () => [],
   getSessionProgress: async () => null,
   listRetryChain: async () => [],
+}));
+
+let drill = { streak_days: 0, cards_due: 0 };
+const drillZones: (string | null)[] = [];
+
+mock.module("@/lib/services/drillService", () => ({
+  drillStats: async (_userId: string, timeZone: string | null) => {
+    drillZones.push(timeZone);
+    return drill;
+  },
 }));
 
 const { getDashboardData } = await import("./dashboardService");
@@ -72,4 +83,29 @@ test("wpm that is missing, negative or not a number reads as unmeasured", async 
   ]);
 
   expect(points.map((p) => p.wpm)).toEqual([null, null, null, null]);
+});
+
+test("the drill streak and due count reach the dashboard as counts, zero included", async () => {
+  reportRows = [];
+  drill = { streak_days: 0, cards_due: 0 };
+  const empty = await getDashboardData("u1");
+  expect(empty.stats.streak_days).toBe(0);
+  expect(empty.stats.cards_due).toBe(0);
+
+  drill = { streak_days: 4, cards_due: 7 };
+  const busy = await getDashboardData("u1");
+  expect(busy.stats.streak_days).toBe(4);
+  expect(busy.stats.cards_due).toBe(7);
+});
+
+test("the user's own timezone is what the streak is counted in", async () => {
+  reportRows = [];
+  drillZones.length = 0;
+
+  userTimezone = "Asia/Kolkata";
+  await getDashboardData("u1");
+  userTimezone = null;
+  await getDashboardData("u1");
+
+  expect(drillZones).toEqual(["Asia/Kolkata", null]);
 });

@@ -21,10 +21,14 @@ export async function GET() {
 export async function PATCH(req: Request) {
   try {
     const userId = await requireUserId();
-    const { name, email_on_report } = updateProfileSchema.parse(await req.json());
+    const { name, email_on_report, timezone, email_digest } = updateProfileSchema.parse(
+      await req.json(),
+    );
     const user = await repo.updateUserProfile(userId, {
       name,
       emailOnReport: email_on_report,
+      timezone,
+      emailDigest: email_digest,
     });
     return json(toUserDTO(user) satisfies User);
   } catch (err) {
