@@ -2,11 +2,13 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getUserId, toUserDTO } from "@/lib/auth";
+import { config } from "@/lib/env";
 import * as repo from "@/lib/db/repo";
 import { BAND_LABEL, cx, scoreBand, scoreTone } from "@/components/ui";
 import { Explain, ExplainBanner } from "@/components/Explain";
 import { Reveal } from "@/components/Reveal";
 import { initialsOf } from "../currentUser";
+import { Bookmarklet } from "./Bookmarklet";
 import { ProfileForm } from "./ProfileForm";
 
 export const metadata: Metadata = {
@@ -123,7 +125,15 @@ export default async function ProfilePage() {
           </div>
         </section>
 
-        <ProfileForm user={toUserDTO(user)} emailOnReport={user.emailOnReport} />
+        <ProfileForm
+          user={toUserDTO(user)}
+          emailOnReport={user.emailOnReport}
+          emailDigest={user.emailDigest}
+        />
+
+        <div className="rv mt-[18px]" data-io>
+          <Bookmarklet siteUrl={config.site.url} />
+        </div>
 
         <p className="fineprint rv" data-io>
           Every session, recording and report is scoped to <b>this account</b> — nobody else can
