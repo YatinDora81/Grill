@@ -4,6 +4,7 @@ import { prisma, Prisma } from "@repo/db";
 import type { Session } from "@repo/db";
 import type {
   AnswerScores,
+  CameraTurnMetrics,
   InterviewConfig,
   QuestionSetSource,
   QuestionType,
@@ -30,11 +31,21 @@ export function createUser(input: { email: string; passwordHash: string; name?: 
 
 export function updateUserProfile(
   id: string,
-  patch: { name?: string | null; emailOnReport?: boolean },
+  patch: {
+    name?: string | null;
+    emailOnReport?: boolean;
+    timezone?: string | null;
+    emailDigest?: boolean;
+  },
 ) {
   return prisma.user.update({
     where: { id },
-    data: { name: patch.name, emailOnReport: patch.emailOnReport },
+    data: {
+      name: patch.name,
+      emailOnReport: patch.emailOnReport,
+      timezone: patch.timezone,
+      emailDigest: patch.emailDigest,
+    },
   });
 }
 
@@ -141,7 +152,40 @@ export async function listRetryChain(
   return chain.reverse();
 }
 
-/** Fetch a session that belongs to this user (null otherwise). Soft-deleted rows are invisible. */
+export interface SessionRetries {
+  count: number;
+  latest: RetryChainSession;
+}
+
+export async function getRetriesOf(
+  sessionId: string,
+  userId: string,
+): Promise<SessionRetries | null> {
+  const rows = await prisma.session.findMany({
+    where: { retryOfId: sessionId, userId, ...aliveSession },
+    orderBy: { createdAt: "desc" },
+    select: {
+      id: true,
+      name: true,
+      createdAt: true,
+      report: { select: { overallScore: true } },
+    },
+  });
+
+  const newest = rows[0];
+  if (!newest) return null;
+
+  return {
+    count: rows.length,
+    latest: {
+      id: newest.id,
+      name: newest.name,
+      overallScore: newest.report?.overallScore ?? null,
+      createdAt: newest.createdAt,
+    },
+  };
+}
+
 export function getSession(id: string, userId: string) {
   return prisma.session.findFirst({ where: { id, userId, ...aliveSession } });
 }
@@ -526,6 +570,7 @@ export function recordAnswer(
     answerScores: AnswerScores;
     videoId?: string | null;
     videoOffsetMs?: number | null;
+    cameraMetrics?: CameraTurnMetrics | null;
   },
 ) {
   return prisma.turn.update({
@@ -534,6 +579,7 @@ export function recordAnswer(
       audioKey: data.audioKey ?? undefined,
       videoId: data.videoId ?? undefined,
       videoOffsetMs: data.videoOffsetMs ?? undefined,
+      cameraMetrics: data.cameraMetrics ? json(data.cameraMetrics) : undefined,
       transcript: data.transcript,
       transcriptWords: data.transcriptWords ? json(data.transcriptWords) : undefined,
       answerScores: json(data.answerScores),
@@ -553,6 +599,7 @@ export interface CreateReportInput {
   worstAnswer: unknown;
   nextSteps: unknown;
   questionFeedback: unknown;
+  starBreakdown: unknown;
   raw: unknown;
 }
 
@@ -568,6 +615,7 @@ export function createReport(input: CreateReportInput) {
     worstAnswer: input.worstAnswer ? json(input.worstAnswer) : Prisma.JsonNull,
     nextSteps: json(input.nextSteps),
     questionFeedback: json(input.questionFeedback ?? []),
+    starBreakdown: json(input.starBreakdown ?? []),
     raw: json(input.raw),
   };
   return prisma.report.upsert({
@@ -604,12 +652,14 @@ export interface WeakTurn {
   scores: AnswerScores;
 }
 
-/**
- * Answered turns this user scored worst on — the raw material for `weak_spots`.
- * Soft-deleted interviews are ignored (same as listAskedQuestions).
- * Only turns with both a transcript and scores can be judged, and scoring is
- * done here rather than in SQL because answer_scores is a JSON blob.
- */
+const RUBRIC_KEYS = ["relevance", "correctness", "structure", "depth", "filler"] as const;
+
+export function rubricMean(value: unknown): number | null {
+  const s = value as AnswerScores | null;
+  if (!s || RUBRIC_KEYS.some((k) => typeof s[k] !== "number")) return null;
+  return (s.relevance + s.correctness + s.structure + s.depth + s.filler) / 5;
+}
+
 export async function listWeakTurns(userId: string, take = 8): Promise<WeakTurn[]> {
   const turns = await prisma.turn.findMany({
     where: { session: { userId, ...aliveSession }, transcript: { not: null } },
@@ -619,15 +669,8 @@ export async function listWeakTurns(userId: string, take = 8): Promise<WeakTurn[
   });
 
   const scored = turns.flatMap((t) => {
-    // answer_scores is an opaque JSON column, so nothing about its shape is
-    // guaranteed at this boundary — an unscored or half-written turn just
-    // drops out rather than poisoning the ranking with NaN.
-    const s = t.answerScores as unknown as AnswerScores | null;
-    if (!s || typeof s.relevance !== "number") return [];
-    // Mean of the rubric. `filler` is already "higher is better" in the rubric,
-    // so it needs no inversion here.
-    const mean =
-      (s.relevance + s.correctness + s.structure + s.depth + s.filler) / 5;
+    const mean = rubricMean(t.answerScores);
+    if (mean === null) return [];
     return [{ turn: t, mean }];
   });
 
@@ -703,16 +746,6 @@ export function getSessionProgress(userId: string, sessionId: string) {
   });
 }
 
-/** The five rubric keys, so a half-written score can be rejected as a whole. */
-const RUBRIC_KEYS = ["relevance", "correctness", "structure", "depth", "filler"] as const;
-
-/**
- * The rubric off this user's recent answered turns and nothing else.
- *
- * Same read as `listWeakTurns` without the transcript or the question: the
- * dashboard only averages the five numbers, and the dashboard is force-dynamic,
- * so it re-runs this on every view.
- */
 export async function listRecentAnswerScores(userId: string, take = 120): Promise<AnswerScores[]> {
   const turns = await prisma.turn.findMany({
     where: { session: { userId, ...aliveSession }, transcript: { not: null } },
@@ -728,16 +761,263 @@ export async function listRecentAnswerScores(userId: string, take = 120): Promis
   });
 }
 
-// ── Password reset tokens ─────────────────────────────────────────
-/**
- * The one group of queries in this file that is NOT user-scoped, and it is not a
- * mistake: a reset happens before there is any session, so the token IS the
- * credential being presented. Filtering by userId would mean already knowing who
- * the caller is, which is precisely what the token is there to establish.
- *
- * What replaces HARD RULE #11 here: only the sha256 of the raw token is ever
- * stored or looked up, tokens expire, and they are single-use.
- */
+export const STREAK_LOOKBACK_DAYS = 400;
+
+const STREAK_MAX_REVIEWS = 2000;
+
+function dayKeyFormatter(timeZone: string): Intl.DateTimeFormat {
+  const parts = { year: "numeric", month: "2-digit", day: "2-digit" } as const;
+  try {
+    return new Intl.DateTimeFormat("en-CA", { timeZone, ...parts });
+  } catch {
+    console.warn(`[repo] unknown timezone ${JSON.stringify(timeZone)} — counting drill days in UTC`);
+    return new Intl.DateTimeFormat("en-CA", { timeZone: "UTC", ...parts });
+  }
+}
+
+export function dayKeyIn(date: Date, timeZone: string): string {
+  return dayKeyFormatter(timeZone).format(date);
+}
+
+export async function listReviewDays(
+  userId: string,
+  timeZone: string,
+  since = new Date(Date.now() - STREAK_LOOKBACK_DAYS * 86_400_000),
+): Promise<Set<string>> {
+  const reviews = await prisma.drillReview.findMany({
+    where: { userId, reviewedAt: { gte: since } },
+    orderBy: { reviewedAt: "desc" },
+    take: STREAK_MAX_REVIEWS,
+    select: { reviewedAt: true },
+  });
+  const format = dayKeyFormatter(timeZone);
+  return new Set(reviews.map((r) => format.format(r.reviewedAt)));
+}
+
+export function countDrillReviewsSince(userId: string, since: Date): Promise<number> {
+  return prisma.drillReview.count({ where: { userId, reviewedAt: { gte: since } } });
+}
+
+const dueCard = (now: Date) => ({ suspendedAt: null, dueAt: { lte: now } });
+
+export interface UpsertDrillCardInput {
+  userId: string;
+  question: string;
+  questionType: QuestionType;
+  sourceTurnId?: string | null;
+  bestTranscript?: string | null;
+  bestMean?: number | null;
+}
+
+export async function upsertDrillCard(
+  input: UpsertDrillCardInput,
+): Promise<{ id: string; created: boolean }> {
+  const hash = questionHash(input.question);
+  const key = { userId_questionHash: { userId: input.userId, questionHash: hash } };
+
+  const existing = await prisma.drillCard.findUnique({
+    where: key,
+    select: { id: true, bestMean: true },
+  });
+
+  const beatsBest =
+    input.bestTranscript != null &&
+    typeof input.bestMean === "number" &&
+    (existing === null || existing.bestMean === null || input.bestMean > existing.bestMean);
+  const best = beatsBest
+    ? { bestTranscript: input.bestTranscript, bestMean: input.bestMean }
+    : {};
+
+  const card = await prisma.drillCard.upsert({
+    where: key,
+    create: {
+      userId: input.userId,
+      question: input.question,
+      questionType: input.questionType,
+      questionHash: hash,
+      sourceTurnId: input.sourceTurnId ?? null,
+      ...best,
+    },
+    update: best,
+    select: { id: true },
+  });
+  return { id: card.id, created: existing === null };
+}
+
+export interface AddDrillCardInput {
+  userId: string;
+  question: string;
+  questionType: QuestionType;
+  sourceTurnId?: string | null;
+}
+
+export function addDrillCard(input: AddDrillCardInput): Promise<{ id: string }> {
+  const hash = questionHash(input.question);
+  return prisma.drillCard.upsert({
+    where: { userId_questionHash: { userId: input.userId, questionHash: hash } },
+    create: {
+      userId: input.userId,
+      question: input.question,
+      questionType: input.questionType,
+      questionHash: hash,
+      sourceTurnId: input.sourceTurnId ?? null,
+    },
+    update: { dueAt: new Date(), suspendedAt: null },
+    select: { id: true },
+  });
+}
+
+export function listDueDrillCards(userId: string, take: number, now = new Date()) {
+  return prisma.drillCard.findMany({
+    where: { userId, ...dueCard(now) },
+    orderBy: [{ dueAt: "asc" }, { createdAt: "asc" }],
+    take,
+  });
+}
+
+export function listAheadDrillCards(
+  userId: string,
+  take: number,
+  exclude: string[] = [],
+  now = new Date(),
+) {
+  return prisma.drillCard.findMany({
+    where: {
+      userId,
+      suspendedAt: null,
+      dueAt: { gt: now },
+      ...(exclude.length ? { id: { notIn: exclude } } : {}),
+    },
+    orderBy: [{ dueAt: "asc" }, { createdAt: "asc" }],
+    take,
+  });
+}
+
+export function countDueDrillCards(userId: string, now = new Date()): Promise<number> {
+  return prisma.drillCard.count({ where: { userId, ...dueCard(now) } });
+}
+
+export function getDrillCard(cardId: string, userId: string) {
+  return prisma.drillCard.findFirst({ where: { id: cardId, userId } });
+}
+
+export interface RecordDrillReviewInput {
+  cardId: string;
+  userId: string;
+  grade: number;
+  transcript?: string | null;
+  answerScores?: AnswerScores | null;
+  schedule: { ease: number; intervalDays: number; repetitions: number; dueAt: Date };
+  attempt?: { transcript: string; mean: number } | null;
+}
+
+export async function recordDrillReview(input: RecordDrillReviewInput): Promise<boolean> {
+  return prisma.$transaction(async (tx) => {
+    const card = await tx.drillCard.findFirst({
+      where: { id: input.cardId, userId: input.userId },
+      select: { id: true, bestMean: true },
+    });
+    if (!card) return false;
+
+    const attempt = input.attempt;
+    const beatsBest = attempt != null && (card.bestMean === null || attempt.mean > card.bestMean);
+
+    await tx.drillCard.update({
+      where: { id: card.id },
+      data: {
+        ease: input.schedule.ease,
+        intervalDays: input.schedule.intervalDays,
+        repetitions: input.schedule.repetitions,
+        dueAt: input.schedule.dueAt,
+        lastGrade: input.grade,
+        ...(beatsBest && attempt
+          ? { bestTranscript: attempt.transcript, bestMean: attempt.mean }
+          : {}),
+      },
+    });
+
+    await tx.drillReview.create({
+      data: {
+        cardId: card.id,
+        userId: input.userId,
+        grade: input.grade,
+        transcript: input.transcript ?? null,
+        answerScores: input.answerScores ? json(input.answerScores) : Prisma.JsonNull,
+      },
+    });
+    return true;
+  });
+}
+
+export async function suspendDrillCard(cardId: string, userId: string): Promise<boolean> {
+  const { count } = await prisma.drillCard.updateMany({
+    where: { id: cardId, userId, suspendedAt: null },
+    data: { suspendedAt: new Date() },
+  });
+  return count === 1;
+}
+
+export interface DigestCandidate {
+  id: string;
+  email: string;
+  name: string | null;
+  timezone: string | null;
+  dueCount: number;
+  firstDueQuestion: string | null;
+}
+
+export function listDigestCandidates(
+  cutoff: Date,
+  take = 50,
+  now = new Date(),
+): Promise<DigestCandidate[]> {
+  const due = dueCard(now);
+  return prisma.user
+    .findMany({
+      where: {
+        emailDigest: true,
+        OR: [{ lastDigestAt: null }, { lastDigestAt: { lt: cutoff } }],
+        drillCards: { some: due },
+      },
+      orderBy: { lastDigestAt: { sort: "asc", nulls: "first" } },
+      take,
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        timezone: true,
+        drillCards: {
+          where: due,
+          orderBy: [{ dueAt: "asc" }, { createdAt: "asc" }],
+          take: 1,
+          select: { question: true },
+        },
+        _count: { select: { drillCards: { where: due } } },
+      },
+    })
+    .then((rows) =>
+      rows.map((u) => ({
+        id: u.id,
+        email: u.email,
+        name: u.name,
+        timezone: u.timezone,
+        dueCount: u._count.drillCards,
+        firstDueQuestion: u.drillCards[0]?.question ?? null,
+      })),
+    );
+}
+
+export async function claimDrillDigest(userId: string, cutoff: Date): Promise<boolean> {
+  const { count } = await prisma.user.updateMany({
+    where: {
+      id: userId,
+      emailDigest: true,
+      OR: [{ lastDigestAt: null }, { lastDigestAt: { lt: cutoff } }],
+    },
+    data: { lastDigestAt: new Date() },
+  });
+  return count === 1;
+}
 
 export function createPasswordResetToken(input: {
   userId: string;
@@ -811,6 +1091,22 @@ export interface SharedReport {
   deliveryMetrics: unknown;
   strengths: unknown;
   weaknesses: unknown;
+  starBreakdown: unknown;
+}
+
+function starBarsWithoutWords(column: unknown): unknown {
+  if (!Array.isArray(column)) return [];
+  return column.map((bar) => {
+    if (typeof bar !== "object" || bar === null) return bar;
+    const segments = (bar as { segments?: unknown }).segments;
+    if (!Array.isArray(segments)) return bar;
+    return {
+      ...bar,
+      segments: segments.map((seg) =>
+        typeof seg === "object" && seg !== null ? { ...seg, text: "" } : seg,
+      ),
+    };
+  });
 }
 
 export async function getSharedReport(tokenHash: string): Promise<SharedReport | null> {
@@ -836,6 +1132,7 @@ export async function getSharedReport(tokenHash: string): Promise<SharedReport |
               deliveryMetrics: true,
               strengths: true,
               weaknesses: true,
+              starBreakdown: true,
             },
           },
         },
@@ -857,5 +1154,40 @@ export async function getSharedReport(tokenHash: string): Promise<SharedReport |
     deliveryMetrics: session.report.deliveryMetrics,
     strengths: session.report.strengths,
     weaknesses: session.report.weaknesses,
+    starBreakdown: starBarsWithoutWords(session.report.starBreakdown),
   };
+}
+
+export function getCompanyBrief(companyKey: string, roleKey: string) {
+  return prisma.companyBrief.findUnique({
+    where: { companyKey_roleKey: { companyKey, roleKey } },
+  });
+}
+
+export interface UpsertCompanyBriefInput {
+  companyKey: string;
+  roleKey: string;
+  company: string;
+  role: string | null;
+  brief: unknown;
+  grounded: boolean;
+  sources: unknown;
+  raw: unknown;
+}
+
+export function upsertCompanyBrief(input: UpsertCompanyBriefInput) {
+  const fields = {
+    company: input.company,
+    role: input.role,
+    brief: json(input.brief),
+    grounded: input.grounded,
+    sources: json(input.sources ?? []),
+    raw: json(input.raw),
+    createdAt: new Date(),
+  };
+  return prisma.companyBrief.upsert({
+    where: { companyKey_roleKey: { companyKey: input.companyKey, roleKey: input.roleKey } },
+    create: { companyKey: input.companyKey, roleKey: input.roleKey, ...fields },
+    update: fields,
+  });
 }

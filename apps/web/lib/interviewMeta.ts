@@ -121,6 +121,14 @@ export const PERSONAS: readonly Persona[] = [
   "skeptic",
 ] as const;
 
+export const PERSONA_VOICE: Record<Persona, { voice: string; direction: string }> = {
+  neutral: { voice: "hannah", direction: "" },
+  friendly_screen: { voice: "autumn", direction: "[cheerful] " },
+  terse_staff: { voice: "troy", direction: "" },
+  bar_raiser: { voice: "daniel", direction: "" },
+  skeptic: { voice: "austin", direction: "" },
+};
+
 export const PERSONA_GUARDRAIL =
   "Persona changes tone and phrasing only — question difficulty, topic selection, and follow-up logic are unchanged; remain professional.";
 
@@ -175,6 +183,9 @@ export const MODE_META: Record<ExclusiveMode, { label: string; blurb: string }> 
 };
 
 export function interviewLabel(c: InterviewConfig): string {
+  if (c.mode === "jd" && c.company?.trim()) {
+    return `${MODE_META.jd.label} · ${c.company.trim()}`;
+  }
   if (c.mode) return MODE_META[c.mode].label;
   return c.sources.map((s) => SOURCE_META[s].label).join(" + ");
 }

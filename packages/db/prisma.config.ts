@@ -3,9 +3,7 @@ import { defineConfig, env } from "prisma/config";
 
 try {
   createRequire(import.meta.url)("dotenv/config");
-} catch {
-  /* env already provided */
-}
+} catch {}
 
 export default defineConfig({
   schema: "prisma/schema.prisma",

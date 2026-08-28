@@ -1,4 +1,10 @@
 import { describe, expect, mock, test } from "bun:test";
+import type {
+  CameraTurnMetrics,
+  CompanyBrief,
+  DeliveryMetrics,
+  StarBreakdown,
+} from "@repo/types";
 
 mock.module("server-only", () => ({}));
 
@@ -7,14 +13,30 @@ process.env.JWT_SECRET ||= "test-secret";
 
 const { DIFFICULTIES, PERSONAS, QUESTION_BOUNDS } = await import("./interviewMeta");
 const {
+  COMPANY_MAX_CHARS,
   GAP_JD_MAX_CHARS,
   GAP_RESUME_MAX_CHARS,
+  JOB_PAGE_TEXT_MAX_CHARS,
+  answerTextSchema,
+  cameraMetricsSchema,
+  companyBriefRequestSchema,
+  companyBriefSchema,
+  deliveryMetricsSchema,
+  drillReviewSchema,
+  drillTextAnswerSchema,
   interviewConfigSchema,
+  jdExtractRequestSchema,
+  jobExtractSchema,
   questionResponseSchema,
   resumeGapRequestSchema,
   resumeGapResponseSchema,
+  starBreakdownSchema,
+  starResponseSchema,
   startRequestSchema,
   storedConfigSchema,
+  turnRefSchema,
+  updateProfileSchema,
+  voiceRequestSchema,
 } = await import("./schemas");
 
 function cfg(over: Record<string, unknown> = {}) {
@@ -623,5 +645,578 @@ describe("questionResponseSchema", () => {
   test("rejects an empty question and an invented question type", () => {
     expect(questionResponseSchema.safeParse({ question: "", question_type: "technical" }).success).toBe(false);
     expect(questionResponseSchema.safeParse({ question: "q", question_type: "philosophical" }).success).toBe(false);
+  });
+});
+
+describe("on-camera metrics coming off an answer", () => {
+  function cam(over: Record<string, unknown> = {}) {
+    return {
+      frames: 300,
+      no_face_frames: 12,
+      on_camera_pct: 78.4,
+      smile_pct: 11.2,
+      head_motion_dps: 4.6,
+      away_segments: [{ start_ms: 3_000, end_ms: 6_200 }],
+      longest_away_ms: 3_200,
+      sample_hz: 5,
+      pose_source: "matrix",
+      ...over,
+    };
+  }
+
+  test("accepts the aggregate the hook produces, and nothing resembling a frame", () => {
+    const r = cameraMetricsSchema.safeParse(cam());
+    expect(r.success).toBe(true);
+    expect(Object.keys(r.data!).sort()).toEqual([
+      "away_segments",
+      "frames",
+      "head_motion_dps",
+      "longest_away_ms",
+      "no_face_frames",
+      "on_camera_pct",
+      "pose_source",
+      "sample_hz",
+      "smile_pct",
+    ]);
+  });
+
+  test.each([
+    ["on_camera_pct", 100.1],
+    ["on_camera_pct", -1],
+    ["smile_pct", 140],
+    ["head_motion_dps", -0.5],
+    ["sample_hz", 0],
+    ["sample_hz", 61],
+    ["frames", -1],
+  ])("refuses %s of %p, which no measurement can produce", (key, value) => {
+    expect(cameraMetricsSchema.safeParse(cam({ [key]: value })).success).toBe(false);
+  });
+
+  test("refuses a pose source that is neither of the two the hook can use", () => {
+    expect(cameraMetricsSchema.safeParse(cam({ pose_source: "guess" })).success).toBe(false);
+  });
+
+  test("refuses a look-away that ends before it starts", () => {
+    const r = cameraMetricsSchema.safeParse(
+      cam({ away_segments: [{ start_ms: 6_000, end_ms: 3_000 }] }),
+    );
+    expect(r.success).toBe(false);
+  });
+
+  test("caps the segment list at 500, which is far more glances than an answer holds", () => {
+    const many = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({ start_ms: i * 10, end_ms: i * 10 + 5 }));
+    expect(cameraMetricsSchema.safeParse(cam({ away_segments: many(500) })).success).toBe(true);
+    expect(cameraMetricsSchema.safeParse(cam({ away_segments: many(501) })).success).toBe(false);
+  });
+
+  test("mirrors CameraTurnMetrics, so the parsed value can be stored as-is", () => {
+    const parsed = cameraMetricsSchema.parse(cam());
+    const shared: CameraTurnMetrics = parsed;
+    expect(shared.pose_source).toBe("matrix");
+    expect(shared.away_segments[0]!.end_ms).toBe(6_200);
+  });
+});
+
+describe("the JSON-in-a-form-field wrapper", () => {
+  function form(over: Record<string, unknown> = {}) {
+    return {
+      session_id: "11111111-1111-4111-8111-111111111111",
+      turn_index: "3",
+      ...over,
+    };
+  }
+
+  const CAM = {
+    frames: 120,
+    no_face_frames: 0,
+    on_camera_pct: 91,
+    smile_pct: 4,
+    head_motion_dps: 2.1,
+    away_segments: [],
+    longest_away_ms: 0,
+    sample_hz: 5,
+    pose_source: "landmarks" as const,
+  };
+
+  test("reads an absent field as absent, not as a broken payload", () => {
+    const r = turnRefSchema.safeParse(form());
+    expect(r.success).toBe(true);
+    expect(r.data!.camera_metrics).toBeUndefined();
+  });
+
+  test.each([
+    ["an empty string, which is how a form sends nothing", ""],
+    ["a null, which is how FormData.get reports a missing field", null],
+  ])("reads %s as absent", (_label, value) => {
+    const r = turnRefSchema.safeParse(form({ camera_metrics: value }));
+    expect(r.success).toBe(true);
+    expect(r.data!.camera_metrics).toBeUndefined();
+  });
+
+  test("parses the metrics the client stringified into the field", () => {
+    const r = turnRefSchema.safeParse(form({ camera_metrics: JSON.stringify(CAM) }));
+    expect(r.success).toBe(true);
+    expect(r.data!.camera_metrics).toEqual(CAM);
+  });
+
+  test("turns malformed JSON into a 400 naming the field, never a thrown parse", () => {
+    const r = turnRefSchema.safeParse(form({ camera_metrics: "{not json" }));
+    expect(r.success).toBe(false);
+    expect(issuePaths(r)).toContain("camera_metrics");
+  });
+
+  test("still refuses well-formed JSON that is not a set of metrics", () => {
+    const r = turnRefSchema.safeParse(form({ camera_metrics: JSON.stringify({ frames: -1 }) }));
+    expect(r.success).toBe(false);
+    expect(issuePaths(r).some((p) => p.startsWith("camera_metrics"))).toBe(true);
+  });
+
+  test("passes an object straight through, so a JSON body can use the same field", () => {
+    const r = turnRefSchema.safeParse(form({ camera_metrics: CAM }));
+    expect(r.success).toBe(true);
+    expect(r.data!.camera_metrics).toEqual(CAM);
+  });
+
+  test("takes the same metrics on a typed answer, including an explicit null", () => {
+    const body = {
+      session_id: "11111111-1111-4111-8111-111111111111",
+      turn_index: 0,
+      text: "I'd shard by tenant.",
+    };
+    expect(answerTextSchema.safeParse({ ...body, camera_metrics: CAM }).data!.camera_metrics).toEqual(CAM);
+    expect(answerTextSchema.safeParse({ ...body, camera_metrics: null }).success).toBe(true);
+    expect(answerTextSchema.safeParse(body).success).toBe(true);
+  });
+});
+
+describe("the interviewer voice request", () => {
+  test("names a turn and nothing else, since free text would be an open TTS proxy", () => {
+    const r = voiceRequestSchema.safeParse({
+      session_id: "11111111-1111-4111-8111-111111111111",
+      turn_index: 2,
+    });
+    expect(r.success).toBe(true);
+    expect(Object.keys(r.data!).sort()).toEqual(["session_id", "turn_index"]);
+  });
+
+  test("refuses a turn index that is not one", () => {
+    const base = { session_id: "11111111-1111-4111-8111-111111111111" };
+    expect(voiceRequestSchema.safeParse({ ...base, turn_index: -1 }).success).toBe(false);
+    expect(voiceRequestSchema.safeParse({ ...base, turn_index: 1.5 }).success).toBe(false);
+    expect(voiceRequestSchema.safeParse({ ...base }).success).toBe(false);
+  });
+});
+
+describe("the STAR labels the model returns", () => {
+  const OK = { labels: ["S", "S", "T", "A", "R"], missing: [], note: "Mostly action, thin result." };
+
+  test("passes a well-formed labelling through", () => {
+    const r = starResponseSchema.safeParse(OK);
+    expect(r.success).toBe(true);
+    expect(r.data!.labels).toEqual(["S", "S", "T", "A", "R"]);
+  });
+
+  test("refuses a label outside the five, rather than drawing a bar that means nothing", () => {
+    expect(starResponseSchema.safeParse({ ...OK, labels: ["S", "X"] }).success).toBe(false);
+    expect(starResponseSchema.safeParse({ ...OK, labels: ["s"] }).success).toBe(false);
+    expect(starResponseSchema.safeParse({ ...OK, labels: ["Situation"] }).success).toBe(false);
+  });
+
+  test("refuses an empty label list, which labels no sentence at all", () => {
+    expect(starResponseSchema.safeParse({ ...OK, labels: [] }).success).toBe(false);
+  });
+
+  test("does not police the label count — padding to the sentences is service work", () => {
+    const r = starResponseSchema.safeParse({ ...OK, labels: ["S"] });
+    expect(r.success).toBe(true);
+    expect(r.data!.labels).toEqual(["S"]);
+  });
+
+  test("reads a missing or malformed 'missing' list as nothing missing", () => {
+    expect(starResponseSchema.safeParse({ labels: ["S"], note: "n" }).data!.missing).toEqual([]);
+    expect(
+      starResponseSchema.safeParse({ labels: ["S"], note: "n", missing: ["Result"] }).data!.missing,
+    ).toEqual([]);
+  });
+
+  test("trims a runaway note instead of failing the turn over its length", () => {
+    const r = starResponseSchema.safeParse({ ...OK, note: "x".repeat(900) });
+    expect(r.success).toBe(true);
+    expect(r.data!.note).toHaveLength(300);
+  });
+
+  test("still refuses a labelling with no note, which is half the callout", () => {
+    expect(starResponseSchema.safeParse({ ...OK, note: "   " }).success).toBe(false);
+  });
+});
+
+describe("the job posting import request", () => {
+  const URL = "https://boards.greenhouse.io/acme/jobs/4012345";
+
+  test("takes a URL on its own — the server fetches the posting", () => {
+    const r = jdExtractRequestSchema.safeParse({ url: URL });
+    expect(r.success).toBe(true);
+    expect(r.data!.page_text).toBeUndefined();
+  });
+
+  test.each([
+    ["http, which the fetcher refuses anyway", "http://boards.greenhouse.io/acme/jobs/1"],
+    ["a javascript: URL, which would be rendered back as a link", "javascript:alert(1)"],
+    ["something that is not a URL at all", "acme.com/jobs"],
+    ["an empty string", ""],
+  ])("refuses %s", (_label, url) => {
+    expect(jdExtractRequestSchema.safeParse({ url }).success).toBe(false);
+  });
+
+  test("takes the page the bookmarklet scraped out of the user's own tab", () => {
+    const r = jdExtractRequestSchema.safeParse({
+      url: "https://www.linkedin.com/jobs/view/4012345",
+      page_title: "Senior Backend Engineer",
+      page_text: "We are looking for…",
+    });
+    expect(r.success).toBe(true);
+    expect(r.data!.page_title).toBe("Senior Backend Engineer");
+    expect(r.data!.page_text).toBe("We are looking for…");
+  });
+
+  test("caps the scraped page, since the bookmarklet slices at 60k of its own", () => {
+    const at = jdExtractRequestSchema.safeParse({ url: URL, page_text: "a".repeat(JOB_PAGE_TEXT_MAX_CHARS) });
+    expect(at.success).toBe(true);
+
+    const over = jdExtractRequestSchema.safeParse({
+      url: URL,
+      page_text: "a".repeat(JOB_PAGE_TEXT_MAX_CHARS + 1),
+    });
+    expect(over.success).toBe(false);
+    expect(issuePaths(over)).toContain("page_text");
+  });
+
+  test("reads an empty page field as absent, which is the fetch-it-yourself path", () => {
+    const r = jdExtractRequestSchema.safeParse({ url: URL, page_text: "", page_title: "" });
+    expect(r.success).toBe(true);
+    expect(r.data!.page_text).toBeUndefined();
+    expect(r.data!.page_title).toBeUndefined();
+  });
+});
+
+describe("the posting the model reads off a page", () => {
+  test("lets an empty description through, so the service can say 'not a posting'", () => {
+    const r = jobExtractSchema.safeParse({ title: "", company: null, location: null, description: "" });
+    expect(r.success).toBe(true);
+    expect(r.data!.description).toBe("");
+  });
+
+  test("keeps a company the page never named as null rather than inventing one", () => {
+    const r = jobExtractSchema.safeParse({
+      title: "Backend Engineer",
+      company: "",
+      location: null,
+      description: "d".repeat(400),
+    });
+    expect(r.success).toBe(true);
+    expect(r.data!.company).toBeNull();
+    expect(r.data!.location).toBeNull();
+  });
+
+  test("trims a long title or description instead of dropping the import", () => {
+    const r = jobExtractSchema.safeParse({ title: "t".repeat(500), description: "d".repeat(25_000) });
+    expect(r.success).toBe(true);
+    expect(r.data!.title).toHaveLength(200);
+    expect(r.data!.description).toHaveLength(20_000);
+  });
+
+  test("survives a model that returned nothing usable at all", () => {
+    const r = jobExtractSchema.safeParse({});
+    expect(r.success).toBe(true);
+    expect(r.data).toEqual({ title: "", company: null, location: null, description: "" });
+  });
+});
+
+describe("the company brief request", () => {
+  test("needs a company to research", () => {
+    expect(companyBriefRequestSchema.safeParse({ company: "   " }).success).toBe(false);
+    expect(companyBriefRequestSchema.safeParse({}).success).toBe(false);
+  });
+
+  test("takes a company at the key's ceiling and refuses one past it", () => {
+    expect(companyBriefRequestSchema.safeParse({ company: "a".repeat(COMPANY_MAX_CHARS) }).success).toBe(true);
+    expect(
+      companyBriefRequestSchema.safeParse({ company: "a".repeat(COMPANY_MAX_CHARS + 1) }).success,
+    ).toBe(false);
+  });
+
+  test("treats a blank role as no role, which is a different cache row", () => {
+    const r = companyBriefRequestSchema.safeParse({ company: "Acme", role: "" });
+    expect(r.success).toBe(true);
+    expect(r.data!.role).toBeUndefined();
+  });
+
+  test("leaves the cache in place unless a refresh was asked for", () => {
+    expect(companyBriefRequestSchema.safeParse({ company: "Acme" }).data!.refresh).toBe(false);
+    expect(companyBriefRequestSchema.safeParse({ company: "Acme", refresh: true }).data!.refresh).toBe(true);
+  });
+});
+
+describe("the company brief the model returns", () => {
+  const NEWS = { headline: "Acme raises a Series C", date: "2026-03", why_it_matters: "They are hiring fast." };
+  const OK = {
+    what_they_do: "Payments infrastructure for marketplaces.",
+    recent_news: [NEWS],
+    values: ["Write it down"],
+    interview_style_notes: ["One story per round"],
+    likely_questions: ["Walk me through a ledger you designed."],
+    questions_to_ask: ["How do you handle reconciliation breaks?"],
+  };
+
+  test("passes a well-formed brief through", () => {
+    const r = companyBriefSchema.safeParse(OK);
+    expect(r.success).toBe(true);
+    expect(r.data).toEqual(OK);
+  });
+
+  test("keeps the sections that came back when the others did not", () => {
+    const r = companyBriefSchema.safeParse({ values: ["Write it down"] });
+    expect(r.success).toBe(true);
+    expect(r.data!.what_they_do).toBe("");
+    expect(r.data!.recent_news).toEqual([]);
+    expect(r.data!.values).toEqual(["Write it down"]);
+  });
+
+  test("drops a malformed headline rather than losing the whole brief", () => {
+    const r = companyBriefSchema.safeParse({
+      ...OK,
+      recent_news: [NEWS, { headline: "no reason given" }, "nonsense", null],
+    });
+    expect(r.success).toBe(true);
+    expect(r.data!.recent_news).toEqual([NEWS]);
+  });
+
+  test("keeps a dateless headline, since the story is still the story", () => {
+    const r = companyBriefSchema.safeParse({
+      ...OK,
+      recent_news: [{ headline: "Acme ships an API", why_it_matters: "It's the team you'd join." }],
+    });
+    expect(r.data!.recent_news[0]!.date).toBe("");
+  });
+
+  test("caps every list at eight, however enthusiastic the model felt", () => {
+    const many = Array.from({ length: 30 }, (_, i) => `value ${i}`);
+    expect(companyBriefSchema.safeParse({ ...OK, values: many }).data!.values).toHaveLength(8);
+  });
+
+  test("mirrors CompanyBrief, so the parsed value is what gets stored", () => {
+    const shared: CompanyBrief = companyBriefSchema.parse(OK);
+    expect(shared.likely_questions).toHaveLength(1);
+  });
+});
+
+describe("the daily drill's requests", () => {
+  const CARD = "22222222-2222-4222-8222-222222222222";
+  const SCORES = { relevance: 7, correctness: 6, structure: 5, depth: 4, filler: 8 };
+
+  test("takes a typed drill answer and refuses an empty one", () => {
+    expect(drillTextAnswerSchema.safeParse({ card_id: CARD, text: "Because the index was unused." }).success).toBe(true);
+    expect(drillTextAnswerSchema.safeParse({ card_id: CARD, text: "   " }).success).toBe(false);
+    expect(drillTextAnswerSchema.safeParse({ card_id: "not-a-uuid", text: "x" }).success).toBe(false);
+  });
+
+  test("grades a card inside SM-2's own 0–5 range", () => {
+    expect(drillReviewSchema.safeParse({ card_id: CARD, grade: 1 }).success).toBe(true);
+    expect(drillReviewSchema.safeParse({ card_id: CARD, grade: "5" }).data!.grade).toBe(5);
+    expect(drillReviewSchema.safeParse({ card_id: CARD, grade: 6 }).success).toBe(false);
+    expect(drillReviewSchema.safeParse({ card_id: CARD, grade: -1 }).success).toBe(false);
+    expect(drillReviewSchema.safeParse({ card_id: CARD, grade: 2.5 }).success).toBe(false);
+  });
+
+  test("carries the transcript and scores the answer route already produced", () => {
+    const r = drillReviewSchema.safeParse({
+      card_id: CARD,
+      grade: 3,
+      transcript: "I'd add a covering index.",
+      answer_scores: SCORES,
+    });
+    expect(r.success).toBe(true);
+    expect(r.data!.answer_scores).toEqual(SCORES);
+  });
+
+  test("refuses a rubric that is not one, rather than storing it as a best answer", () => {
+    expect(
+      drillReviewSchema.safeParse({ card_id: CARD, grade: 3, answer_scores: { relevance: 7 } }).success,
+    ).toBe(false);
+  });
+});
+
+describe("the profile's timezone", () => {
+  test("takes an IANA zone the server can actually format dates in", () => {
+    const r = updateProfileSchema.safeParse({ timezone: "Asia/Kolkata" });
+    expect(r.success).toBe(true);
+    expect(r.data!.timezone).toBe("Asia/Kolkata");
+    expect(updateProfileSchema.safeParse({ timezone: "UTC" }).success).toBe(true);
+  });
+
+  test("refuses a zone nothing recognises, instead of letting the nightly sweep throw", () => {
+    expect(updateProfileSchema.safeParse({ timezone: "Mars/Olympus" }).success).toBe(false);
+    expect(updateProfileSchema.safeParse({ timezone: "GMT+5:30" }).success).toBe(false);
+    expect(updateProfileSchema.safeParse({ timezone: "   " }).success).toBe(false);
+  });
+
+  test("lets a user clear a zone the browser guessed wrong", () => {
+    const r = updateProfileSchema.safeParse({ timezone: null });
+    expect(r.success).toBe(true);
+    expect(r.data!.timezone).toBeNull();
+  });
+
+  test("leaves both new profile fields absent when they were not sent", () => {
+    const r = updateProfileSchema.safeParse({ name: "Yatin" });
+    expect(r.success).toBe(true);
+    expect(r.data!.timezone).toBeUndefined();
+    expect(r.data!.email_digest).toBeUndefined();
+  });
+});
+
+describe("an imported posting on the interview config", () => {
+  function jd(over: Record<string, unknown> = {}) {
+    return cfg({ mode: "jd", sources: [], job_description: "Senior Go role", ...over });
+  }
+
+  test("carries the provenance the importer read off the posting", () => {
+    const r = interviewConfigSchema.safeParse(
+      jd({
+        job_url: "https://jobs.lever.co/acme/6d2f0a1e-1111-4111-8111-111111111111",
+        company: "Acme",
+        job_title: "Senior Backend Engineer",
+        job_location: "Bengaluru, India",
+      }),
+    );
+    expect(r.success).toBe(true);
+    expect(r.data!.company).toBe("Acme");
+    expect(r.data!.job_title).toBe("Senior Backend Engineer");
+  });
+
+  test("reads the nulls an importer returns for what a posting never named", () => {
+    const r = interviewConfigSchema.safeParse(jd({ company: null, job_location: "", job_url: null }));
+    expect(r.success).toBe(true);
+    expect(r.data!.company).toBeUndefined();
+    expect(r.data!.job_location).toBeUndefined();
+    expect(r.data!.job_url).toBeUndefined();
+  });
+
+  test("refuses a job link that is not an https URL", () => {
+    expect(interviewConfigSchema.safeParse(jd({ job_url: "javascript:alert(1)" })).success).toBe(false);
+    expect(interviewConfigSchema.safeParse(jd({ job_url: "http://jobs.example.com/1" })).success).toBe(false);
+  });
+
+  test("still reads a JD session recorded before the importer existed", () => {
+    const r = storedConfigSchema.safeParse({ mode: "jd", job_description: "Senior Go role" });
+    expect(r.success).toBe(true);
+    expect(r.data!.company).toBeUndefined();
+  });
+});
+
+describe("delivery metrics read back off a report row", () => {
+  const MEASURED: DeliveryMetrics = {
+    wpm: 148.2,
+    avg_pause_ms: 210.5,
+    filler_count: 9,
+    pitch_variation: 21.6,
+    energy: 0.038,
+    mean_pitch_hz: 121,
+    jitter_local: 0.012,
+    shimmer_local: 0.041,
+    hnr_db: 18.4,
+    uptalk_pct: 22.2,
+    uptalk_statements: 9,
+    uptalk_rising: 2,
+    on_camera_pct: 74.1,
+    smile_pct: 8.3,
+    head_motion_dps: 5.2,
+    camera_turns: 4,
+  };
+
+  test("passes a fully measured report through untouched", () => {
+    const r = deliveryMetricsSchema.safeParse(MEASURED);
+    expect(r.success).toBe(true);
+    expect(r.data).toEqual(MEASURED);
+  });
+
+  test("reads a report written before a metric existed as NOT MEASURED, never as zero", () => {
+    const old = {
+      wpm: 148.2,
+      avg_pause_ms: 210.5,
+      filler_count: 9,
+      pitch_variation: 21.6,
+      energy: 0.038,
+      mean_pitch_hz: 121,
+    };
+    const r = deliveryMetricsSchema.safeParse(old);
+    expect(r.success).toBe(true);
+    expect(r.data!.jitter_local).toBeNull();
+    expect(r.data!.hnr_db).toBeNull();
+    expect(r.data!.uptalk_pct).toBeNull();
+    expect(r.data!.on_camera_pct).toBeNull();
+    expect(r.data!.smile_pct).toBeNull();
+    expect(r.data!.head_motion_dps).toBeNull();
+  });
+
+  test("reads a row with no timing or filler keys at all as unmeasured, not as a perfect run", () => {
+    const r = deliveryMetricsSchema.safeParse({ pitch_variation: 21.6 });
+    expect(r.success).toBe(true);
+    expect(r.data!.wpm).toBeNull();
+    expect(r.data!.avg_pause_ms).toBeNull();
+    expect(r.data!.filler_count).toBeNull();
+  });
+
+  test("keeps a stored zero, because a run with no fillers really did have none", () => {
+    const r = deliveryMetricsSchema.parse({ wpm: 0, avg_pause_ms: 0, filler_count: 0 });
+    expect(r.wpm).toBe(0);
+    expect(r.avg_pause_ms).toBe(0);
+    expect(r.filler_count).toBe(0);
+  });
+
+  test("reads counts that never happened as zero, which is what they are", () => {
+    const r = deliveryMetricsSchema.parse({ wpm: 0, avg_pause_ms: 0, filler_count: 0 });
+    expect(r.camera_turns).toBe(0);
+    expect(r.uptalk_statements).toBe(0);
+    expect(r.uptalk_rising).toBe(0);
+  });
+
+  test("reads an unusable value as unmeasured rather than dropping the comparison", () => {
+    const r = deliveryMetricsSchema.safeParse({ ...MEASURED, energy: "loud", camera_turns: null });
+    expect(r.success).toBe(true);
+    expect(r.data!.energy).toBeNull();
+    expect(r.data!.camera_turns).toBe(0);
+  });
+
+  test("mirrors every key of DeliveryMetrics, which is what the retry diff compares", () => {
+    const parsed = deliveryMetricsSchema.parse(MEASURED);
+    expect(Object.keys(parsed).sort()).toEqual(Object.keys(MEASURED).sort());
+    expect(parsed.camera_turns).toBe(4);
+  });
+});
+
+describe("a STAR breakdown read back off a report row", () => {
+  const STORED = {
+    turn_index: 2,
+    basis: "time",
+    segments: [{ label: "S", start: 0, end: 4.2, text: "We had a flaky deploy." }],
+    share: { S: 62, T: 8, A: 26, R: 4, other: 0 },
+    missing: ["R"],
+    note: "Two thirds is scene-setting.",
+  };
+
+  test("passes a stored breakdown through", () => {
+    const r = starBreakdownSchema.safeParse(STORED);
+    expect(r.success).toBe(true);
+    expect(r.data!.share.S).toBe(62);
+  });
+
+  test("mirrors StarBreakdown, so the shared report can render it unguarded", () => {
+    const shared: StarBreakdown = starBreakdownSchema.parse(STORED);
+    expect(shared.missing).toEqual(["R"]);
+  });
+
+  test("refuses a breakdown with no basis, which is what the bar's units depend on", () => {
+    expect(starBreakdownSchema.safeParse({ ...STORED, basis: "vibes" }).success).toBe(false);
   });
 });

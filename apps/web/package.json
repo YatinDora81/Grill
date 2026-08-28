@@ -10,12 +10,16 @@
     "lint": "eslint --max-warnings 0",
     "check-types": "next typegen && tsc --noEmit",
     "test": "bun test/run.ts",
-    "test:watch": "bun test --watch"
+    "test:watch": "bun test --watch",
+    "postinstall": "node scripts/copy-mediapipe.mjs; node scripts/fetch-face-model.mjs; exit 0"
   },
   "dependencies": {
+    "@mediapipe/tasks-vision": "^1.0.1",
     "@node-rs/argon2": "^2.0.2",
     "@repo/db": "*",
     "@repo/types": "*",
+    "@upstash/qstash": "^2.11.3",
+    "@upstash/redis": "^1.38.3",
     "aws4fetch": "^1.0.20",
     "jose": "^6.1.0",
     "mammoth": "^1.12.0",

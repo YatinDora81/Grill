@@ -15,10 +15,15 @@ model User {
   emailOnReport Boolean  @default(true) @map("email_on_report")
   createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
+  timezone     String?   @db.VarChar(64)
+  emailDigest  Boolean   @default(true) @map("email_digest")
+  lastDigestAt DateTime? @map("last_digest_at") @db.Timestamptz(6)
+
   sessions            Session[]
   starred             StarredQuestion[]
   questionSets        QuestionSet[]
   passwordResetTokens PasswordResetToken[]
+  drillCards          DrillCard[]
 
   @@map("users")
 }
@@ -174,10 +179,49 @@ model StarredQuestion {
   @@map("starred_questions")
 }
 
-/// One continuous camera recording. A session usually has exactly one — but a
-/// reload mid-interview stops the old MediaRecorder and starts a fresh one, so
-/// the recording is a row, not a column on Session. Each row is one R2 object
-/// and its own timeline; Turn.videoOffsetMs is relative to THIS row's start.
+model DrillCard {
+  id           String       @id @default(uuid()) @db.Uuid
+  userId       String       @map("user_id") @db.Uuid
+  question     String
+  questionType QuestionType @map("question_type")
+  questionHash String       @map("question_hash") @db.Char(64)
+  sourceTurnId String?      @map("source_turn_id") @db.Uuid
+
+  ease         Float     @default(2.5)
+  intervalDays Int       @default(0) @map("interval_days")
+  repetitions  Int       @default(0)
+  dueAt        DateTime  @default(now()) @map("due_at") @db.Timestamptz(6)
+  lastGrade    Int?      @map("last_grade")
+  bestTranscript String? @map("best_transcript")
+  bestMean       Float?  @map("best_mean")
+  suspendedAt    DateTime? @map("suspended_at") @db.Timestamptz(6)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user    User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reviews DrillReview[]
+
+  @@unique([userId, questionHash])
+  @@index([userId, suspendedAt, dueAt])
+  @@map("drill_cards")
+}
+
+model DrillReview {
+  id     String @id @default(uuid()) @db.Uuid
+  cardId String @map("card_id") @db.Uuid
+  userId String @map("user_id") @db.Uuid
+
+  grade        Int
+  transcript   String?
+  answerScores Json?    @map("answer_scores")
+  reviewedAt   DateTime @default(now()) @map("reviewed_at") @db.Timestamptz(6)
+
+  card DrillCard @relation(fields: [cardId], references: [id], onDelete: Cascade)
+
+  @@index([userId, reviewedAt])
+  @@index([cardId])
+  @@map("drill_reviews")
+}
+
 model SessionVideo {
   id        String @id @default(uuid()) @db.Uuid
   sessionId String @map("session_id") @db.Uuid
@@ -211,6 +255,8 @@ model Turn {
   videoId       String? @map("video_id") @db.Uuid
   videoOffsetMs Int?    @map("video_offset_ms")
 
+  cameraMetrics Json?   @map("camera_metrics")
+
   session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   video   SessionVideo? @relation(fields: [videoId], references: [id], onDelete: SetNull)
   starred StarredQuestion[]
@@ -234,6 +280,7 @@ model Report {
   worstAnswer     Json?    @map("worst_answer")
   nextSteps       Json     @map("next_steps")
   questionFeedback Json    @default("[]") @map("question_feedback")
+  starBreakdown   Json     @default("[]") @map("star_breakdown")
   raw             Json
   createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
@@ -252,4 +299,22 @@ model ReportShare {
   session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@map("report_shares")
+}
+
+model CompanyBrief {
+  id         String @id @default(uuid()) @db.Uuid
+  companyKey String @map("company_key") @db.VarChar(120)
+  roleKey    String @map("role_key") @db.VarChar(120)
+
+  company String
+  role    String?
+  brief   Json
+  grounded Boolean
+  sources  Json @default("[]")
+  raw      Json
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([companyKey, roleKey])
+  @@map("company_briefs")
 }

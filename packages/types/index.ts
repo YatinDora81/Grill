@@ -48,11 +48,10 @@ export interface InterviewConfig {
   mode: ExclusiveMode | null;
   topic?: string;
   job_description?: string;
-  /**
-   * `project`: the material the interviewer reads — a pasted write-up or the
-   * edited digest of an imported GitHub repo. This IS the interview; the résumé,
-   * if present at all, is only background. Bounded to 24 000 chars by the schema.
-   */
+  job_url?: string;
+  company?: string;
+  job_title?: string;
+  job_location?: string;
   project_context?: string;
   project_repo_url?: string;
   starred_hashes?: string[];
@@ -126,6 +125,31 @@ export interface PresignResponse {
   expires_in: number;
 }
 
+export interface VoiceResponse {
+  url: string | null;
+  provider: "orpheus" | "browser";
+  cached?: boolean;
+  reason?: string;
+  budget_remaining?: number;
+}
+
+export interface AwaySegment {
+  start_ms: number;
+  end_ms: number;
+}
+
+export interface CameraTurnMetrics {
+  frames: number;
+  no_face_frames: number;
+  on_camera_pct: number;
+  smile_pct: number;
+  head_motion_dps: number;
+  away_segments: AwaySegment[];
+  longest_away_ms: number;
+  sample_hz: number;
+  pose_source: "matrix" | "landmarks";
+}
+
 export interface DeliveryMetrics {
   wpm: number;
   avg_pause_ms: number;
@@ -133,6 +157,16 @@ export interface DeliveryMetrics {
   pitch_variation: number | null;
   energy: number | null;
   mean_pitch_hz: number | null;
+  jitter_local: number | null;
+  shimmer_local: number | null;
+  hnr_db: number | null;
+  uptalk_pct: number | null;
+  uptalk_statements: number;
+  uptalk_rising: number;
+  on_camera_pct: number | null;
+  smile_pct: number | null;
+  head_motion_dps: number | null;
+  camera_turns: number;
 }
 
 export interface CategoryScores {
@@ -162,6 +196,24 @@ export interface QuestionFeedback {
   improvements: string[];
 }
 
+export type StarLabel = "S" | "T" | "A" | "R" | "other";
+
+export interface StarSegment {
+  label: StarLabel;
+  start: number;
+  end: number;
+  text: string;
+}
+
+export interface StarBreakdown {
+  turn_index: number;
+  basis: "time" | "words";
+  segments: StarSegment[];
+  share: Record<StarLabel, number>;
+  missing: Exclude<StarLabel, "other">[];
+  note: string;
+}
+
 export interface Report {
   id: string;
   session_id: string;
@@ -175,6 +227,7 @@ export interface Report {
   worst_answer: AnswerHighlight | null;
   next_steps: string[];
   question_feedback: QuestionFeedback[];
+  star_breakdown: StarBreakdown[];
   created_at: string;
 }
 
@@ -208,6 +261,8 @@ export interface DashboardStats {
   fillers_per_answer: number | null;
   fillers_per_answer_first: number | null;
   top_pattern: string | null;
+  streak_days: number;
+  cards_due: number;
 }
 
 export interface RecentSession {
@@ -251,6 +306,11 @@ export interface AcousticMetrics {
   pitch_variation: number;
   energy: number;
   mean_pitch_hz: number;
+  jitter_local: number | null;
+  shimmer_local: number | null;
+  hnr_db: number | null;
+  uptalk_statements: number | null;
+  uptalk_rising: number | null;
 }
 
 export interface TranscriptWord {
@@ -309,4 +369,113 @@ export interface GenerateQuestionSetResponse {
 export interface DeleteQuestionSetResponse {
   set_id: string;
   deleted: true;
+}
+
+export type JobImportSource = "greenhouse" | "lever" | "ashby" | "generic" | "bookmarklet";
+
+export interface JobImportResponse {
+  title: string;
+  company: string | null;
+  location: string | null;
+  description: string;
+  source: JobImportSource;
+  url: string;
+}
+
+export type DrillGrade = 1 | 3 | 5;
+
+export interface DrillCardDTO {
+  id: string;
+  question: string;
+  question_type: QuestionType;
+  due_at: string;
+  interval_days: number;
+  repetitions: number;
+  last_grade: number | null;
+  best_transcript: string | null;
+  best_mean: number | null;
+  ahead: boolean;
+}
+
+export interface DrillQueueResponse {
+  cards: DrillCardDTO[];
+  due_total: number;
+  streak_days: number;
+  reviewed_today: number;
+}
+
+export interface DrillAnswerResponse {
+  card_id: string;
+  transcript: string;
+  answer_scores: AnswerScores;
+  suggested_grade: DrillGrade;
+  improvements: string[];
+  better_line: string | null;
+  previous_best: string | null;
+}
+
+export interface DrillReviewResponse {
+  due_at: string;
+  interval_days: number;
+  streak_days: number;
+}
+
+export type DiffOp = { op: "keep" | "add" | "del"; text: string };
+
+export interface MetricDelta {
+  key: string;
+  label: string;
+  then: number | null;
+  now: number | null;
+  delta: number | null;
+  unit: string;
+  better: "up" | "down" | "none";
+}
+
+export interface TurnComparison {
+  turn_index: number;
+  question: string;
+  then_transcript: string;
+  now_transcript: string;
+  then_mean: number | null;
+  now_mean: number | null;
+  diff: DiffOp[];
+}
+
+export interface Comparison {
+  parent_session_id: string;
+  parent_name: string | null;
+  parent_date: string;
+  overall: MetricDelta;
+  categories: MetricDelta[];
+  delivery: MetricDelta[];
+  turns: TurnComparison[];
+}
+
+export interface CompanyNewsItem {
+  headline: string;
+  date: string;
+  why_it_matters: string;
+}
+
+export interface CompanyBrief {
+  what_they_do: string;
+  recent_news: CompanyNewsItem[];
+  values: string[];
+  interview_style_notes: string[];
+  likely_questions: string[];
+  questions_to_ask: string[];
+}
+
+export interface GroundingSource {
+  uri: string;
+  title: string;
+}
+
+export interface CompanyBriefResponse {
+  brief: CompanyBrief;
+  grounded: boolean;
+  sources: GroundingSource[];
+  cached: boolean;
+  generated_at: string;
 }

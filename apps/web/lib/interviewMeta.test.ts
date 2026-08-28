@@ -169,6 +169,31 @@ describe("interviewLabel", () => {
       "Starred drill",
     );
   });
+
+  test("names the hiring company once the importer has read one off the posting", () => {
+    expect(interviewLabel(cfg({ mode: "jd", company: "Stripe" }))).toBe("Job description · Stripe");
+  });
+
+  test("trims the stored company, which arrives from a scraped page", () => {
+    expect(interviewLabel(cfg({ mode: "jd", company: "  Stripe\n" }))).toBe(
+      "Job description · Stripe",
+    );
+  });
+
+  test("keeps the plain label for a hand-pasted posting that named nobody", () => {
+    expect(interviewLabel(cfg({ mode: "jd" }))).toBe(MODE_META.jd.label);
+    expect(interviewLabel(cfg({ mode: "jd", company: "" }))).toBe(MODE_META.jd.label);
+    expect(interviewLabel(cfg({ mode: "jd", company: "   " }))).toBe(MODE_META.jd.label);
+  });
+
+  test("only the JD mode wears a company, however a stale row was written", () => {
+    for (const mode of ALL_MODES.filter((m) => m !== "jd")) {
+      expect(interviewLabel(cfg({ mode, company: "Stripe" }))).toBe(MODE_META[mode].label);
+    }
+    expect(interviewLabel(cfg({ sources: ["resume"], company: "Stripe" }))).toBe(
+      SOURCE_META.resume.label,
+    );
+  });
 });
 
 describe("personas", () => {

@@ -13,9 +13,7 @@ function createClient(): PrismaClient {
   let schema: string | undefined;
   try {
     schema = new URL(connectionString).searchParams.get("schema") ?? undefined;
-  } catch {
-    /* non-URL connection string — leave schema undefined */
-  }
+  } catch {}
   const adapter = new PrismaPg({ connectionString }, schema ? { schema } : undefined);
   return new PrismaClient({ adapter });
 }

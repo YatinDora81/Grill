@@ -19,6 +19,8 @@ export const nextJsConfig = [
     "out/**",
     "build/**",
     "next-env.d.ts",
+    "public/mediapipe/**",
+    "public/models/**",
   ]),
   {
     ...pluginReact.configs.flat.recommended,
@@ -48,7 +50,17 @@ export const nextJsConfig = [
       "react/react-in-jsx-scope": "off",
     },
   },
-  // Last, so it wins over the tseslint recommended set spread in above — which
-  // otherwise turns no-explicit-any back on for test files.
+  {
+    files: ["app/api/**/*.ts"],
+    ignores: ["**/*.test.ts"],
+    languageOptions: {
+      parserOptions: {
+        projectService: true,
+      },
+    },
+    rules: {
+      "@typescript-eslint/no-floating-promises": "error",
+    },
+  },
   testOverrides,
 ];

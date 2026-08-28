@@ -54,6 +54,49 @@ if (!process.env.SMTP_EMAIL || !process.env.SMTP_PASSWORD) {
   );
 }
 
+const storageReady = Boolean(
+  process.env.S3_ENDPOINT &&
+    process.env.S3_BUCKET &&
+    process.env.S3_ACCESS_KEY_ID &&
+    process.env.S3_SECRET_ACCESS_KEY,
+);
+
+if (process.env.TTS_ENABLED === "1") {
+  if (groqKeys.length === 0) {
+    console.warn(
+      "[env] TTS_ENABLED=1 but GROQ_API_KEYS is empty — the interviewer voice stays on the browser's built-in speech.",
+    );
+  }
+  if (!storageReady) {
+    console.warn(
+      "[env] TTS_ENABLED=1 but the S3_* vars are incomplete — there is nowhere to cache clips, so the interviewer voice stays on the browser's built-in speech.",
+    );
+  }
+}
+
+const upstashUrlSet = Boolean(process.env.UPSTASH_REDIS_REST_URL);
+const upstashTokenSet = Boolean(process.env.UPSTASH_REDIS_REST_TOKEN);
+if (upstashUrlSet !== upstashTokenSet) {
+  console.warn(
+    "[env] only one of UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN is set — rate limits stay in memory, per instance. Set both, or neither.",
+  );
+} else if (!upstashUrlSet) {
+  console.info(
+    "[env] UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN are unset — rate limits and the interviewer voice's daily budget count in this instance's memory and reset on a cold start. Set both to share them across instances.",
+  );
+}
+
+const qstashVarsSet = [
+  process.env.QSTASH_TOKEN,
+  process.env.QSTASH_CURRENT_SIGNING_KEY,
+  process.env.QSTASH_NEXT_SIGNING_KEY,
+].filter(Boolean).length;
+if (qstashVarsSet > 0 && qstashVarsSet < 3) {
+  console.warn(
+    "[env] QSTASH_TOKEN / QSTASH_CURRENT_SIGNING_KEY / QSTASH_NEXT_SIGNING_KEY are partially set — report builds keep riding on the request that ended the interview. Set all three, or none.",
+  );
+}
+
 export const config = {
   gemini: {
     keys: geminiKeys,
@@ -105,8 +148,19 @@ export const config = {
     maxBytes: num("MAX_AUDIO_MB", 25) * 1024 * 1024,
     retentionDays: num("AUDIO_RETENTION_DAYS", 100),
   },
+  tts: {
+    enabled: process.env.TTS_ENABLED === "1",
+    model: process.env.GROQ_TTS_MODEL || "canopylabs/orpheus-v1-english",
+    dailyBudget: num("TTS_DAILY_BUDGET", 90),
+    cachePrefix: process.env.TTS_CACHE_PREFIX || "tts/orpheus/",
+    maxChars: num("TTS_MAX_CHARS", 1_200),
+  },
   interview: {
     defaultNumQuestions: num("DEFAULT_NUM_QUESTIONS", 8),
+  },
+  drill: {
+    dailyCards: num("DRILL_DAILY_CARDS", 3),
+    digestDays: num("DRILL_DIGEST_DAYS", 7),
   },
   site: {
     url: process.env.NEXT_PUBLIC_SITE_URL
@@ -115,21 +169,36 @@ export const config = {
         ? `https://${process.env.VERCEL_URL}`
         : "http://localhost:4000",
   },
+  upstash: {
+    redisUrl: process.env.UPSTASH_REDIS_REST_URL || "",
+    redisToken: process.env.UPSTASH_REDIS_REST_TOKEN || "",
+  },
+  qstash: {
+    token: process.env.QSTASH_TOKEN || "",
+    currentSigningKey: process.env.QSTASH_CURRENT_SIGNING_KEY || "",
+    nextSigningKey: process.env.QSTASH_NEXT_SIGNING_KEY || "",
+  },
   presignExpirySeconds: num("PRESIGN_EXPIRY_SECONDS", 300),
 
   get storageConfigured(): boolean {
-    return Boolean(
-      this.storage.endpoint &&
-        this.storage.bucket &&
-        this.storage.accessKeyId &&
-        this.storage.secretAccessKey,
-    );
+    return storageReady;
   },
   get mailConfigured(): boolean {
     return Boolean(this.mail.user && this.mail.password);
   },
   get databaseConfigured(): boolean {
     return Boolean(process.env.DATABASE_URL);
+  },
+  get ttsConfigured(): boolean {
+    return Boolean(this.tts.enabled && this.groq.keys.length > 0 && storageReady);
+  },
+  get redisConfigured(): boolean {
+    return Boolean(this.upstash.redisUrl && this.upstash.redisToken);
+  },
+  get qstashConfigured(): boolean {
+    return Boolean(
+      this.qstash.token && this.qstash.currentSigningKey && this.qstash.nextSigningKey,
+    );
   },
 } as const;
 

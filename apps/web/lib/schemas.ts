@@ -22,9 +22,27 @@ export const resetPasswordSchema = z.object({
   password: z.string().min(config.auth.passwordMinLength).max(200),
 });
 
+function isKnownTimeZone(zone: string): boolean {
+  try {
+    Intl.DateTimeFormat("en-CA", { timeZone: zone });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export const timezoneSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(64)
+  .refine(isKnownTimeZone, "That isn't a time zone this server knows.");
+
 export const updateProfileSchema = z.object({
   name: z.string().trim().min(1).max(80).nullable().optional(),
   email_on_report: z.boolean().optional(),
+  timezone: timezoneSchema.nullable().optional(),
+  email_digest: z.boolean().optional(),
 });
 
 export const changePasswordSchema = z.object({
@@ -105,19 +123,42 @@ function migrateConfig(raw: unknown): unknown {
   const rawDiff = typeof c.difficulty === "string" ? c.difficulty : undefined;
   const modern =
     rawDiff === "easy" || rawDiff === "medium" || rawDiff === "hard" || rawDiff === "extreme";
-  if (modern) {
-    /* already current */
-  } else if (typeof c.years_experience === "number") {
-    c.difficulty = yearsToDifficulty(c.years_experience);
-  } else if (rawDiff && LEGACY_DIFFICULTY[rawDiff]) {
-    c.difficulty = LEGACY_DIFFICULTY[rawDiff];
-  } else {
-    c.difficulty = "medium";
+  if (!modern) {
+    if (typeof c.years_experience === "number") {
+      c.difficulty = yearsToDifficulty(c.years_experience);
+    } else if (rawDiff && LEGACY_DIFFICULTY[rawDiff]) {
+      c.difficulty = LEGACY_DIFFICULTY[rawDiff];
+    } else {
+      c.difficulty = "medium";
+    }
   }
   delete c.years_experience;
 
   return c;
 }
+
+export const JOB_DESCRIPTION_MAX_CHARS = 20_000;
+export const JOB_DESCRIPTION_MIN_CHARS = 200;
+export const JOB_PAGE_TEXT_MAX_CHARS = 60_000;
+export const JOB_URL_MAX_CHARS = 2_000;
+export const COMPANY_MAX_CHARS = 120;
+
+const optionalText = (max: number) =>
+  z.preprocess(
+    (v) => (v === null || v === "" ? undefined : v),
+    z.string().trim().max(max).optional(),
+  );
+
+function isHttpsUrl(raw: string): boolean {
+  try {
+    return new URL(raw).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+export const httpsUrlSchema = (max: number) =>
+  z.string().trim().url().max(max).refine(isHttpsUrl, "Links must start with https://.");
 
 const interviewConfigShape = z.object({
   num_questions: z.coerce
@@ -131,12 +172,14 @@ const interviewConfigShape = z.object({
   sources: z.array(interviewSourceSchema).max(3).default([]),
   mode: exclusiveModeSchema.nullable().default(null),
   topic: z.string().trim().max(2_000).optional(),
-  job_description: z.string().trim().max(20_000).optional(),
-  // `project`: the material the interviewer reads (pasted text or edited digest)
-  // and, when a repo was imported, the URL it came from. Both optional so every
-  // historic config still parses; the superRefine below requires the context
-  // when the mode is `project`. The digest is denser than a résumé, hence the
-  // higher ceiling than job_description.
+  job_description: z.string().trim().max(JOB_DESCRIPTION_MAX_CHARS).optional(),
+  job_url: z.preprocess(
+    (v) => (v === null || v === "" ? undefined : v),
+    httpsUrlSchema(JOB_URL_MAX_CHARS).optional(),
+  ),
+  company: optionalText(COMPANY_MAX_CHARS),
+  job_title: optionalText(200),
+  job_location: optionalText(200),
   project_context: z.string().trim().max(24_000).optional(),
   project_repo_url: z.string().trim().url().max(500).optional(),
   starred_hashes: z.array(z.string().regex(/^[0-9a-f]{64}$/)).min(1).max(12).optional(),
@@ -287,7 +330,48 @@ export const resumeGapRequestSchema = z.object({
   ),
 });
 
-// ── Session video ─────────────────────────────────────────────────
+const AWAY_MS_MAX = 12 * 3_600_000;
+
+export const awaySegmentSchema = z
+  .object({
+    start_ms: z.coerce.number().int().min(0).max(AWAY_MS_MAX),
+    end_ms: z.coerce.number().int().min(0).max(AWAY_MS_MAX),
+  })
+  .superRefine((v, ctx) => {
+    if (v.end_ms < v.start_ms) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["end_ms"],
+        message: "A look-away cannot end before it starts.",
+      });
+    }
+  });
+
+export const cameraMetricsSchema = z.object({
+  frames: z.coerce.number().int().min(0).max(100_000),
+  no_face_frames: z.coerce.number().int().min(0).max(100_000),
+  on_camera_pct: z.coerce.number().min(0).max(100),
+  smile_pct: z.coerce.number().min(0).max(100),
+  head_motion_dps: z.coerce.number().min(0).max(10_000),
+  away_segments: z.array(awaySegmentSchema).max(500),
+  longest_away_ms: z.coerce.number().int().min(0).max(AWAY_MS_MAX),
+  sample_hz: z.coerce.number().min(1).max(60),
+  pose_source: z.enum(["matrix", "landmarks"]),
+});
+
+const INVALID_JSON = "__invalid_json__";
+
+function jsonField<T extends z.ZodType>(schema: T) {
+  return z.preprocess((v) => {
+    if (v === null || v === undefined || v === "") return undefined;
+    if (typeof v !== "string") return v;
+    try {
+      return JSON.parse(v);
+    } catch {
+      return INVALID_JSON;
+    }
+  }, schema.optional());
+}
 
 export const videoStartSchema = z.object({
   session_id: z.string().uuid(),
@@ -311,6 +395,7 @@ export const answerTextSchema = z.object({
   turn_index: z.coerce.number().int().min(0),
   text: z.string().min(1).max(20_000),
   ...answerVideoFields,
+  camera_metrics: cameraMetricsSchema.nullish(),
 });
 
 export const turnRefSchema = z.object({
@@ -320,16 +405,56 @@ export const turnRefSchema = z.object({
     .preprocess((v) => (v === null || v === "" ? undefined : v), z.string().uuid().optional()),
   video_offset_ms: z
     .preprocess((v) => (v === null || v === "" ? undefined : v), z.coerce.number().int().min(0).optional()),
+  camera_metrics: jsonField(cameraMetricsSchema),
 });
 
 export const sessionIdSchema = z.object({ session_id: z.string().uuid() });
 
-// ── Report shares ─────────────────────────────────────────────────
+export const voiceRequestSchema = z.object({
+  session_id: z.string().uuid(),
+  turn_index: z.coerce.number().int().min(0),
+});
+
 export const shareSessionParamsSchema = z.object({ sessionId: z.string().uuid() });
 
 export const shareTokenSchema = z.string().trim().min(32).max(200).regex(/^[A-Za-z0-9_-]+$/);
 
-// ── LLM JSON responses ────────────────────────────────────────────
+export const jdExtractRequestSchema = z.object({
+  url: httpsUrlSchema(JOB_URL_MAX_CHARS),
+  page_title: optionalText(300),
+  page_text: z.preprocess(
+    (v) => (v === null || v === "" ? undefined : v),
+    z.string().trim().min(1).max(JOB_PAGE_TEXT_MAX_CHARS).optional(),
+  ),
+});
+
+export const companyBriefRequestSchema = z.object({
+  company: z.string().trim().min(1, "Name the company you're interviewing at.").max(COMPANY_MAX_CHARS),
+  role: optionalText(COMPANY_MAX_CHARS),
+  refresh: z.coerce.boolean().default(false),
+});
+
+const cappedLine = (max: number) =>
+  z
+    .string()
+    .trim()
+    .min(1)
+    .transform((s) => s.slice(0, max));
+
+function keepingOnlyWellFormed<T>(item: z.ZodType<T>, cap: number) {
+  return z
+    .array(z.unknown())
+    .catch([])
+    .transform((raw) =>
+      raw
+        .flatMap((v) => {
+          const parsed = item.safeParse(v);
+          return parsed.success ? [parsed.data] : [];
+        })
+        .slice(0, cap),
+    );
+}
+
 export const questionResponseSchema = z.object({
   question: z.string().min(1),
   question_type: z
@@ -400,37 +525,16 @@ const GAP_SUMMARY_MAX_CHARS = 600;
 const GAP_LINE_MAX_CHARS = 400;
 const GAP_LIST_MAX_ITEMS = 12;
 
-const gapLine = (max: number) =>
-  z
-    .string()
-    .trim()
-    .min(1)
-    .transform((s) => s.slice(0, max));
-
 const coveredItemSchema = z.object({
-  requirement: gapLine(240),
-  evidence: gapLine(GAP_LINE_MAX_CHARS),
+  requirement: cappedLine(240),
+  evidence: cappedLine(GAP_LINE_MAX_CHARS),
 });
 
 const gapItemSchema = z.object({
-  requirement: gapLine(240),
-  why_it_matters: gapLine(GAP_LINE_MAX_CHARS),
-  how_to_close: gapLine(GAP_LINE_MAX_CHARS),
+  requirement: cappedLine(240),
+  why_it_matters: cappedLine(GAP_LINE_MAX_CHARS),
+  how_to_close: cappedLine(GAP_LINE_MAX_CHARS),
 });
-
-function keepingOnlyWellFormed<T>(item: z.ZodType<T>, cap: number) {
-  return z
-    .array(z.unknown())
-    .catch([])
-    .transform((raw) =>
-      raw
-        .flatMap((v) => {
-          const parsed = item.safeParse(v);
-          return parsed.success ? [parsed.data] : [];
-        })
-        .slice(0, cap),
-    );
-}
 
 export const resumeGapResponseSchema = z.object({
   match_percent: z.coerce
@@ -445,6 +549,163 @@ export const resumeGapResponseSchema = z.object({
   gaps: keepingOnlyWellFormed(gapItemSchema, GAP_LIST_MAX_ITEMS),
 });
 
+export const starLabelSchema = z.enum(["S", "T", "A", "R", "other"]);
+
+export const starPartSchema = z.enum(["S", "T", "A", "R"]);
+
+const STAR_LABELS_MAX = 400;
+const STAR_NOTE_MAX_CHARS = 300;
+
+export const starResponseSchema = z.object({
+  labels: z.array(starLabelSchema).min(1).max(STAR_LABELS_MAX),
+  missing: z.array(starPartSchema).default([]).catch([]),
+  note: cappedLine(STAR_NOTE_MAX_CHARS),
+});
+
+export const jobExtractSchema = z.object({
+  title: z
+    .string()
+    .trim()
+    .transform((t) => t.slice(0, 200))
+    .catch(""),
+  company: optionalText(COMPANY_MAX_CHARS).transform((v) => v ?? null),
+  location: optionalText(200).transform((v) => v ?? null),
+  description: z
+    .string()
+    .trim()
+    .transform((s) => s.slice(0, JOB_DESCRIPTION_MAX_CHARS))
+    .catch(""),
+});
+
+const BRIEF_LIST_MAX_ITEMS = 8;
+const BRIEF_SUMMARY_MAX_CHARS = 600;
+
+const briefNewsSchema = z.object({
+  headline: cappedLine(160),
+  date: cappedLine(40).catch(""),
+  why_it_matters: cappedLine(400),
+});
+
+export const companyBriefSchema = z.object({
+  what_they_do: z
+    .string()
+    .trim()
+    .transform((s) => s.slice(0, BRIEF_SUMMARY_MAX_CHARS))
+    .catch(""),
+  recent_news: keepingOnlyWellFormed(briefNewsSchema, BRIEF_LIST_MAX_ITEMS),
+  values: keepingOnlyWellFormed(cappedLine(200), BRIEF_LIST_MAX_ITEMS),
+  interview_style_notes: keepingOnlyWellFormed(cappedLine(300), BRIEF_LIST_MAX_ITEMS),
+  likely_questions: keepingOnlyWellFormed(cappedLine(300), BRIEF_LIST_MAX_ITEMS),
+  questions_to_ask: keepingOnlyWellFormed(cappedLine(300), BRIEF_LIST_MAX_ITEMS),
+});
+
+export const briefSourceSchema = z.object({
+  uri: httpsUrlSchema(2_000),
+  title: z
+    .string()
+    .trim()
+    .transform((t) => t.slice(0, 300))
+    .catch(""),
+});
+
+export const briefSourcesSchema = keepingOnlyWellFormed(briefSourceSchema, 20);
+
+const DRILL_TEXT_MAX_CHARS = 20_000;
+const DRILL_LINE_MAX_CHARS = 360;
+const DRILL_IMPROVEMENTS_MAX = 2;
+
+export const drillCardRefSchema = z.object({ card_id: z.string().uuid() });
+
+export const drillQueueQuerySchema = z.object({
+  limit: z.preprocess(
+    (v) => (v === null || v === "" ? undefined : v),
+    z.coerce.number().int().min(1).max(20).optional(),
+  ),
+});
+
+export const drillAudioAnswerSchema = drillCardRefSchema;
+
+export const drillTextAnswerSchema = drillCardRefSchema.extend({
+  text: z.string().trim().min(1).max(DRILL_TEXT_MAX_CHARS),
+});
+
+export const drillReviewSchema = drillCardRefSchema.extend({
+  grade: z.coerce.number().int().min(0).max(5),
+  transcript: z.preprocess(
+    (v) => (v === null || v === "" ? undefined : v),
+    z.string().trim().max(DRILL_TEXT_MAX_CHARS).optional(),
+  ),
+  answer_scores: answerScoresSchema.optional(),
+});
+
+export const addDrillCardSchema = z.object({ turn_id: z.string().uuid() });
+
+export const suspendDrillCardSchema = drillCardRefSchema;
+
+export const drillFeedbackSchema = z.object({
+  improvements: keepingOnlyWellFormed(cappedLine(DRILL_LINE_MAX_CHARS), DRILL_IMPROVEMENTS_MAX),
+  better_line: cappedLine(DRILL_LINE_MAX_CHARS),
+});
+
+const storedMetric = z.number().nullable().catch(null);
+
+const storedCount = z.number().catch(0);
+
+export const deliveryMetricsSchema = z.object({
+  wpm: storedMetric,
+  avg_pause_ms: storedMetric,
+  filler_count: storedMetric,
+  pitch_variation: storedMetric,
+  energy: storedMetric,
+  mean_pitch_hz: storedMetric,
+  on_camera_pct: storedMetric,
+  smile_pct: storedMetric,
+  head_motion_dps: storedMetric,
+  camera_turns: storedCount,
+  jitter_local: storedMetric,
+  shimmer_local: storedMetric,
+  hnr_db: storedMetric,
+  uptalk_pct: storedMetric,
+  uptalk_statements: storedCount,
+  uptalk_rising: storedCount,
+});
+
+const starSegmentSchema = z.object({
+  label: starLabelSchema,
+  start: storedCount,
+  end: storedCount,
+  text: z.string().catch(""),
+});
+
+export const starBreakdownSchema = z.object({
+  turn_index: z.number().int(),
+  basis: z.enum(["time", "words"]),
+  segments: z.array(starSegmentSchema).max(STAR_LABELS_MAX).catch([]),
+  share: z.object({
+    S: storedCount,
+    T: storedCount,
+    A: storedCount,
+    R: storedCount,
+    other: storedCount,
+  }),
+  missing: z.array(starPartSchema).catch([]),
+  note: z.string().catch(""),
+});
+
+export const starBreakdownsSchema = keepingOnlyWellFormed(
+  starBreakdownSchema,
+  QUESTION_BOUNDS.max,
+);
+
 export type QuestionResponse = z.infer<typeof questionResponseSchema>;
 export type ReportResponse = z.infer<typeof reportResponseSchema>;
 export type ResumeGapParsed = z.infer<typeof resumeGapResponseSchema>;
+export type AwaySegmentInput = z.infer<typeof awaySegmentSchema>;
+export type CameraMetricsInput = z.infer<typeof cameraMetricsSchema>;
+export type StarResponse = z.infer<typeof starResponseSchema>;
+export type JobExtractParsed = z.infer<typeof jobExtractSchema>;
+export type CompanyBriefParsed = z.infer<typeof companyBriefSchema>;
+export type BriefSource = z.infer<typeof briefSourceSchema>;
+export type DrillFeedback = z.infer<typeof drillFeedbackSchema>;
+export type DeliveryMetricsParsed = z.infer<typeof deliveryMetricsSchema>;
+export type StarBreakdownParsed = z.infer<typeof starBreakdownSchema>;

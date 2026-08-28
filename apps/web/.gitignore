@@ -8,7 +8,9 @@
 /.next/
 /out/
 
-# production
+/public/mediapipe/
+/public/models/
+
 /build
 
 .DS_Store
