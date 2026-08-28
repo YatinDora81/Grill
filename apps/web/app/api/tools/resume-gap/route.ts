@@ -33,9 +33,9 @@ const DAILY = {
     "That is ten comparisons today — the daily ceiling for a tool with no account behind it. Come back tomorrow, or sign up and run a full interview.",
 };
 
-function limit(req: Request, rule: typeof BURST): void {
+async function limit(req: Request, rule: typeof BURST): Promise<void> {
   try {
-    rateLimit(clientKey(req, rule.bucket), rule.opts);
+    await rateLimit(clientKey(req, rule.bucket), rule.opts);
   } catch (err) {
     if (err instanceof AppError && err.status === 429) {
       throw new AppError(429, err.code, rule.message);
@@ -47,8 +47,8 @@ function limit(req: Request, rule: typeof BURST): void {
 export async function POST(req: Request) {
   const deadline = Date.now() + ROUTE_BUDGET_MS;
   try {
-    limit(req, BURST);
-    limit(req, DAILY);
+    await limit(req, BURST);
+    await limit(req, DAILY);
 
     const declared = Number(req.headers.get("content-length"));
     if (Number.isFinite(declared) && declared > MAX_RESUME_BYTES + MULTIPART_OVERHEAD_BYTES) {

@@ -16,7 +16,7 @@ const digest = (rawToken: string) => createHash("sha256").update(rawToken).diges
 export async function POST(_req: Request, { params }: { params: Promise<{ sessionId: string }> }) {
   try {
     const userId = await requireUserId();
-    rateLimit(`share:${userId}`, { limit: 20, windowMs: 60_000 });
+    await rateLimit(`share:${userId}`, { limit: 20, windowMs: 60_000 });
     const { sessionId } = shareSessionParamsSchema.parse(await params);
 
     const session = await repo.getSession(sessionId, userId);
@@ -42,7 +42,7 @@ export async function DELETE(
 ) {
   try {
     const userId = await requireUserId();
-    rateLimit(`share:${userId}`, { limit: 20, windowMs: 60_000 });
+    await rateLimit(`share:${userId}`, { limit: 20, windowMs: 60_000 });
     const { sessionId } = shareSessionParamsSchema.parse(await params);
 
     const session = await repo.getSession(sessionId, userId);

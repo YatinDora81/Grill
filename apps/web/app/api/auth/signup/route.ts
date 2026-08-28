@@ -10,7 +10,7 @@ import { rateLimit, clientKey } from "@/lib/rateLimit";
 
 export async function POST(req: Request) {
   try {
-    rateLimit(clientKey(req, "signup"), { limit: 8, windowMs: 60_000 });
+    await rateLimit(clientKey(req, "signup"), { limit: 8, windowMs: 60_000 });
     const { email, password, name } = signupSchema.parse(await req.json());
 
     if (await repo.getUserByEmail(email)) {

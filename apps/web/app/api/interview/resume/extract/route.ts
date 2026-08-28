@@ -13,9 +13,7 @@ const MULTIPART_OVERHEAD_BYTES = 16 * 1024;
 export async function POST(req: Request) {
   try {
     const userId = await requireUserId();
-    // Per user, like the answer routes: parsing a PDF costs real CPU, and
-    // unlike them nothing downstream bounds how often it can be paid.
-    rateLimit(`resume-extract:${userId}`, { limit: 20, windowMs: 60_000 });
+    await rateLimit(`resume-extract:${userId}`, { limit: 20, windowMs: 60_000 });
 
     const declared = Number(req.headers.get("content-length"));
     if (Number.isFinite(declared) && declared > MAX_RESUME_BYTES + MULTIPART_OVERHEAD_BYTES) {

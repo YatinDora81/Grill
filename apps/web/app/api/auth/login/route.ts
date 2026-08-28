@@ -9,7 +9,7 @@ import { rateLimit, clientKey } from "@/lib/rateLimit";
 
 export async function POST(req: Request) {
   try {
-    rateLimit(clientKey(req, "login"), { limit: 10, windowMs: 60_000 });
+    await rateLimit(clientKey(req, "login"), { limit: 10, windowMs: 60_000 });
     const { email, password } = loginSchema.parse(await req.json());
 
     const user = await repo.getUserByEmail(email);

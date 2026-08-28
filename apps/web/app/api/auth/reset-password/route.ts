@@ -11,7 +11,7 @@ import { resetPassword } from "@/lib/services/passwordResetService";
 
 export async function POST(req: Request) {
   try {
-    rateLimit(clientKey(req, "reset-password"), { limit: 10, windowMs: 15 * 60_000 });
+    await rateLimit(clientKey(req, "reset-password"), { limit: 10, windowMs: 15 * 60_000 });
     const { token, password } = resetPasswordSchema.parse(await req.json());
 
     const userId = await resetPassword(token, password);

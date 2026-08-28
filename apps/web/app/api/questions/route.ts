@@ -30,10 +30,7 @@ export async function GET() {
 export async function POST(req: Request) {
   try {
     const userId = await requireUserId();
-    // Each set is several LLM calls; per-user ceiling, same idiom as
-    // resume-extract. Sized so an impatient double-submit passes but a loop
-    // doesn't.
-    rateLimit(`question-set:${userId}`, { limit: 6, windowMs: 60_000 });
+    await rateLimit(`question-set:${userId}`, { limit: 6, windowMs: 60_000 });
 
     const body = createQuestionSetSchema.parse(await req.json());
 

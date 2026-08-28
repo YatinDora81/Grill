@@ -8,6 +8,7 @@ import { json, errorResponse } from "@/lib/http";
 import { sessionIdSchema } from "@/lib/schemas";
 import { requireUserId } from "@/lib/auth";
 import * as repo from "@/lib/db/repo";
+import { publishReportBuild, qstashConfigured } from "@/lib/queue/qstash";
 import { claimAndBuild } from "@/lib/services/reportQueue";
 import { VIDEO_FLUSH_GRACE_MS } from "@/lib/services/videoService";
 
@@ -36,16 +37,22 @@ export async function POST(req: Request) {
       await repo.setStatus(session_id, "generating_report");
     }
 
-    // Runs after the response flushes, inside this invocation's budget. Errors
-    // are swallowed on purpose: the queue is the retry mechanism, and there is
-    // no client left listening by the time this runs.
-    after(async () => {
+    const buildInline = async () => {
       try {
         await claimAndBuild(session_id, { videoGraceMs: VIDEO_FLUSH_GRACE_MS });
       } catch (err) {
         console.error(`[end] background build for ${session_id} threw:`, err);
       }
-    });
+    };
+
+    if (qstashConfigured()) {
+      await publishReportBuild(session_id).catch((err) => {
+        console.error("[end] qstash publish failed; falling back to after():", err);
+        after(buildInline);
+      });
+    } else {
+      after(buildInline);
+    }
 
     return json({
       session_id,
