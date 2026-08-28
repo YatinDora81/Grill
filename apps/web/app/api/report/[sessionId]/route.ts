@@ -29,6 +29,7 @@ export async function GET(
       worst_answer: r.worstAnswer as unknown as ReportDTO["worst_answer"],
       next_steps: r.nextSteps as unknown as ReportDTO["next_steps"],
       question_feedback: (r.questionFeedback as unknown as ReportDTO["question_feedback"]) ?? [],
+      star_breakdown: (r.starBreakdown as unknown as ReportDTO["star_breakdown"]) ?? [],
       created_at: r.createdAt.toISOString(),
     };
     return json(out);
