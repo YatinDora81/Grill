@@ -11,13 +11,17 @@ import type {
   TranscriptWord,
 } from "@repo/types";
 import { getUserId } from "@/lib/auth";
+import { cameraMetricsSchema, starBreakdownsSchema } from "@/lib/schemas";
 import * as repo from "@/lib/db/repo";
+import { takeMs } from "@/lib/camera/summarize";
 import { DIFFICULTY_META } from "@/lib/interviewMeta";
+import { compareSessions } from "@/lib/services/compareService";
 import { settleUnfinishedVideos } from "@/lib/services/videoService";
 import { BAND_LABEL, cx, scoreBand, scoreTone } from "@/components/ui";
 import { Explain, ExplainBanner } from "@/components/Explain";
 import { Reveal } from "@/components/Reveal";
 import { ScoreBand } from "@/components/ScoreBand";
+import { PrepBrief } from "../../new/PrepBrief";
 import { DeleteInterviewButton } from "./DeleteInterviewButton";
 import { Delivery } from "./Delivery";
 import { FinishReport } from "./FinishReport";
@@ -26,6 +30,7 @@ import { Replay } from "./Replay";
 import { ReportNav, type Section } from "./ReportNav";
 import { RetryButton } from "./RetryButton";
 import { ShareControl } from "./ShareControl";
+import { RetryForward, ThenVsNow } from "./ThenVsNow";
 
 export const metadata: Metadata = {
   title: "Report",
@@ -82,28 +87,17 @@ export default async function ReportPage({
     worst_answer: row.worstAnswer as unknown as ReportDTO["worst_answer"],
     next_steps: row.nextSteps as unknown as ReportDTO["next_steps"],
     question_feedback: (row.questionFeedback as unknown as ReportDTO["question_feedback"]) ?? [],
+    star_breakdown: starBreakdownsSchema.parse(row.starBreakdown),
     created_at: row.createdAt.toISOString(),
   };
 
   const feedbackByTurn = new Map(report.question_feedback.map((f) => [f.turn_index, f] as const));
+  const starByTurn = new Map(report.star_breakdown.map((b) => [b.turn_index, b] as const));
 
   const turns = await repo.getTurns(sessionId);
 
-  // Reaching here means a report exists, which means the interview is over —
-  // so no upload of this session's can still be live, and settling one is safe.
-  // claimAndBuild already did this before the report was built; repeating it is
-  // the retry for the case where that attempt hit a transient R2 error, since
-  // the gate below would otherwise hide such a recording forever with nothing
-  // left to trigger a salvage. A no-op (one indexed read) in the normal case.
-  await settleUnfinishedVideos(sessionId).catch(() => {
-    /* best-effort: a report must still render when housekeeping fails */
-  });
+  await settleUnfinishedVideos(sessionId).catch(() => {});
 
-  // Turn.videoId is stamped when the answer is given, long before the upload is
-  // stitched — it says which recording the answer is in, never that the object
-  // exists. Offering "Watch" straight off it hands out a button whose only
-  // possible outcome is a 409, so gate on the recordings that are actually
-  // playable.
   const videos = await repo.listSessionVideos(sessionId);
   const playableVideoIds = new Set(videos.map((v) => v.id));
   const expiryById = new Map(videos.map((v) => [v.id, v.expiresAt] as const));
@@ -123,6 +117,10 @@ export default async function ReportPage({
   const parent = await repo.getRetryParent(session, userId);
   const before = parent?.report;
 
+  const comparison = session.retryOfId ? await compareSessions(userId, sessionId) : null;
+
+  const retries = await repo.getRetriesOf(sessionId, userId);
+
   const shareIsLive = await repo.hasLiveReportShare(sessionId, userId);
 
   const cats = report.category_scores;
@@ -134,35 +132,21 @@ export default async function ReportPage({
     ? { nav: "Best & worst", kicker: "Your best and worst answer" }
     : { nav: "What worked, what didn't", kicker: "What worked, what didn't" };
 
-  /**
-   * Only the sections that actually rendered. A nav entry pointing at an id that
-   * never made it into the DOM is a link that silently does nothing, and the
-   * observer would keep it permanently unlit.
-   */
+  const config = session.config as unknown as Partial<InterviewConfig>;
+  const company = typeof config.company === "string" ? config.company.trim() : "";
+
   const sections: Section[] = [
     { id: "verdict", label: "The verdict" },
+    ...(comparison ? [{ id: "compare", label: "Then vs now" }] : []),
     ...(fixes.length > 0 ? [{ id: "fixes", label: "Fix these" }] : []),
     { id: "sounded", label: "How you sounded" },
     ...(hasEvidence ? [{ id: "highlights", label: highlights.nav }] : []),
     ...(turns.length > 0 ? [{ id: "questions", label: "Every question" }] : []),
+    ...(company ? [{ id: "brief", label: "Prep brief" }] : []),
   ];
 
   const title = session.name?.trim() || session.role?.trim() || "Interview";
 
-  /**
-   * The facts about the run itself, stacked down the right of the headline.
-   * Read off the session rather than the report so nothing here is a judgement
-   * — the verdict owns all of those.
-   *
-   * `en-GB` is pinned rather than left to the runtime: this renders once on the
-   * server, so the format would otherwise be whatever locale the container
-   * happens to boot with, and change under the reader on a redeploy.
-   *
-   * Difficulty is read through the lookup rather than `difficultyLabel` because
-   * sessions predating the current four levels carry a value that isn't in it,
-   * and a missing line is better than a crashed report.
-   */
-  const config = session.config as unknown as Partial<InterviewConfig>;
   const meta = [
     new Date(report.created_at).toLocaleDateString("en-GB", {
       day: "numeric",
@@ -176,6 +160,7 @@ export default async function ReportPage({
       .filter(Boolean)
       .join(" · "),
     session.name?.trim() && session.role?.trim() ? session.role.trim() : null,
+    company && !title.toLowerCase().includes(company.toLowerCase()) ? `for ${company}` : null,
   ].filter((line): line is string => Boolean(line));
 
   return (
@@ -206,6 +191,11 @@ export default async function ReportPage({
                   {line}
                 </span>
               ))}
+              {company ? (
+                <a href="#brief" className="vs-label block">
+                  Prep brief <span aria-hidden="true">↓</span>
+                </a>
+              ) : null}
             </p>
           </header>
 
@@ -270,6 +260,16 @@ export default async function ReportPage({
                   </Explain>
                 </>
               ) : null}
+
+              {retries ? (
+                <div className="mt-6 border-t border-dashed border-line-strong pt-4">
+                  <RetryForward
+                    count={retries.count}
+                    latestId={retries.latest.id}
+                    latestScored={retries.latest.overallScore !== null}
+                  />
+                </div>
+              ) : null}
             </div>
 
             <div className="grid content-start gap-6 p-6 sm:p-7">
@@ -315,8 +315,13 @@ export default async function ReportPage({
           </div>
         </section>
 
-        {/* What to do about it, above the evidence for it: the page is read top
-            to bottom exactly once, and the actions are what the reader came for. */}
+        {comparison ? (
+          <section className="section nav-target" id="compare" aria-label="Then vs now">
+            <SectionHead title="Then vs now" note="same questions · both runs" />
+            <ThenVsNow comparison={comparison} />
+          </section>
+        ) : null}
+
         {fixes.length > 0 && (
           <section className="section nav-target" id="fixes" aria-label="Fix these">
             <SectionHead title="Fix these things" note="ranked · biggest gain first" />
@@ -446,13 +451,20 @@ export default async function ReportPage({
               const hash = repo.questionHash(t.question);
               const videoId = t.videoId && playableVideoIds.has(t.videoId) ? t.videoId : null;
               const expiresAt = videoId ? expiryById.get(videoId) : undefined;
+              const words = parseTranscriptWords(t.transcriptWords);
+              const camera = cameraMetricsSchema.safeParse(t.cameraMetrics);
+              const away =
+                camera.success && camera.data.away_segments.length > 0
+                  ? camera.data.away_segments
+                  : null;
+              const lastWordEnd = words?.length ? (words[words.length - 1]?.end ?? null) : null;
               return {
                 turn_id: t.id,
                 turn_index: t.turnIndex,
                 question: t.question,
                 question_type: t.questionType,
                 transcript: t.transcript,
-                transcript_words: parseTranscriptWords(t.transcriptWords),
+                transcript_words: words,
                 has_audio: Boolean(t.audioKey),
                 video_id: videoId,
                 video_offset_ms: t.videoOffsetMs,
@@ -463,6 +475,9 @@ export default async function ReportPage({
                 starred: starredHashes.has(hash),
                 feedback: feedbackByTurn.get(t.turnIndex) ?? null,
                 scores: (t.answerScores as unknown as AnswerScores | null) ?? null,
+                star: starByTurn.get(t.turnIndex) ?? null,
+                away_segments: away,
+                take_ms: away ? takeMs(lastWordEnd, away) : null,
               };
             })}
           />
@@ -470,9 +485,18 @@ export default async function ReportPage({
             Where an answer kept its <b>word timings</b>, the words light up in time with the
             recording as it plays — and <b>clicking any word seeks the player to it</b>, so you can
             hear one phrase back without hunting for it. Fillers stay tinted even when the audio has
-            been purged and there is nothing left to play.
+            been purged and there is nothing left to play. The red marks under a transcript are the
+            moments you were looking away from the camera, on the same clock — <b>click one</b> to
+            hear what you were saying then.
           </Explain>
         </div>
+
+        {company ? (
+          <div id="brief" role="region" aria-label="Prep brief" className="section nav-target">
+            <SectionHead title="Before the real thing" note="about them · not about your run" />
+            <PrepBrief company={company} role={session.role} />
+          </div>
+        ) : null}
 
         <ShareControl sessionId={sessionId} sessionName={title} initiallyShared={shareIsLive} />
 
