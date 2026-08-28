@@ -4,15 +4,6 @@ import { REPORT_SYSTEM, reportPrompt } from "./report";
 import type { ReportTurn } from "./report";
 import type { SessionContext } from "./questionGen";
 
-/**
- * `wpm: 0` is what computeDelivery returns when nobody spoke, and it is also
- * what a measured zero would look like — the type cannot tell them apart. The
- * report prompt is the last place that can, because REPORT_SYSTEM forbids the
- * model from noticing for itself that the answers were typed. So these tests are
- * about one thing: which numbers reach the model as facts, and which reach it
- * named as absent.
- */
-
 const ctx: SessionContext = {
   sourceType: "resume",
   sourceText: "Staff engineer. Shipped a billing ledger on Postgres.",
@@ -46,7 +37,6 @@ const FULL: DeliveryMetrics = {
   mean_pitch_hz: 118,
 };
 
-/** Typed answers: computeDelivery had no timed words and no audio at all. */
 const TYPED: DeliveryMetrics = {
   wpm: 0,
   avg_pause_ms: 0,
@@ -64,8 +54,6 @@ const build = (d: DeliveryMetrics) => reportPrompt(ctx, turns, d);
 test("a typed interview is never handed a pace or a pitch to grade", () => {
   const p = build(TYPED);
 
-  // The bug: the whole object was JSON.stringified under "facts", so 0 wpm and
-  // zero pitch variation read as a measured monotone drone.
   expect(p).not.toMatch(/\b0 wpm\b/);
   expect(p).not.toContain('"wpm": 0');
   expect(p).not.toMatch(/pace: /);
@@ -85,7 +73,6 @@ test("filler words survive typed answers, because they are counted from the text
   const p = build(TYPED);
 
   expect(p).toContain("Measured delivery metrics (facts):\n- filler words: 2");
-  // The list of what's absent must not claim the one thing that was measured.
   expect(p.slice(p.indexOf("NOT MEASURED"))).not.toContain("filler");
 });
 
@@ -120,8 +107,6 @@ test("a fully measured session is told about no absence at all", () => {
 });
 
 test("silence in the middle of speech is reported, but a zero-pause zero is not", () => {
-  // avg_pause_ms is gated on wpm, not on itself: a 0 with no speech behind it is
-  // the same absence as pace, and must not be handed over as a fact.
   const p = build({ ...TYPED, filler_count: 0 });
   expect(p).not.toContain("average pause: 0 ms");
   expect(p).toContain("- filler words: 0");

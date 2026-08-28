@@ -15,26 +15,14 @@ import { PATTERN, worstDimension } from "@/lib/rubricPattern";
 
 const WEEK_MS = 7 * 864e5;
 
-/**
- * Below this there is no pattern, only a bad day. A weakness that shows up once
- * might be the question; one that shows up across sessions is the candidate.
- */
 const PATTERN_MIN_SESSIONS = 3;
 
-/** The lowest-scoring rubric dimension across recent answers, as a sentence. */
 function derivePattern(scores: AnswerScores[], sessionCount: number): string | null {
   if (sessionCount < PATTERN_MIN_SESSIONS || scores.length === 0) return null;
   const worst = worstDimension(scores);
   return worst === null ? null : PATTERN[worst];
 }
 
-/**
- * `filler_count` off a report's delivery_metrics.
- *
- * JSON column: nothing about its shape is guaranteed here, and a report written
- * before the field existed is a real case. Returning null makes the caller show
- * an em dash instead of inventing a figure.
- */
 function fillerCount(raw: unknown): number | null {
   if (!raw || typeof raw !== "object") return null;
   const n = (raw as Partial<DeliveryMetrics>).filler_count;
@@ -47,15 +35,12 @@ function wordsPerMinute(raw: unknown): number | null {
   return typeof n === "number" && Number.isFinite(n) && n > 0 ? n : null;
 }
 
-/** `num_questions` off a session's stored config. Null, never a guess, when the
- *  JSON doesn't carry one. */
 function plannedQuestions(raw: unknown): number | null {
   if (!raw || typeof raw !== "object") return null;
   const n = (raw as Partial<InterviewConfig>).num_questions;
   return typeof n === "number" && Number.isInteger(n) && n > 0 ? n : null;
 }
 
-/** Assemble the user's dashboard data (all queries scoped to userId). */
 export async function getDashboardData(userId: string): Promise<DashboardData> {
   const [user, reports, sessions] = await Promise.all([
     repo.getUserById(userId),
@@ -68,20 +53,12 @@ export async function getDashboardData(userId: string): Promise<DashboardData> {
   const last = scores.length ? scores[scores.length - 1]! : null;
   const first = scores.length ? scores[0]! : null;
 
-  // Reports are ordered by SESSION date ascending (see the repo function), and
-  // these are real Date objects from Prisma — comparing them numerically is safe
-  // in a way parsing a date *string* would not be. The session's date is the
-  // right one here too: "in the last 7 days" has to mean interviews the user
-  // actually sat that week, not builds that happened to finish in it.
   const weekAgo = Date.now() - WEEK_MS;
   const sessionsThisWeek = reports.filter((r) => r.session.createdAt.getTime() >= weekAgo).length;
 
   const newest = reports[reports.length - 1] ?? null;
   const oldest = reports[0] ?? null;
 
-  // Exactly two sessions get a turn count — the newest and the oldest — which is
-  // all the "now vs. when you started" number needs. Deduped so a user with one
-  // report pays for one count, not two.
   const countable = [...new Set([newest?.sessionId, oldest?.sessionId].filter(Boolean))] as string[];
 
   const unfinished = sessions.find((s) => s.status === "in_progress") ?? null;
@@ -89,8 +66,6 @@ export async function getDashboardData(userId: string): Promise<DashboardData> {
 
   const [counts, rubric, progress, chainRows] = await Promise.all([
     Promise.all(countable.map((id) => repo.countAnsweredTurns(userId, id))),
-    // Skipped entirely below the threshold: the sentence would be suppressed
-    // anyway, so a new user never pays for this read.
     reports.length >= PATTERN_MIN_SESSIONS
       ? repo.listRecentAnswerScores(userId)
       : Promise.resolve([] as AnswerScores[]),
@@ -101,7 +76,6 @@ export async function getDashboardData(userId: string): Promise<DashboardData> {
   ]);
   const answered = new Map(countable.map((id, i) => [id, counts[i]!]));
 
-  /** Session-total fillers ÷ answers given. Null unless both halves are real. */
   const perAnswer = (report: (typeof reports)[number] | null): number | null => {
     if (!report) return null;
     const fillers = fillerCount(report.deliveryMetrics);

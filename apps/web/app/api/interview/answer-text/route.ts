@@ -25,8 +25,6 @@ export async function POST(req: Request) {
       session,
       turnIndex: body.turn_index,
       transcript: body.text,
-      // A typed answer still happened on camera — the recording never stopped,
-      // so the replay can show them typing it.
       videoId: body.video_id ?? null,
       videoOffsetMs: body.video_offset_ms ?? null,
     });

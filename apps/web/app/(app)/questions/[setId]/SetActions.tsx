@@ -6,26 +6,12 @@ import type { StartResponse } from "@repo/types";
 import { apiDelete, apiPost, ApiClientError } from "@/lib/apiClient";
 import { Button, ErrorNote, Spinner } from "@/components/ui";
 
-/**
- * The set page's two verbs: run these questions as a live interview, or
- * delete the set. A client island on an otherwise server-rendered document.
- */
 export function SetActions({ setId, questionCount }: { setId: string; questionCount: number }) {
   const router = useRouter();
   const [starting, setStarting] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  /**
-   * Two-step delete, held in state rather than a confirm() dialog — the app
-   * never uses native dialogs, and arming decays if they click anywhere else.
-   */
   const [armed, setArmed] = useState(false);
   const [error, setError] = useState("");
-  /**
-   * Same double-fire guard as every start button in the app: `starting` only
-   * disables the control, and the POST holds open long enough for a second
-   * click to land. Each call creates a real session, so the one the router
-   * doesn't navigate to would be stranded `in_progress` forever.
-   */
   const startingRef = useRef(false);
 
   async function runInterview() {
@@ -38,7 +24,6 @@ export function SetActions({ setId, questionCount }: { setId: string; questionCo
       router.push(`/session/${res.session_id}`);
     } catch (err) {
       setError(err instanceof ApiClientError ? err.message : "Couldn't start the interview.");
-      // Only reopened on failure; the success path navigates away.
       startingRef.current = false;
       setStarting(false);
     }
@@ -53,8 +38,6 @@ export function SetActions({ setId, questionCount }: { setId: string; questionCo
     setError("");
     try {
       await apiDelete(`/api/questions/${setId}`, {});
-      // Interviews already run from this set survive, by design — only the
-      // document goes.
       router.push("/questions");
       router.refresh();
     } catch (err) {

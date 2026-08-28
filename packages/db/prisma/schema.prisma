@@ -1,7 +1,3 @@
-// AI Interviewer data model — see BACKEND_README §6.
-// Everything the report needs is reconstructable from these three tables,
-// so a report can be regenerated at any time.
-
 generator client {
   provider = "prisma-client"
   output   = "../generated/prisma"
@@ -27,35 +23,18 @@ model User {
   @@map("users")
 }
 
-/// A live "forgot password" link, as a row.
-///
-/// Only the SHA-256 of the raw token is stored. The raw 32 random bytes exist
-/// exactly once, in the email; a database leak therefore hands over hashes, not
-/// working reset links, and there is nothing here to replay.
-///
-/// Single-use and short-lived: `usedAt` is stamped by an atomic UPDATE (see
-/// repo.consumePasswordResetToken), so two submissions of the same link cannot
-/// both reset the password.
 model PasswordResetToken {
   id     String @id @default(uuid()) @db.Uuid
   userId String @map("user_id") @db.Uuid
 
-  /// sha256 hex of the raw token. Unique so a collision is a write error rather
-  /// than two accounts sharing one link, and because lookup is by this column —
-  /// the raw token is never stored and never queried.
   tokenHash String @unique @map("token_hash") @db.Char(64)
 
   expiresAt DateTime  @map("expires_at") @db.Timestamptz(6)
-  /// Set the moment the token is spent. Null is the only redeemable state.
   usedAt    DateTime? @map("used_at") @db.Timestamptz(6)
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  /// Cascade: a deleted account must not leave live reset links behind that
-  /// would resurrect credentials for a user that no longer exists.
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  /// A successful reset invalidates every other outstanding token for the user,
-  /// which is a sweep over this column.
   @@index([userId])
   @@map("password_reset_tokens")
 }
@@ -88,9 +67,6 @@ enum QuestionType {
   @@map("question_type")
 }
 
-/// What a question-bank set draws from. Mirrors the interview sources on
-/// purpose (résumé / topic / cultural) but is its own enum: the bank is a
-/// separate feature and must be free to grow sources the interview never has.
 enum QuestionSetSource {
   resume
   topic
@@ -106,68 +82,23 @@ model Session {
   updatedAt   DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
   sourceType  SourceType    @map("source_type")
   sourceText  String        @map("source_text")
-  /// The user's own name for this interview — required for anything created
-  /// after names existed. Nullable only because sessions predating the column
-  /// have no name to give and inventing one would put words in their mouth;
-  /// the UI reads a null as "Untitled interview".
   name        String?
   role        String?
   config      Json
   status      SessionStatus @default(in_progress)
   errorReason String?       @map("error_reason")
 
-  /// Report queue, claim side. A session with status `generating_report` and no
-  /// report row IS the queue; this column is the lease on it. A worker claims by
-  /// atomically setting this into the future (see repo.claimReportLease) — the
-  /// UPDATE ... WHERE only matches an unleased row, so exactly one caller wins
-  /// and two runs can never build the same report.
-  ///
-  /// Not an advisory lock: Prisma runs over a POOLED connection (packages/db
-  /// derives the pooler URL), so a session-scoped pg_try_advisory_lock would
-  /// bind to a backend that pooling can hand elsewhere or drop. A lease in a row
-  /// survives that, and survives a hard crash — it simply expires.
   reportLeaseUntil DateTime? @map("report_lease_until") @db.Timestamptz(6)
-  /// Counts claims, not successes. A session whose build always throws would
-  /// otherwise be retried forever and sit at the head of the queue; past
-  /// MAX_REPORT_ATTEMPTS it is failed out to `error` instead.
   reportAttempts   Int       @default(0) @map("report_attempts")
 
-  /// Set when this session is a re-run of an earlier one: same résumé, same
-  /// config, same questions copied verbatim, so the two reports are comparable.
-  /// A retry can itself be retried — this points at the immediate parent, and
-  /// the chain walks back from there. There is no separate "type" column: a
-  /// session is a retry precisely when this is set.
   retryOfId String?  @map("retry_of_id") @db.Uuid
-  /// Deleting the parent must not delete the retry — the re-run's own answers
-  /// and report are still the user's work.
   retryOf   Session? @relation("SessionRetries", fields: [retryOfId], references: [id], onDelete: SetNull)
   retries   Session[] @relation("SessionRetries")
 
-  /// Set once the audio retention sweep has cleared this session's clips from
-  /// R2. Answer audio has no per-object row (its key is deterministic —
-  /// `audio/{sessionId}/turn_{n}.{ext}`), so unlike video there is nothing to
-  /// delete as the record of the deletion; this column is that record, and it
-  /// is what keeps the sweep from re-listing every old session every night.
-  ///
-  /// Expiry itself is derived from createdAt rather than stored per-object the
-  /// way SessionVideo.expiresAt is. The tradeoff is deliberate: audio is small
-  /// and uniform, so a policy change re-dating history is acceptable here in
-  /// exchange for not carrying a row per clip.
   audioPurgedAt DateTime? @map("audio_purged_at") @db.Timestamptz(6)
 
-  /// Soft delete. Set when the user removes the interview from their history.
-  /// Rows stay (turns, report, media) so retention can still run later.
-  /// User-facing reads treat these as gone — including do-not-reuse /
-  /// weak_spots question lists — so deleting an interview makes those
-  /// questions askable again.
   deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
 
-  /// Set when this interview was started FROM a question-bank set: its turns
-  /// were copied verbatim from that set up front, and — exactly like a retry —
-  /// the answer loop serves them in order and never generates. There is no
-  /// separate "type" column: a session is set-backed precisely when this is set.
-  /// SetNull, not Cascade: deleting a set must not delete the interviews (and
-  /// their reports) that were run on it — those are the user's own work.
   questionSetId String?      @map("question_set_id") @db.Uuid
   questionSet   QuestionSet? @relation(fields: [questionSetId], references: [id], onDelete: SetNull)
 
@@ -180,47 +111,24 @@ model Session {
   @@index([userId])
   @@index([status])
   @@index([retryOfId])
-  /// The audio sweep's only query: old enough to expire, not yet purged.
   @@index([audioPurgedAt, createdAt])
   @@index([userId, deletedAt])
-  /// "Practised n×" on the bank pages: sessions per set, cheap.
   @@index([questionSetId])
   @@map("sessions")
 }
 
-/// A generated batch of questions with no interview attached — the question
-/// bank. Deliberately separate from Session/Turn: reading a set is not an
-/// interview, produces no transcript, no scores and no report. The only bridge
-/// between the two worlds is Session.questionSetId, written when the user
-/// chooses to RUN an interview on a set — at which point the set's items are
-/// copied into brand-new Turn rows (same mechanism as a retry) and the set
-/// itself is never mutated. A set can seed any number of interviews, at any
-/// time, without the interviews touching it back.
 model QuestionSet {
   id     String @id @default(uuid()) @db.Uuid
   userId String @map("user_id") @db.Uuid
 
-  /// The user's own name for the set — how they find it again.
   name   String
   source QuestionSetSource
-  /// What the generation read: the résumé text for `resume`, the topic line
-  /// for `topic`, and "" for `cultural` (which brings no material). Kept so a
-  /// set's provenance is inspectable and so an interview started from it can
-  /// hand the report the same grounding the questions came from.
   sourceText String  @map("source_text")
   role       String?
-  /// "easy" | "medium" | "hard" | "extreme" — the same union the interview
-  /// config stores in its JSON. A string column rather than a new enum so the
-  /// two can never disagree about what a difficulty is called.
   difficulty String
-  /// How many questions were requested. The items are the truth of how many
-  /// exist; this is what the user asked for, kept for display.
   count Int
 
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  /// Soft delete, same contract as Session: user-facing reads treat the set as
-  /// gone, interviews already run from it keep their questionSetId until a hard
-  /// delete SetNulls it.
   deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
 
   user     User              @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -231,10 +139,6 @@ model QuestionSet {
   @@map("question_sets")
 }
 
-/// One question in a set, in reading order. Item rows are written once at
-/// generation and never edited — an interview run on the set copies them into
-/// its own turns rather than referencing them, so the set stays a stable
-/// document however many times it is drilled.
 model QuestionSetItem {
   id    String @id @default(uuid()) @db.Uuid
   setId String @map("set_id") @db.Uuid
@@ -250,30 +154,14 @@ model QuestionSetItem {
   @@map("question_set_items")
 }
 
-/// A question the user liked, kept as a collection.
-///
-/// The question TEXT is denormalized here rather than joined through Turn, and
-/// that's the whole design. Turn is `onDelete: Cascade` from Session, so a star
-/// that only pointed at a turn would evaporate the moment the interview it came
-/// from was deleted — the opposite of "keep the ones I liked". `turnId` is a
-/// courtesy link back to where it was found, and goes null rather than taking
-/// the star with it.
-///
-/// Deduped on the question text, not the turn: `copyQuestionsInto` gives a retry
-/// brand-new Turn rows carrying identical text, so keying on turnId would list
-/// the same question once per re-run.
 model StarredQuestion {
   id     String @id @default(uuid()) @db.Uuid
   userId String @map("user_id") @db.Uuid
 
   question     String
   questionType QuestionType @map("question_type")
-  /// sha256 of the normalized question. A hash, not the text itself, because a
-  /// unique index on unbounded text hits Postgres' btree row-size limit.
   questionHash String       @map("question_hash") @db.Char(64)
 
-  /// Where it was starred from. SetNull: deleting that interview must not
-  /// delete the star.
   turnId String? @map("turn_id") @db.Uuid
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -281,8 +169,6 @@ model StarredQuestion {
   user User  @relation(fields: [userId], references: [id], onDelete: Cascade)
   turn Turn? @relation(fields: [turnId], references: [id], onDelete: SetNull)
 
-  /// Starring the same question twice — from a retry, or a double click — is one
-  /// star, enforced here rather than by a read-then-write that can race.
   @@unique([userId, questionHash])
   @@index([userId])
   @@map("starred_questions")
@@ -295,25 +181,17 @@ model StarredQuestion {
 model SessionVideo {
   id        String @id @default(uuid()) @db.Uuid
   sessionId String @map("session_id") @db.Uuid
-  /// R2 object key. Never a URL — playback mints a short-lived presigned GET.
   key       String
-  /// The in-flight multipart upload. Null once completed; a row that still has
-  /// one and no completedAt is an upload that died and needs settling.
   uploadId  String? @map("upload_id")
 
   startedAt   DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
-  /// Set when the multipart upload is completed. Until then the object does not
-  /// exist in R2 and nothing may try to play it.
   completedAt DateTime? @map("completed_at") @db.Timestamptz(6)
-  /// When the retention sweep may delete the object. Stored rather than derived
-  /// from startedAt so the policy can change without rewriting history.
   expiresAt   DateTime  @map("expires_at") @db.Timestamptz(6)
 
   session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   turns   Turn[]
 
   @@index([sessionId])
-  /// The retention sweep's only query: expired, not yet deleted.
   @@index([expiresAt])
   @@map("session_videos")
 }
@@ -330,19 +208,10 @@ model Turn {
   answerScores    Json?        @map("answer_scores")
   createdAt       DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  /// Which recording this answer lives in, and where. Null when the candidate
-  /// denied the camera, typed the answer, or the recording never started.
   videoId       String? @map("video_id") @db.Uuid
-  /// Milliseconds from that recording's start to the moment this answer began.
-  /// The client's own clock, not the server's: it is the same clock that starts
-  /// the mic, so audio t=0 and video t=offset are the same instant by
-  /// construction. Never derived from video.duration, which MediaRecorder webm
-  /// reports as Infinity.
   videoOffsetMs Int?    @map("video_offset_ms")
 
   session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  /// SetNull, not Cascade: expiring a 100-day-old video must not delete the
-  /// answer, the transcript or the score. The replay just loses its picture.
   video   SessionVideo? @relation(fields: [videoId], references: [id], onDelete: SetNull)
   starred StarredQuestion[]
 
@@ -364,7 +233,6 @@ model Report {
   bestAnswer      Json?    @map("best_answer")
   worstAnswer     Json?    @map("worst_answer")
   nextSteps       Json     @map("next_steps")
-  /// Per-turn coaching: possible answers + what to improve, keyed by turn_index.
   questionFeedback Json    @default("[]") @map("question_feedback")
   raw             Json
   createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)

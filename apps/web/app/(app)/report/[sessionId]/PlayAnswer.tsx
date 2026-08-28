@@ -16,11 +16,6 @@ export interface PlayAnswerHandle {
   seekTo(seconds: number): void;
 }
 
-/**
- * Plays back a turn's recording. The URL is presigned on demand and short-lived,
- * so it's fetched at press time rather than embedded in the page — a signed R2
- * URL baked into HTML would outlive the view and leak the recording.
- */
 export function PlayAnswer({
   sessionId,
   turnIndex,
@@ -31,7 +26,6 @@ export function PlayAnswer({
 }: {
   sessionId: string;
   turnIndex: number;
-  /** "play" in the replay; "play answer" where it stands on its own. */
   label?: string;
   onTime?: (seconds: number | null) => void;
   seekRef?: RefObject<PlayAnswerHandle | null>;
@@ -83,8 +77,6 @@ export function PlayAnswer({
   }, [scrubber]);
 
   useEffect(() => {
-    // Don't leave audio playing after the component goes away — collapsing a
-    // turn in the replay unmounts this.
     aliveRef.current = true;
     return () => {
       aliveRef.current = false;

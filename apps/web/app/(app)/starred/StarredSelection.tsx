@@ -20,7 +20,6 @@ const TYPE_LABEL: Record<QuestionType, string> = {
   technical: "Technical",
   cultural: "Cultural",
   followup: "Follow-up",
-  // Legacy turns: `behavioral` and `cultural` always meant the same thing.
   behavioral: "Cultural",
 };
 
@@ -106,16 +105,6 @@ export function StarredSelection({ items }: { items: StarredItem[] }) {
   );
 }
 
-/**
- * One kept question.
- *
- * NOT a `.row` link like the dashboard's ledger, and not for lack of trying: the
- * row owns a Remove button, and nesting a button inside a link gives keyboard and
- * screen-reader users a control they can reach but not operate predictably. So
- * the question sits as text and the two actions are their own square chips
- * beside it — which also lets the question wrap to as many lines as it needs
- * instead of being ellipsised into a single grid cell.
- */
 function StarredRow({
   item: s,
   position,
@@ -144,8 +133,6 @@ function StarredRow({
         className="mt-1.5 size-[15px] shrink-0 accent-ember disabled:opacity-40"
       />
 
-      {/* The star is the whole label for this list — it's the mark you put on
-          the question yourself, and it says "saved" faster than a chip does. */}
       <span aria-hidden="true" className="shrink-0 text-[13px] leading-7 text-ember">
         ★
       </span>
@@ -165,8 +152,6 @@ function StarredRow({
             Asked {ordinal(position)} in the drill
           </p>
         )}
-        {/* Null once the interview it came from is deleted. The star is the
-            point; the link back is a bonus, so its absence is quiet. */}
         {s.sessionId ? null : (
           <p className="mt-2 font-mono text-[10px] tracking-[0.12em] uppercase text-ink-muted">
             Interview deleted · the question is still yours
@@ -175,9 +160,6 @@ function StarredRow({
       </div>
 
       <div className="ml-auto flex flex-wrap items-center gap-x-4 gap-y-2">
-        {/* Type and date as one mono string rather than a chip plus a date:
-            the reference keeps this column to a single quiet line so the
-            question is the only thing with weight in the row. */}
         <span className={CHIP}>
           {TYPE_LABEL[s.questionType]} · {s.day}
         </span>

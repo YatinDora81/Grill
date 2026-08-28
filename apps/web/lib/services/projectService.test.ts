@@ -2,18 +2,12 @@ import { beforeEach, describe, expect, mock, test } from "bun:test";
 import tar from "tar-stream";
 import { createGzip } from "node:zlib";
 
-// `server-only` is a build-time marker with no runtime behaviour; neutralise it
-// before projectService pulls it in via env.ts.
 mock.module("server-only", () => ({}));
 
-// env.ts fails fast on a missing key; Bun doesn't load .env.local under
-// NODE_ENV=test. Satisfy the boot check; fetch and the LLM are mocked below.
 process.env.GEMINI_API_KEYS ||= "TEST__SPLIT__not-a-real-key";
 process.env.JWT_SECRET ||= "test-secret";
 process.env.GITHUB_TOKEN ||= "test-token";
 
-// generateText is the MAP phase (plain text); generateJson is full-dump / merge.
-// Both default to throwing; success tests override with mockImplementation.
 const THROW_IMPL = async () => {
   throw new Error("provider down");
 };
@@ -32,8 +26,6 @@ const {
   EXTRACT_CAPS,
 } = await import("./projectService");
 import type { ExtractedFile, RepoMeta } from "./projectService";
-
-// ── fixtures: tar-stream packs as well as it parses, so no binary in git ──
 
 type Entry = string | Buffer | { type: "symlink"; linkname: string } | { type: "directory" };
 
@@ -56,15 +48,12 @@ async function tarball(entries: Record<string, Entry>, root = "owner-repo-abc123
   return Buffer.concat(gz);
 }
 
-/** A Buffer as a web ReadableStream, the way fetch would hand it over. */
 const webStream = (buf: Buffer): ReadableStream<Uint8Array> => new Response(buf).body!;
 
 const extractBuf = (buf: Buffer, opts: { subpath?: string; abort?: () => void; caps?: typeof EXTRACT_CAPS } = {}) =>
   extractRepoTarball(webStream(buf), { abort: opts.abort ?? (() => {}), subpath: opts.subpath, caps: opts.caps });
 
 const paths = (r: { files: ExtractedFile[] }) => r.files.map((f) => f.path);
-
-// ── parseRepoUrl ──────────────────────────────────────────────────
 
 describe("parseRepoUrl", () => {
   test("plain, .git, /tree/{ref}, /tree/{ref}/{subpath}", () => {
@@ -105,8 +94,6 @@ describe("parseRepoUrl", () => {
     }
   });
 });
-
-// ── streaming tarball extraction ──────────────────────────────────
 
 describe("extractRepoTarball", () => {
   test(
@@ -157,7 +144,6 @@ describe("extractRepoTarball", () => {
       const big = r.files.find((f) => f.path === "big.ts")!;
       expect(big.text.length).toBe(1_000);
       expect(big.truncatedFile).toBe(true);
-      // The entry after the capped one still extracted — proof the tail drained.
       expect(paths(r)).toContain("after.ts");
     },
     2000,
@@ -214,7 +200,6 @@ describe("extractRepoTarball", () => {
   test(
     "rejects a file whose stripped path traverses upward (zip-slip)",
     async () => {
-      // `owner-repo-abc123/../../etc/passwd` → stripRoot → `../../etc/passwd`.
       const r = await extractBuf(await tarball({ "../../etc/passwd": "secret", "ok.ts": "fine" }));
       expect(paths(r)).toEqual(["ok.ts"]);
     },
@@ -269,8 +254,6 @@ describe("extractRepoTarball", () => {
   );
 });
 
-// ── chunkFiles & buildPack ────────────────────────────────────────
-
 const META: RepoMeta = {
   owner: "YatinDora81",
   repo: "Grill",
@@ -320,8 +303,6 @@ describe("buildPack", () => {
   });
 });
 
-// ── fallbackDigest ────────────────────────────────────────────────
-
 describe("fallbackDigest", () => {
   test("seeds the summary from the description and lists files", () => {
     const digest = fallbackDigest(
@@ -339,8 +320,6 @@ describe("fallbackDigest", () => {
     expect(digest).toContain("fork of up/stream");
   });
 });
-
-// ── extractProject: fetch + LLM mocked end to end ─────────────────
 
 describe("extractProject", () => {
   const realFetch = globalThis.fetch;
@@ -410,7 +389,6 @@ describe("extractProject", () => {
       expect(res.digest).toContain("SUM: a collaborative drawing app.");
       expect(res.digest).not.toContain("raw repo pack");
       expect(res.repo.file_count).toBe(2);
-      // Full dump: exactly one generateJson call, no map phase.
       expect(generateJson.mock.calls.length).toBe(1);
       expect(generateText.mock.calls.length).toBe(0);
     } finally {
@@ -419,11 +397,8 @@ describe("extractProject", () => {
   });
 
   test("a big repo map-reduces: one brief per chunk, then one merge", async () => {
-    // 40 files × 25 K chars ≈ 1 MB > FULL_DUMP_MAX_CHARS → map-reduce.
     const entries: Record<string, string> = {};
     for (let i = 0; i < 40; i++) entries[`src/mod${i}.ts`] = "x".repeat(25_000);
-    // The exact fan-out the map phase should produce (order-independent for
-    // equal-size files, so the reconstruction's count matches extraction's).
     const expectedChunks = chunkFiles(
       Object.entries(entries).map(([path, text]) => ({ path, text, truncatedFile: false })),
     ).length;
@@ -436,7 +411,6 @@ describe("extractProject", () => {
       const res = await extractProject("https://github.com/owner/repo");
       expect(res.digest).toContain("SUM: a collaborative drawing app.");
       expect(res.digest).not.toContain("raw repo pack");
-      // Exactly one MAP call per chunk, then exactly one merge (REDUCE).
       expect(generateText.mock.calls.length).toBe(expectedChunks);
       expect(generateJson.mock.calls.length).toBe(1);
     } finally {
@@ -446,14 +420,13 @@ describe("extractProject", () => {
 
   test("a failed full dump drops to map-reduce rather than dying", async () => {
     mockGitHub({ tarball: await tarball({ "src/a.ts": "code", "src/b.ts": "more" }) });
-    // First generateJson (full dump) throws; second (merge) succeeds.
     generateJson.mockImplementationOnce(THROW_IMPL).mockImplementation(async () => REDUCE_VALUE);
     generateText.mockImplementation(async () => "slice brief");
     try {
       const res = await extractProject("https://github.com/owner/repo");
       expect(res.digest).toContain("SUM: a collaborative drawing app.");
       expect(res.digest).not.toContain("raw repo pack");
-      expect(generateText.mock.calls.length).toBeGreaterThan(0); // map ran
+      expect(generateText.mock.calls.length).toBeGreaterThan(0);
     } finally {
       restore();
     }
@@ -469,7 +442,7 @@ describe("extractProject", () => {
       const res = await extractProject("https://github.com/owner/repo");
       expect(res.digest).not.toContain("raw repo pack");
       expect(res.digest).toContain("A monorepo.");
-      expect(res.digest).toContain("A mock repo"); // summary backfilled from description
+      expect(res.digest).toContain("A mock repo");
     } finally {
       restore();
     }
@@ -477,7 +450,6 @@ describe("extractProject", () => {
 
   test("total LLM outage falls to the deterministic digest", async () => {
     mockGitHub({ tarball: await tarball({ "src/a.ts": "code", "README.md": "# hi" }) });
-    // Both seams stay at THROW_IMPL → digest can't be built by the model.
     try {
       const res = await extractProject("https://github.com/owner/repo");
       expect(res.digest).toContain("raw repo pack");

@@ -1,28 +1,12 @@
 import "server-only";
-/**
- * Multi-key rotation (Grill §rotation). Failover, not quota multiplication.
- *
- * Rotate on 429/5xx, and on 401/403 — a key that's revoked, or whose project
- * has been denied access, is that key's problem, and the whole point of a pool
- * is that the next key can still serve the request. Only 400 is fatal: a
- * malformed request stays malformed no matter who signs it.
- *
- * Keep trying for at least MIN_ATTEMPTS, cycling the pool more than once if it
- * is small — most failures here are 429s that clear within seconds.
- *
- * Never log a full key — label + last-4 only.
- */
 import { config, type NamedKey } from "@/lib/env";
 import { AllKeysExhausted } from "@/lib/errors";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** Try this hard before giving up, even when the pool is smaller than this. */
 const MIN_ATTEMPTS = 7;
-/** Don't let linear backoff run away on the later attempts. */
 const MAX_BACKOFF_MS = 3_000;
 
-/** `dead` = this key is finished for this request; rotate and never retry it. */
 type ErrClass = "rotate" | "dead" | "fatal";
 
 export class ProviderError extends Error {
@@ -38,15 +22,8 @@ export class ProviderError extends Error {
 
 function classify(err: unknown): { cls: ErrClass; retryAfterMs?: number } {
   const status = err instanceof ProviderError ? err.status : 0;
-  if (status === 0) return { cls: "rotate" }; // network/timeout → transient
-  if (status === 401 || status === 403) return { cls: "dead" }; // revoked key / denied project
-  // 404 reads like "our request" but Gemini scopes model access per project: one
-  // key answers `This model is no longer available` while every other key serves
-  // the same model fine. Treating it as fatal let a single restricted key kill a
-  // request the healthy keys could serve — and because generateText only reaches
-  // Groq on AllKeysExhausted, a fatal skipped the fallback too. It's a key fact,
-  // so it kills the key, not the request. A genuinely wrong model name now 404s
-  // every key, exhausts the pool, and degrades to Groq instead of hard-failing.
+  if (status === 0) return { cls: "rotate" };
+  if (status === 401 || status === 403) return { cls: "dead" };
   if (status === 404) return { cls: "dead" };
   if (status === 429 || (status >= 500 && status <= 599)) {
     return {
@@ -54,7 +31,7 @@ function classify(err: unknown): { cls: ErrClass; retryAfterMs?: number } {
       retryAfterMs: err instanceof ProviderError ? err.retryAfterMs : undefined,
     };
   }
-  return { cls: "fatal" }; // 400 and friends: our request, not our key
+  return { cls: "fatal" };
 }
 
 export class KeyPool {
@@ -68,8 +45,6 @@ export class KeyPool {
     if (!k) throw new Error(`empty key pool: ${this.name}`);
     return k;
   }
-  /** Position of `current()`. The only stable identity a key has — labels are
-   * display strings and may repeat. */
   get index(): number {
     return this.i;
   }
@@ -109,20 +84,11 @@ export async function callWithRotation<T>(
   const base = opts.baseBackoffMs ?? config.rotation.baseBackoffMs;
   let lastErr: unknown;
 
-  // Keys that answered 401/403 this request. Because `attempts` can exceed the
-  // pool size we come back around, and re-asking a revoked key is a guaranteed
-  // waste of a turn.
-  //
-  // Keyed by pool index, not label: labels come from operator-supplied env
-  // (`NAME__SPLIT__KEY`) and nothing forces them to be unique, so two keys
-  // sharing one would make the first 401 retire both — including a key that
-  // still works. The index is unique by construction.
   const dead = new Set<number>();
 
   for (let n = 0; n < attempts; n++) {
-    if (dead.size >= pool.size) break; // every key rejected us outright
+    if (dead.size >= pool.size) break;
 
-    // Land on a key that hasn't already been ruled out.
     for (let hop = 0; hop < pool.size && dead.has(pool.index); hop++) {
       pool.advance();
     }
@@ -137,7 +103,6 @@ export async function callWithRotation<T>(
       logKeyFailure(pool, n, attempts, k, err);
 
       if (cls === "dead") {
-        // No backoff: the key isn't busy, it's gone. Move straight on.
         dead.add(pool.index);
         pool.advance();
         continue;

@@ -1,37 +1,13 @@
 import type { Difficulty, QuestionSetSource } from "@repo/types";
 import { DIFFICULTY_META, difficultyLabel } from "@/lib/interviewMeta";
 
-/**
- * Prompts for the QUESTION BANK — a batch of standalone questions with no
- * interview attached.
- *
- * Deliberately its own file rather than a branch inside questionGen.ts: the
- * interview prompts are conversational (one question at a time, follow-ups,
- * stages, per-user history) and the bank is the opposite — N questions in one
- * pass, each of which must stand alone on a page with no answer before or
- * after it. Sharing the builders would mean every interview change risks
- * silently reshaping the bank and vice versa; the two features are only
- * allowed to meet where the product says they meet (running an interview ON a
- * set), not in a prompt template.
- *
- * What IS shared is the vocabulary: DIFFICULTY_META is imported so "Hard"
- * promises the same thing here as it does in an interview.
- */
-
 export interface QuestionBankContext {
   source: QuestionSetSource;
-  /** Résumé text for `resume`, the topic line for `topic`, "" for `cultural`. */
   sourceText: string;
   role: string | null;
   difficulty: Difficulty;
 }
 
-/**
- * The bar a standalone bank question has to clear, per source. Adapted from
- * the interview quality bars but rewritten for a question that is READ rather
- * than asked: no conversation to lean on, no answer to follow up, so each one
- * has to carry its own context.
- */
 const RESUME_BAR = `Every question must clear all of this:
 - It names something concrete from the résumé — this system, that project, that
   decision. If it could be asked of any other candidate unchanged, it fails.
@@ -70,13 +46,6 @@ const SOURCE_BAR: Record<QuestionSetSource, string> = {
   cultural: CULTURAL_BAR,
 };
 
-/**
- * Coverage angles, spread across the batch so twenty questions don't all
- * circle the same paragraph of the résumé. Same idea as the interview's
- * opener pools — vary the INSTRUCTION, not just the sampling — but phrased
- * for a list: the model is told to distribute the batch across these rather
- * than draw one per turn.
- */
 const RESUME_ANGLES = [
   "what they actually shipped in the most recent role, not what the team shipped",
   "how deep a claimed technology really runs",
@@ -123,7 +92,6 @@ function shuffled<T>(xs: readonly T[]): T[] {
   return a;
 }
 
-/** What the model may label a bank question, per source. */
 export function bankTypeUnion(source: QuestionSetSource): string {
   return source === "cultural" ? `"cultural"` : `"technical" | "cultural"`;
 }
@@ -158,12 +126,6 @@ function contextBlock(c: QuestionBankContext): string {
   return parts.join("\n");
 }
 
-/**
- * One generation chunk: ask for `wantCount` questions, banning everything the
- * batch already holds. `avoid` is the running set — earlier chunks plus any
- * near-duplicates the service filtered — so a 30-question set stays 30
- * DIFFERENT questions rather than ten questions three ways.
- */
 export function questionBankPrompt(
   c: QuestionBankContext,
   wantCount: number,

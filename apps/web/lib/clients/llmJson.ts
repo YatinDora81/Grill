@@ -1,11 +1,6 @@
 import type { z } from "zod";
 import { generateText, extractJson, type GenerateOpts } from "./llmClient";
 
-/**
- * Generate JSON and Zod-validate it (Grill hard rule #7). On parse/validation
- * failure, retry ONCE with a "valid JSON only" reminder. Returns the validated
- * value and the raw text (persist raw as a safety net).
- */
 export async function generateJson<T>(
   schema: z.ZodType<T>,
   opts: GenerateOpts,

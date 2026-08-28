@@ -1,13 +1,3 @@
-"""apps/audio — tiny FastAPI service. Two jobs.
-
-1. POST /analyze — audio bytes → a few numbers. apps/web calls this while it
-   builds a report. Because audio lives in the object bucket, this can also run
-   on a PC reading from the same bucket — the detachable worker (§13).
-2. The report sweeper (sweeper.py). It lives here for exactly one reason:
-   apps/web is serverless and has no clock of its own, so this is the only
-   process in the system that is always running.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -23,10 +13,6 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from analysis import analyze
 from sweeper import Config, Sweeper, build_client
 
-# uvicorn configures only its own loggers and leaves the root alone, so without
-# this every line below WARNING from this module and sweeper.py is dropped on the
-# floor — including the one naming the URL the sweeper is actually hitting, which
-# is the only positive confirmation that it is on.
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO").upper(),
     format="%(levelname)s:     %(message)s",
@@ -36,7 +22,6 @@ log = logging.getLogger("audio")
 
 
 def _max_audio_bytes() -> int:
-    """The clip cap, read from the same env var apps/web reads for its own."""
     raw = os.getenv("MAX_AUDIO_MB", "").strip()
     if not raw:
         return 25 * 1024 * 1024
@@ -47,11 +32,6 @@ def _max_audio_bytes() -> int:
         return 25 * 1024 * 1024
 
 
-# What the multipart envelope costs on top of the clip: the boundaries, the part
-# headers, the filename. Counting the body against a bare clip cap would reject a
-# clip that is exactly at the limit — legal by apps/web's reckoning, over by ours,
-# and the caller has no way to tell which of the two refused it. apps/web allows
-# itself the same slack for the same reason.
 MULTIPART_OVERHEAD_BYTES = 16 * 1024
 
 MAX_AUDIO_BYTES = _max_audio_bytes()
@@ -66,21 +46,6 @@ class _BodyTooLarge(Exception):
 
 
 class LimitUploadSize:
-    """Counts bytes off the receive channel and aborts once past the cap.
-
-    apps/web checks the clip size before it POSTs, but that is one caller's good
-    manners rather than a property of this service: /analyze is unauthenticated,
-    so anything that can reach the port can hand us a body of any length. The
-    cost of not bounding it is paid twice — the read OOM-kills the process, and
-    this process is also the sweeper, so one oversized upload takes the report
-    backstop down with it.
-
-    This has to sit on the ASGI stream rather than inside the handler. By the
-    time FastAPI resolves an UploadFile it has already run the multipart parser
-    over the whole body, so any check in /analyze is one made after the bytes
-    have already landed. Refusing here means they are never accumulated at all.
-    """
-
     def __init__(self, app: ASGIApp, max_bytes: int) -> None:
         self.app = app
         self.max_bytes = max_bytes
@@ -90,9 +55,6 @@ class LimitUploadSize:
             await self.app(scope, receive, send)
             return
 
-        # Content-Length only buys a cheap early refusal: it is absent on chunked
-        # bodies and freely lied about on hostile ones. The counter below is what
-        # actually holds the line.
         if self._declared_length(scope) > self.max_bytes:
             await self._too_large(scope, receive, send)
             return
@@ -111,10 +73,6 @@ class LimitUploadSize:
             return message
 
         async def guarded_send(message: Message) -> None:
-            # Whatever the app has to say once the cap trips is wrong: FastAPI
-            # wraps form parsing in a bare `except Exception` and reports the
-            # aborted read as its generic 400 "error parsing the body". Drop that
-            # and let the 413 below be the answer.
             if tripped:
                 return
             await send(message)
@@ -123,8 +81,6 @@ class LimitUploadSize:
             await self.app(scope, counted_receive, guarded_send)
 
         if tripped:
-            # Nothing reached the client — the parser gave up mid-body and the
-            # send above was swallowed — so the response is still ours to write.
             await self._too_large(scope, receive, send)
 
     @staticmethod
@@ -134,7 +90,7 @@ class LimitUploadSize:
                 try:
                     return int(value)
                 except ValueError:
-                    return 0  # unparseable: let the counter judge it
+                    return 0
         return 0
 
     async def _too_large(self, scope: Scope, receive: Receive, send: Send) -> None:
@@ -152,13 +108,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     cfg = Config.from_env()
     if cfg is None:
-        yield  # unconfigured: /analyze still serves, which is the actual job
+        yield
         return
 
     async with build_client(cfg) as client:
         sweeper = Sweeper(cfg, client)
-        # Hold the handle. asyncio keeps only a weak reference to a task, so one
-        # with no live reference can be garbage-collected mid-flight.
         task = asyncio.create_task(sweeper.run(), name="report-sweeper")
         app.state.sweeper = sweeper
         app.state.sweeper_task = task
@@ -166,14 +120,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         try:
             yield
         finally:
-            # Cancel lands on whatever is being awaited — the sleep, or the
-            # socket read — so shutdown is immediate rather than waiting out the
-            # timeout. Abandoning a sweep mid-request is safe: apps/web finishes
-            # the build it started, and the lease protects the row it claimed.
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
-    # The client closes only here, once the task is provably gone.
 
 
 app = FastAPI(title="ai-interview audio service", lifespan=lifespan)
@@ -186,8 +135,6 @@ def health() -> JSONResponse:
     if sweeper is None:
         return JSONResponse({"ok": True, "sweeper": None})
     snap = sweeper.snapshot(getattr(app.state, "sweeper_task", None))
-    # A dead sweeper is otherwise invisible — the symptom is reports quietly
-    # never retrying. Fail the check so the platform restarts us.
     return JSONResponse(
         {"ok": snap["running"], "sweeper": snap},
         status_code=200 if snap["running"] else 503,

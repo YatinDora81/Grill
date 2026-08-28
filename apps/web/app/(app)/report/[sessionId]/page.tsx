@@ -38,21 +38,8 @@ const tone = (v: number) => TONE_CLASS[scoreTone(v)];
 
 const DAY_MS = 86_400_000;
 
-/**
- * How many next steps make it onto the page. The coach is asked to rank them by
- * how much each would raise the score, biggest gain first, so this keeps the top
- * of that ranking rather than an arbitrary slice. Anything past it is not shown
- * anywhere else on the report, which is why the section says out loud how many
- * were dropped.
- */
 const FIX_LIMIT = 3;
 
-/**
- * Longest opening sentence still allowed to become a fix's mono uppercase
- * title. Past this it stays in the body: the title is set in wide-tracked caps
- * at a 280px measure, where a long sentence turns into five lines of shouting
- * and buries the fix underneath it.
- */
 const FIX_TITLE_MAX = 64;
 
 export default async function ReportPage({
@@ -73,9 +60,6 @@ export default async function ReportPage({
 
   const row = await repo.getReportForUser(sessionId, userId);
   if (!row) {
-    // No report yet. If the interview is actually finished (every question
-    // answered, or a build that died), /end is retryable — let the user trigger
-    // it rather than stranding them on a dead page.
     const retryable =
       session.status === "in_progress" ||
       session.status === "generating_report" ||
@@ -103,7 +87,6 @@ export default async function ReportPage({
 
   const feedbackByTurn = new Map(report.question_feedback.map((f) => [f.turn_index, f] as const));
 
-  // Which turns were spoken — a typed answer has nothing to play back.
   const turns = await repo.getTurns(sessionId);
 
   // Reaching here means a report exists, which means the interview is over —
@@ -123,27 +106,20 @@ export default async function ReportPage({
   // playable.
   const videos = await repo.listSessionVideos(sessionId);
   const playableVideoIds = new Set(videos.map((v) => v.id));
-  // Retention is real and worth saying out loud — the tape does not keep.
   const expiryById = new Map(videos.map((v) => [v.id, v.expiresAt] as const));
   const now = Date.now();
 
-  // One query for the whole replay rather than one per turn: a 100-question
-  // report would otherwise open 100 connections to paint 100 star icons.
   const starredHashes = await repo.starredHashesFor(
     userId,
     turns.map((t) => t.question),
   );
   const audioTurns = new Set(turns.filter((t) => t.audioKey).map((t) => t.turnIndex));
-  // Turn indices whose recording is actually playable — what gates "watch".
   const videoTurns = new Set(
     turns
       .filter((t) => t.videoId && playableVideoIds.has(t.videoId) && t.videoOffsetMs !== null)
       .map((t) => t.turnIndex),
   );
 
-  // If this run retried an earlier one, the questions were identical — so the
-  // two scores are directly comparable. Only worth showing once the parent has
-  // a report of its own to compare against.
   const parent = await repo.getRetryParent(session, userId);
   const before = parent?.report;
 
@@ -154,8 +130,6 @@ export default async function ReportPage({
   const hasHighlights = Boolean(report.best_answer || report.worst_answer);
   const hasEvidence = hasHighlights || report.strengths.length > 0 || report.weaknesses.length > 0;
 
-  // Nav entry and section heading are the same promise, so they flip together:
-  // with no best/worst answer the section is only the strengths/weaknesses list.
   const highlights = hasHighlights
     ? { nav: "Best & worst", kicker: "Your best and worst answer" }
     : { nav: "What worked, what didn't", kicker: "What worked, what didn't" };
@@ -201,7 +175,6 @@ export default async function ReportPage({
     ]
       .filter(Boolean)
       .join(" · "),
-    // The role only earns a line once the name isn't already it.
     session.name?.trim() && session.role?.trim() ? session.role.trim() : null,
   ].filter((line): line is string => Boolean(line));
 
@@ -211,8 +184,6 @@ export default async function ReportPage({
       <div className="keylight keylight-report" aria-hidden="true" />
 
       <main className="wrap report-main">
-        {/* Sits above the back link because it is the page's own chrome: it has
-            to be the thing pinned to the top edge once you start scrolling. */}
         <ReportNav sections={sections} />
 
         <Link href="/dashboard" className="back">
@@ -221,19 +192,6 @@ export default async function ReportPage({
 
         <ExplainBanner />
 
-        {/* Decision first: the verdict in plain words, the number they came for,
-            and the bar that number is being judged against.
-
-            No `.rv` on this or any other section the nav can jump to — the reveal
-            observer unobserves after the first intersection, so a jump into a
-            section that has never been on screen would land on faded content.
-
-            Every nav target carries `.nav-target` and an `aria-label`: the label
-            names the region the jump handler focuses, and the class keeps a
-            native anchor jump (cmd-click, or a reload on #verdict) from landing
-            underneath the sticky chrome. It's a class rather than `scroll-mt-*`
-            because the offset is two tokens deep and has to stay identical to
-            `.turn`'s — see globals.css. */}
         <section id="verdict" aria-label="The verdict" className="nav-target">
           <header className="mt-5 flex flex-wrap items-end justify-between gap-x-10 gap-y-5">
             <div style={{ minWidth: 0, flex: "1 1 340px" }}>
@@ -251,25 +209,7 @@ export default async function ReportPage({
             </p>
           </header>
 
-          {/* The score and the three lenses in one bordered block, split by a
-              hairline. They are one judgement read two ways, and the old layout
-              — a ring floated beside the headline, the lenses in a card further
-              down — let a reader take the number without ever meeting the
-              breakdown that explains it. */}
           <div className="mt-7 grid border border-line md:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]">
-            {/* The one gradient on the page. Heat behind the number the reader
-                came for, kept to a wash — a flat ember panel would read as an
-                alert rather than a score.
-
-                Its strength is a token rather than the 9% that used to be typed
-                here, and it had to become one: an inline style sits at the top
-                of the cascade, so no scoped rule can reach in and correct it.
-                9% of a printed ember over a near-white card is precisely the
-                alert panel this comment exists to avoid, which is why the light
-                value is 5%. The terminator goes through `--keylight-fade` for
-                the reason all six fade-outs in the product do — `transparent`
-                is alpha-zero BLACK, invisible over black and a grey cast dragged
-                through the middle of the same fade over cream. */}
             <div
               className="border-b border-line p-6 sm:p-8 md:border-r md:border-b-0"
               style={{
@@ -364,9 +304,6 @@ export default async function ReportPage({
                   </div>
                 </div>
               ))}
-              {/* A sibling of the lens rows, never inside one — and never inside
-                  a `<p>`: Explain renders one, and the parser closes the outer
-                  paragraph before React sees the nesting. */}
               <Explain>
                 Three separate marks out of 100 from the same coach that wrote the verdict, and each
                 bar is just that number as a share of 100. <b>Technical</b> is whether the content
@@ -383,10 +320,6 @@ export default async function ReportPage({
         {fixes.length > 0 && (
           <section className="section nav-target" id="fixes" aria-label="Fix these">
             <SectionHead title="Fix these things" note="ranked · biggest gain first" />
-            {/* One hairline lattice rather than separate cards: the container
-                draws the top and left edges, each cell the right and bottom, so
-                every column shares one border at every breakpoint and nothing
-                needs a `:first-child` exception. */}
             <div
               className={cx(
                 "mt-4 grid border-t border-l border-line",
@@ -413,7 +346,6 @@ export default async function ReportPage({
                 );
               })}
             </div>
-            {/* Says what was cut instead of implying these are all of them. */}
             {report.next_steps.length > fixes.length ? (
               <p className="mono-note" style={{ marginTop: 14 }}>
                 top {fixes.length} of {report.next_steps.length} · the rest ranked lower
@@ -428,9 +360,6 @@ export default async function ReportPage({
           </section>
         )}
 
-        {/* The section wrapper lives here rather than in `Delivery` so all four
-            of the report's section heads are set in one place, and so this one
-            carries `.nav-target` like every other jump target. */}
         <section className="section nav-target" id="sounded" aria-label="How you sounded">
           <SectionHead title="How you sounded" note="measured from the recording · never guessed" />
           <Delivery metrics={report.delivery_metrics} />
@@ -440,9 +369,6 @@ export default async function ReportPage({
           <section className="section nav-target" id="highlights" aria-label={highlights.nav}>
             <SectionHead title={highlights.kicker} note="straight from your own recording" />
 
-            {/* Two columns only when there are two answers to show: a single
-                cell in a two-column lattice would leave the block's right edge
-                undrawn. */}
             {hasHighlights && (
               <div
                 className={cx(
@@ -503,10 +429,6 @@ export default async function ReportPage({
           </section>
         )}
 
-        {/* The id lives on a wrapper: `Replay` owns the accordion, not the
-            section head. The role is what makes the label reach a screen reader
-            — a bare div is not exposed, so the focus the nav moves here would
-            land somewhere unnamed. */}
         <div
           id="questions"
           role="region"
@@ -554,7 +476,6 @@ export default async function ReportPage({
 
         <ShareControl sessionId={sessionId} sessionName={title} initiallyShared={shareIsLive} />
 
-        {/* Retry is the hot action, and the only ember button on the page. */}
         <div className="endrow rv" data-io>
           <div>
             <RetryButton sessionId={sessionId} />
@@ -569,12 +490,6 @@ export default async function ReportPage({
   );
 }
 
-/**
- * The heading over a report section: what it is, and in mono beside it, what it
- * is measured from. The right-hand line is where a section says its own
- * provenance — "measured from the recording", "straight from your own
- * recording" — which is the claim this product lives or dies on.
- */
 const VERDICT_MID_FROM = 56;
 const VERDICT_LONG_FROM = 112;
 
@@ -608,22 +523,9 @@ function SectionHead({ title, note }: { title: string; note: string }) {
   );
 }
 
-/**
- * Splits a next step into a headline and the rest of itself.
- *
- * The coach writes each step as prose, and the design wants a mono uppercase
- * title over a plain-English body. Rather than ask the model for a shape it
- * doesn't return — or invent one — the opening sentence becomes the title when
- * it is short enough to survive being set in caps and something follows it.
- * Everything else falls through as body text under the numeral, which is a
- * complete card in its own right.
- */
 function splitFix(step: string): { title: string; body: string } {
   const text = step.trim();
   const m = new RegExp(`^(.{1,${FIX_TITLE_MAX}}?)[.!?]\\s+(\\S[\\s\\S]*)$`).exec(text);
-  // Both groups are checked rather than asserted: `noUncheckedIndexedAccess`
-  // types them as possibly-undefined, and a fix card with an empty title reads
-  // as a rendering bug, so falling through to plain body text is the safer miss.
   const [, title, body] = m ?? [];
   if (!title || !body) return { title: "", body: text };
   const lastWord = title.split(/\s+/).pop() ?? "";
@@ -633,11 +535,6 @@ function splitFix(step: string): { title: string; body: string } {
   return { title, body };
 }
 
-/**
- * One category, this run against the one it retried. A zero is drawn flat, not
- * green: the scores are rounded, so "no change" is a real answer rather than a
- * near miss rounding up.
- */
 function Delta({ label, now, before }: { label: string; now: number; before: number }) {
   const d = now - before;
   return (
@@ -674,15 +571,6 @@ function Highlight({
         </span>
         <span className="hl-q">Q{h.turn_index + 1}</span>
       </div>
-      {/* The rule down the left is the tone: it carries the strong/weak read
-          that the card's own top border used to, now that the two cards share
-          one box instead of being separate panels.
-
-          A token rather than a `/50` alpha modifier because the strength is not
-          the same in both modes: a translucent rule on a bright ground reads
-          weaker than the same rule on a dark one, so on paper it is laid down
-          at 70%. Same pair as `.quote-strong` / `.quote-weak`, which is the
-          point of routing all four through one token each. */}
       <p
         className={cx(
           "hl-quote border-l-2 pl-4",
@@ -697,8 +585,6 @@ function Highlight({
           {hasAudio ? (
             <PlayAnswer sessionId={sessionId} turnIndex={h.turn_index} label="play answer" />
           ) : null}
-          {/* Jumps to this turn in the replay and unfolds it — the tape lives
-              there, next to the transcript it belongs to. */}
           {hasVideo ? (
             <a className="btn btn-ghost btn-xs" href={`#turn-${h.turn_index}`}>
               <span aria-hidden="true">▣</span> watch

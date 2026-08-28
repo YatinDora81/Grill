@@ -1,23 +1,4 @@
 import "server-only";
-/**
- * GitHub repo → interviewer digest, run ONCE at creation time.
- *
- * Mirrors resumeService: the expensive ingestion happens once in the extract
- * endpoint, and /start only ever takes the resulting text. The interview never
- * talks to GitHub.
- *
- * Ingestion is a single tarball download, not a fan-out of per-file API calls:
- *   meta + languages + `GET /tarball/{ref}`  →  stream-extract (gunzip + tar) →
- *   filter junk in code  →  build a pack  →  digest (one call, or map-reduce).
- * Three GitHub requests total, so rate limits stop being a real constraint, and
- * the model reads EVERY kept source file — no selection, no sampling.
- *
- * SECURITY (§8): the raw user string is NEVER fetched. owner/repo/ref are parsed
- * out and validated, and every request URL is built from those parts against the
- * api.github.com literal. Streaming caps (per-entry / total / entry-count) are
- * the DoS defence — a hostile tarball can't balloon memory (see §7 memory math
- * in TARBALL_STREAMING_README).
- */
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { createGunzip } from "node:zlib";
@@ -34,74 +15,38 @@ import {
   type ProjectDigest,
 } from "@/lib/prompts/projectDigest";
 
-// ── Gates & budgets ───────────────────────────────────────────────
-/** Metadata `size` (KB) gate: refuse a repo this big before downloading it. */
-const MAX_REPO_KB = 200_000; // ~200 MB compressed
-/** GitHub JSON calls are fast; a hung one must not hold the request open. */
+const MAX_REPO_KB = 200_000;
 const GITHUB_TIMEOUT_MS = 10_000;
-/** Extraction must never eat the LLM calls' share of the route's 60 s. */
 const EXTRACT_DEADLINE_MS = 20_000;
-/** The rendered digest the textarea shows, capped to the schema's field max. */
 const MAX_DIGEST_CHARS = 24_000;
-/**
- * The whole extract must finish inside the route's maxDuration (60 s), or the
- * PLATFORM kills it at 60 s (504) before our own degradation can run. So the
- * digest works to a wall clock set under that: every LLM call's timeout is the
- * time left on this budget (capped at DIGEST_TIMEOUT_MS), and once too little is
- * left we skip the model and return the deterministic fallback rather than 504.
- */
 const ROUTE_BUDGET_MS = 55_000;
-/** Below this much remaining budget, don't start an LLM call — go to fallback. */
 const MIN_DIGEST_MS = 6_000;
 
-/** Streaming extraction caps — the zip-bomb / OOM defence. */
 export const EXTRACT_CAPS = {
-  perEntryBytes: 400 * 1024, // skip any single file bigger than this, from its header
-  perFileChars: 25_000, // keep at most this much of a kept file
-  maxTotalChars: 4_000_000, // whole-pack ceiling (~1M tokens)
+  perEntryBytes: 400 * 1024,
+  perFileChars: 25_000,
+  maxTotalChars: 4_000_000,
   maxEntries: 20_000,
 } as const;
 
-// ── Digest budgets ────────────────────────────────────────────────
-/**
- * If the whole pack fits within this, ONE digest call reads all of it. Gemini
- * 2.5 Flash's ~1M-token window takes ~175 K tokens comfortably. A pack this big
- * exceeds the Groq fallback's context, so a failed full dump does NOT fall to
- * Groq — it drops to map-reduce, whose chunks fit both providers.
- */
 const FULL_DUMP_MAX_CHARS = 700_000;
-/** One MAP chunk (~22 K tokens): fits Gemini AND the Groq fallback. */
 const CHUNK_CHARS = 90_000;
-/** Beyond this many chunks the remaining files are named-only; the digest says so. */
 const MAX_CHUNKS = 24;
-/** MAP calls in flight at once — bounded so a burst doesn't trip provider 429s. */
 const CHUNK_CONCURRENCY = 5;
-/** Each map brief is trimmed to this before the merge, to keep merge input small. */
 const MAP_NOTE_CHARS = 4_000;
-/** Digest calls carry big inputs; give them more than the default per-call timeout. */
 const DIGEST_TIMEOUT_MS = 90_000;
 
 const GITHUB_API = "https://api.github.com";
 
-// ── URL parsing (§7) ──────────────────────────────────────────────
-
 export interface ParsedRepo {
   owner: string;
   repo: string;
-  /** Branch/ref, when the URL named one via /tree/{ref}. */
   ref?: string;
-  /** Monorepo focus hint — extracted entries are filtered to this prefix. */
   subpath?: string;
 }
 
-/** owner / repo / ref segments must each be a plain path atom — never a payload. */
 const SEGMENT = /^[\w.-]+$/;
 
-/**
- * Accepts github.com/{owner}/{repo}, optional `.git`, optional `/tree/{ref}` and
- * optional `/tree/{ref}/{subpath}`. Rejects every other host and shape — this is
- * the only place a user-supplied string is turned into request parts.
- */
 export function parseRepoUrl(raw: string): ParsedRepo {
   let url: URL;
   try {
@@ -150,8 +95,6 @@ export function parseRepoUrl(raw: string): ParsedRepo {
   return parsed;
 }
 
-// ── GitHub client ─────────────────────────────────────────────────
-
 function ghHeaders(): Record<string, string> {
   const headers: Record<string, string> = {
     Accept: "application/vnd.github+json",
@@ -162,14 +105,12 @@ function ghHeaders(): Record<string, string> {
   return headers;
 }
 
-/** GitHub is unreachable / rate-limited / 5xx — mapped to 502 by the route. */
 function githubUnavailable(res: Response): AppError {
   const remaining = res.headers.get("x-ratelimit-remaining");
   const detail =
     remaining === "0"
       ? "GitHub's API rate limit is exhausted — try again shortly, or set GITHUB_TOKEN."
       : `GitHub is unavailable right now (status ${res.status}).`;
-  // Status + rate-limit only. The token must never reach a log or a message.
   return new AppError(502, "github_unavailable", detail);
 }
 
@@ -197,7 +138,7 @@ export interface RepoMeta {
   language: string;
   topics: string[];
   stars: number;
-  size: number; // KB
+  size: number;
   fork: boolean;
   parent: string | null;
   pushed_at: string;
@@ -240,8 +181,6 @@ async function fetchLanguages(owner: string, repo: string): Promise<Record<strin
   return (await ghJson<Record<string, number>>(`/repos/${owner}/${repo}/languages`, true)) ?? {};
 }
 
-// ── Streaming tarball extraction (see TARBALL_STREAMING_README) ────
-
 export interface ExtractedFile {
   path: string;
   text: string;
@@ -254,13 +193,11 @@ export interface ExtractResult {
   entryCount: number;
 }
 
-/** GitHub prefixes every tarball path with `{owner}-{repo}-{sha}/`; drop it. */
 function stripRoot(name: string): string {
   const i = name.indexOf("/");
   return i === -1 ? "" : name.slice(i + 1);
 }
 
-/** Directory / file patterns never worth reading. Dir tokens are segment-anchored. */
 const SKIP: RegExp[] = [
   /(^|\/)node_modules\//,
   /(^|\/)dist\//,
@@ -293,7 +230,6 @@ function basename(path: string): string {
   return path.slice(path.lastIndexOf("/") + 1).toLowerCase();
 }
 
-/** README first (author's framing), then manifests, then path order. */
 function sortFiles(files: ExtractedFile[]): void {
   const rank = (p: string): number => {
     const b = basename(p);
@@ -309,12 +245,6 @@ function normalizedSubpath(subpath?: string): string | undefined {
   return subpath.endsWith("/") ? subpath : `${subpath}/`;
 }
 
-/**
- * Stream a gzipped tarball into a filtered, capped, in-memory pack. Every entry's
- * stream is fully drained and `next()` is called exactly once on every path —
- * miss either and the pipeline stalls silently (see README §4). Caps are checked
- * from the header before bytes are read; hitting a global cap aborts the download.
- */
 export async function extractRepoTarball(
   body: ReadableStream<Uint8Array>,
   opts: { subpath?: string; abort: () => void; caps?: typeof EXTRACT_CAPS },
@@ -326,9 +256,6 @@ export async function extractRepoTarball(
 
   extract.on("entry", (header, stream, next) => {
     state.entryCount += 1;
-    // The entry-count cap must bind even when every entry is skipped/binary (a
-    // committed node_modules/ would otherwise stream in full): abort here, not
-    // only from a kept file's end handler.
     if (state.entryCount > caps.maxEntries) {
       if (!state.truncated) {
         state.truncated = true;
@@ -350,7 +277,7 @@ export async function extractRepoTarball(
       state.totalChars < caps.maxTotalChars;
 
     if (!keepIt) {
-      stream.resume(); // drain without buffering
+      stream.resume();
       next();
       return;
     }
@@ -363,38 +290,37 @@ export async function extractRepoTarball(
     stream.on("data", (c: Buffer) => {
       if (first) {
         first = false;
-        if (c.subarray(0, 1024).includes(0)) binary = true; // NUL sniff — non-text
+        if (c.subarray(0, 1024).includes(0)) binary = true;
       }
-      if (binary) return; // decision made; keep draining, keep nothing
+      if (binary) return;
       if (bytes < caps.perFileChars * 4) {
-        chunks.push(c); // ×4 utf-8 headroom so the char cap is reachable
+        chunks.push(c);
         bytes += c.length;
       }
     });
 
     stream.on("end", () => {
       if (!binary && chunks.length) {
-        let text = Buffer.concat(chunks).toString("utf8"); // concat THEN decode: multi-byte
+        let text = Buffer.concat(chunks).toString("utf8");
         const truncatedFile = text.length > caps.perFileChars;
         if (truncatedFile) text = text.slice(0, caps.perFileChars);
         state.files.push({ path, text, truncatedFile });
         state.totalChars += text.length;
         if (state.totalChars >= caps.maxTotalChars || state.entryCount >= caps.maxEntries) {
           state.truncated = true;
-          opts.abort(); // stop the download itself (§5)
+          opts.abort();
         }
       }
       next();
     });
 
-    stream.on("error", () => next()); // even the error path advances the parser
+    stream.on("error", () => next());
   });
 
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await pipeline(Readable.fromWeb(body as any), createGunzip(), extract);
   } catch (err) {
-    // An abort we triggered on a global cap is success, not failure.
     const expected = state.truncated && (err as Error)?.name === "AbortError";
     if (!expected) throw err;
   }
@@ -403,7 +329,6 @@ export async function extractRepoTarball(
   return state;
 }
 
-/** Download the tarball and extract it, aborting the download when caps hit. */
 async function fetchAndExtractTarball(
   owner: string,
   repo: string,
@@ -420,8 +345,6 @@ async function fetchAndExtractTarball(
   } catch {
     throw new AppError(502, "github_unavailable", "Couldn't reach GitHub — try again shortly.");
   }
-  // Check status BEFORE piping — a 404/403 body is HTML/JSON, not gzip, and
-  // feeding it to gunzip yields a useless "incorrect header check" error.
   if (!res.ok || !res.body) {
     if (res.status === 404) throw notFound("That branch doesn't exist in the repo.", "repo_not_found");
     throw githubUnavailable(res);
@@ -431,14 +354,10 @@ async function fetchAndExtractTarball(
     return await extractRepoTarball(res.body, { subpath, abort: () => controller.abort() });
   } catch (err) {
     if (err instanceof AppError) throw err;
-    // A deadline abort without a cap hit, a corrupt gzip, a dropped connection.
     throw new AppError(502, "github_unavailable", "Couldn't read the repo archive — try again.");
   }
 }
 
-// ── Pack builder ──────────────────────────────────────────────────
-
-/** Repo metadata + language table header, shared by full-dump and merge. */
 function metaHeader(meta: RepoMeta, languages: Record<string, number>): string {
   const langLine =
     Object.entries(languages)
@@ -459,7 +378,6 @@ function metaHeader(meta: RepoMeta, languages: Record<string, number>): string {
     .join("\n");
 }
 
-/** The whole pack: metadata header + every kept file under a `=== path ===` head. */
 export function buildPack(
   meta: RepoMeta,
   languages: Record<string, number>,
@@ -469,7 +387,6 @@ export function buildPack(
   return `${metaHeader(meta, languages)}\n\n${body}`;
 }
 
-/** Group files by top-level dir, greedy-fill chunks of ≤ CHUNK_CHARS. */
 export function chunkFiles(files: ExtractedFile[]): string[] {
   const byDir = new Map<string, ExtractedFile[]>();
   for (const f of files) {
@@ -501,7 +418,6 @@ export function chunkFiles(files: ExtractedFile[]): string[] {
   return chunks;
 }
 
-/** Bounded-concurrency map — keeps fan-out from tripping provider rate limits. */
 async function pool<T, R>(
   items: T[],
   limit: number,
@@ -519,9 +435,6 @@ async function pool<T, R>(
   return results;
 }
 
-// ── Digest (§3 Stage C) ───────────────────────────────────────────
-
-/** The honesty line that rides at the top of the digest (fork / truncation). */
 function digestNote(meta: RepoMeta, truncated: boolean): string {
   const notes: string[] = [];
   if (meta.fork) notes.push(`Note: this repo is a fork of ${meta.parent ?? "another repo"}.`);
@@ -533,10 +446,6 @@ function digestNote(meta: RepoMeta, truncated: boolean): string {
   return notes.join("\n");
 }
 
-/**
- * Deterministic digest for when the LLM is unreachable entirely. Metadata +
- * README head + file list — degraded, but the user can edit it. Never a dead end.
- */
 export function fallbackDigest(meta: RepoMeta, files: ExtractedFile[], truncated: boolean): string {
   const note = digestNote(meta, truncated);
   const digest: ProjectDigest = {
@@ -562,7 +471,6 @@ export function fallbackDigest(meta: RepoMeta, files: ExtractedFile[], truncated
   );
 }
 
-/** Backfill a blank summary from metadata rather than showing an empty section. */
 function withSummary(value: ProjectDigest, meta: RepoMeta): ProjectDigest {
   if (value.summary.trim()) return value;
   return {
@@ -572,12 +480,10 @@ function withSummary(value: ProjectDigest, meta: RepoMeta): ProjectDigest {
   };
 }
 
-/** Per-call LLM timeout: whatever's left of the route budget, capped, floored. */
 function callTimeout(deadline: number): number {
   return Math.min(DIGEST_TIMEOUT_MS, Math.max(MIN_DIGEST_MS, deadline - Date.now()));
 }
 
-/** One call over the whole pack. Throws on failure so the caller can map-reduce. */
 async function fullDump(pack: string, deadline: number): Promise<ProjectDigest> {
   const { value } = await generateJson(projectDigestSchema, {
     system: PROJECT_DIGEST_SYSTEM,
@@ -588,12 +494,6 @@ async function fullDump(pack: string, deadline: number): Promise<ProjectDigest> 
   return value;
 }
 
-/**
- * Map-reduce: each chunk gets a plain-text brief (MAP, bounded-parallel), then
- * one merge call combines the briefs into the final digest (REDUCE). Plain-text
- * map on purpose — per-chunk JSON invites Gemini object-vs-string schema misses
- * that would fail the whole import. Throws if the LLM is unreachable.
- */
 async function mapReduce(
   files: ExtractedFile[],
   meta: RepoMeta,
@@ -637,11 +537,6 @@ async function mapReduce(
   return { value, partial };
 }
 
-/**
- * Size-routed digest: full dump when the pack fits one call, else map-reduce. A
- * failed full dump drops to map-reduce (its chunks fit both providers); only a
- * total LLM outage falls to the deterministic digest.
- */
 async function digestPack(
   extracted: ExtractResult,
   meta: RepoMeta,
@@ -651,7 +546,6 @@ async function digestPack(
   const { files, totalChars, truncated } = extracted;
   const timeLeft = () => deadline - Date.now();
   try {
-    // No budget left for the model at all → deterministic digest, not a 504.
     if (timeLeft() < MIN_DIGEST_MS) throw new Error("no time budget for LLM digest");
 
     let value: ProjectDigest;
@@ -661,8 +555,6 @@ async function digestPack(
       try {
         value = await fullDump(pack, deadline);
       } catch (err) {
-        // Only map-reduce if there's time; otherwise the full dump failing on a
-        // slow provider means map-reduce would 504 too — go straight to fallback.
         if (timeLeft() < MIN_DIGEST_MS) throw err;
         console.warn("[projectService] full dump failed — falling back to map-reduce:", err);
         ({ value, partial } = await mapReduce(files, meta, languages, deadline));
@@ -679,8 +571,6 @@ async function digestPack(
     return fallbackDigest(meta, files, truncated);
   }
 }
-
-// ── Orchestrator ──────────────────────────────────────────────────
 
 export interface ExtractProjectResult {
   digest: string;
@@ -700,14 +590,7 @@ export interface ExtractProjectResult {
   chars: number;
 }
 
-/**
- * The whole pipeline: parse → meta (size gate) → languages → tarball → extract →
- * digest. Every GitHub URL is built from validated parts inside the helpers; the
- * raw string only ever reaches parseRepoUrl.
- */
 export async function extractProject(repoUrl: string): Promise<ExtractProjectResult> {
-  // The wall clock the whole extract works to, so a slow provider degrades to
-  // the deterministic digest inside maxDuration rather than being 504'd.
   const deadline = Date.now() + ROUTE_BUDGET_MS;
   const { owner, repo, ref, subpath } = parseRepoUrl(repoUrl);
 

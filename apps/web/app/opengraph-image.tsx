@@ -6,32 +6,6 @@ import {
   SITE_NAME,
 } from "@/lib/siteMeta";
 
-/**
- * The card Slack, iMessage and X paint when the landing page is linked.
- *
- * Rendered here rather than shipped as a PNG so the copy stays in one place —
- * siteMeta.ts feeds the <title>, the meta description and this image, and a
- * static asset would be the one copy nobody remembers to re-export.
- *
- * Deliberately no webfont: Archivo would have to be fetched over the network at
- * build time, and a flaky font CDN failing the whole build is a worse trade than
- * a card set in the default sans. Colours are globals.css verbatim: satori
- * cannot read CSS variables, so the tokens have to be re-typed here. Keep them
- * in step with the DARK values in the @theme block by hand — never with the
- * `[data-theme="light"]` block below it.
- *
- * THIS CARD IS DARK IN BOTH THEMES, and is excluded from the light-mode audit
- * along with app/icon.svg and app/apple-icon.png. Not an oversight, three
- * reasons: there is no reader at render time — the consumers are Slack, iMessage
- * and X unfurlers fetching with no cookies, no client JS and no colour-scheme
- * hint; one image serves everyone and is cached per URL, so a theme-aware render
- * would freeze to whichever theme warmed the cache; and satori cannot read a
- * custom property at all, which is why these hexes are re-typed in the first
- * place. A sweep that "fixes" the literals below ships a cream OG card.
- */
-
-// Both re-exported from siteMeta so the dimensions a page declares in
-// `openGraph.images` can never disagree with the PNG actually rendered here.
 export const alt = OG_IMAGE_ALT;
 export const size = OG_IMAGE_SIZE;
 export const contentType = "image/png";
@@ -53,8 +27,6 @@ export default async function OpengraphImage() {
           justifyContent: "center",
           backgroundColor: PAPER,
           padding: "0 90px",
-          // The ember bloom the room uses, flattened to a radial so satori can
-          // render it — it has no blur filter.
           backgroundImage: `radial-gradient(circle at 12% 108%, rgba(255,70,51,0.28) 0%, rgba(255,70,51,0) 55%)`,
         }}
       >

@@ -15,13 +15,6 @@ const EXT: Record<string, string> = {
   "video/x-matroska": "mkv",
 };
 
-/**
- * Begin a session recording: open a multipart upload and hand back its id.
- *
- * No server timestamp comes back on purpose. Answer offsets are measured on the
- * client against the same clock that starts the mic, so a server clock here
- * would only invite someone to mix the two.
- */
 export async function POST(req: Request) {
   try {
     const userId = await requireUserId();
@@ -33,15 +26,8 @@ export async function POST(req: Request) {
       throw conflict(`Session is ${session.status}, not recording.`, "session_not_active");
     }
 
-    // A reload starts a fresh recording; the previous one's upload is still open
-    // and holding real footage. Close it out before opening another.
-    await settleUnfinishedVideos(session_id).catch(() => {
-      /* best-effort: never block the interview on housekeeping */
-    });
+    await settleUnfinishedVideos(session_id).catch(() => {});
 
-    // The id is minted here, not by the DB, because the object key embeds it —
-    // letting Prisma default it would key the object to one id and the row to
-    // another, and nothing would ever find the video again.
     const id = crypto.randomUUID();
     const base = mime_type.split(";")[0]!.trim().toLowerCase();
     const key = videoKey(session_id, id, EXT[base] ?? "webm");

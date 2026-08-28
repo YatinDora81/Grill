@@ -1,10 +1,5 @@
 import type { ApiError } from "@repo/types";
 
-/**
- * Browser-side API helper. Every route returns the same error envelope
- * ({ error: { code, message } }), so unwrap it once here and let callers just
- * catch — no per-screen error parsing.
- */
 export class ApiClientError extends Error {
   readonly code: string;
   readonly status: number;
@@ -58,7 +53,6 @@ export async function apiGet<T>(path: string): Promise<T> {
   return unwrap<T>(res);
 }
 
-/** DELETE with a JSON body — the route reads it, so the body is not optional. */
 export async function apiDelete<T>(path: string, payload: unknown): Promise<T> {
   const res = await fetch(path, {
     method: "DELETE",

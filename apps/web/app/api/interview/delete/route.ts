@@ -8,10 +8,6 @@ import { requireUserId } from "@/lib/auth";
 import * as repo from "@/lib/db/repo";
 import { settleUnfinishedVideos } from "@/lib/services/videoService";
 
-/**
- * Soft-delete an interview. The session (and related rows) stay in the DB;
- * user-facing reads filter `deletedAt: null` so it disappears from history.
- */
 export async function POST(req: Request) {
   try {
     const userId = await requireUserId();
@@ -19,10 +15,7 @@ export async function POST(req: Request) {
     const session = await repo.getSession(session_id, userId);
     if (!session) throw notFound("Session not found.", "unknown_session");
 
-    // Close any open upload before hiding the session — same as cancel/end.
-    await settleUnfinishedVideos(session_id).catch(() => {
-      /* best-effort: delete must still succeed if housekeeping fails */
-    });
+    await settleUnfinishedVideos(session_id).catch(() => {});
 
     const ok = await repo.softDeleteSession(session_id, userId);
     if (!ok) throw notFound("Session not found.", "unknown_session");

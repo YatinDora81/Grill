@@ -1,11 +1,5 @@
 export const runtime = "nodejs";
-// A map-reduce import (tarball download + up to ~25 LLM calls) legitimately runs
-// tens of seconds; give it headroom over the platform default so a big repo
-// doesn't 504 mid-import.
 export const maxDuration = 60;
-// Turns a GitHub repo URL into an editable project digest for /start. Mirrors
-// resume/extract: the expensive ingestion happens once here; /start only ever
-// takes text. The interview never talks to GitHub.
 
 import { z } from "zod";
 import { json, errorResponse } from "@/lib/http";

@@ -1,14 +1,7 @@
 import { describe, expect, mock, test } from "bun:test";
 
-// `server-only` throws the moment it is imported outside an RSC graph. It is a
-// build-time marker with no runtime behaviour, so it is neutralised before
-// schemas.ts pulls it in via env.ts.
 mock.module("server-only", () => ({}));
 
-// env.ts fails fast on a missing key, and Bun does not load `.env.local` under
-// NODE_ENV=test. These satisfy that boot check and nothing else: no test here
-// touches a provider, and every other config value stays at its real default so
-// the bounds below are the ones production enforces.
 process.env.GEMINI_API_KEYS ||= "TEST__SPLIT__not-a-real-key";
 process.env.JWT_SECRET ||= "test-secret";
 
@@ -24,41 +17,25 @@ const {
   storedConfigSchema,
 } = await import("./schemas");
 
-/**
- * These schemas are the only thing standing between the API and a config the
- * prompt builder cannot describe. Nothing downstream re-checks the invariant, so
- * a hole here does not surface as a validation error — it surfaces as an
- * interview briefed on material it does not have.
- */
-
-/** A minimal valid config; `over` names only the field under test. */
 function cfg(over: Record<string, unknown> = {}) {
   return { sources: ["resume"], mode: null, ...over };
 }
 
-/** A minimal valid start request. */
 function start(over: Record<string, unknown> = {}) {
   return { source_text: "Staff engineer. Shipped a billing ledger.", name: "Backend screen", config: cfg(), ...over };
 }
 
-/** The `path` of every issue a failed parse produced, dotted. */
 function issuePaths(result: { success: boolean; error?: { issues: { path: PropertyKey[] }[] } }) {
   return result.error!.issues.map((i) => i.path.join("."));
 }
 
 describe("the mode XOR sources invariant", () => {
-  /**
-   * The prompt builder reads `mode` first and `sources` only when mode is null.
-   * A config carrying both does not fail — it silently runs as the mode, and the
-   * sources the user picked are never mentioned to the interviewer.
-   */
   test("rejects an exclusive mode carrying sources as well", () => {
     const r = interviewConfigSchema.safeParse(cfg({ mode: "jd", job_description: "Senior Go role", sources: ["resume"] }));
     expect(r.success).toBe(false);
     expect(issuePaths(r)).toContain("sources");
   });
 
-  /** The mirror hole: neither field set describes an interview about nothing. */
   test("rejects a config that draws on neither a mode nor any source", () => {
     const r = interviewConfigSchema.safeParse(cfg({ mode: null, sources: [] }));
     expect(r.success).toBe(false);
@@ -99,7 +76,6 @@ describe("material a mode or source cannot run without", () => {
     expect(issuePaths(r)).toContain("topic");
   });
 
-  /** Whitespace is trimmed before the check, so " " is no topic at all. */
   test("does not accept whitespace as a topic", () => {
     const r = interviewConfigSchema.safeParse(cfg({ mode: "topic_only", sources: [], topic: "   " }));
     expect(r.success).toBe(false);
@@ -141,8 +117,6 @@ describe("material a mode or source cannot run without", () => {
 
 describe("bounds", () => {
   test("pins the bounds the form, the API and the prompt all quote", () => {
-    // Restated as literals so a change to the product limits has to be a
-    // deliberate edit here, not a silent follow-on from another file.
     expect(QUESTION_BOUNDS).toEqual({ min: 3, max: 100 });
     expect([...DIFFICULTIES]).toEqual(["easy", "medium", "hard", "extreme"]);
   });
@@ -162,11 +136,6 @@ describe("bounds", () => {
     expect(issuePaths(over)).toContain("config.num_questions");
   });
 
-  /**
-   * The floor is deliberately only on the way IN. A session recorded when the
-   * floor was 1 must still parse, or its report can never build and its room
-   * page 500s — punishing the user for a limit that postdates their interview.
-   */
   test("still reads a stored session recorded under the old 1-question floor", () => {
     const r = storedConfigSchema.safeParse({ ...cfg(), num_questions: 2 });
     expect(r.success).toBe(true);
@@ -185,8 +154,6 @@ describe("bounds", () => {
   });
 
   test("rejects a fractional question count", () => {
-    // num_questions counts turns the room will actually create; 7.5 of them is
-    // a loop that never reaches its own terminating condition.
     expect(interviewConfigSchema.safeParse(cfg({ num_questions: 7.5 })).success).toBe(false);
   });
 
@@ -199,16 +166,12 @@ describe("bounds", () => {
   });
 
   test("rejects an empty résumé and an unnamed interview", () => {
-    // The résumé is required for every mode but `project`; a name always is —
-    // an interview with no name is one the user cannot find again, and nothing
-    // invented here would be their words.
     expect(startRequestSchema.safeParse(start({ source_text: "" })).success).toBe(false);
     expect(startRequestSchema.safeParse(start({ name: "   " })).success).toBe(false);
   });
 });
 
 describe("the résumé is optional only for a project interview", () => {
-  /** A minimal valid project config: mode `project`, its own material, no sources. */
   function projectCfg(over: Record<string, unknown> = {}) {
     return cfg({
       mode: "project",
@@ -221,7 +184,6 @@ describe("the résumé is optional only for a project interview", () => {
   test("accepts a project interview with no résumé at all", () => {
     const r = startRequestSchema.safeParse(start({ source_text: "", config: projectCfg() }));
     expect(r.success).toBe(true);
-    // The empty string survives to the row — Session.sourceText is non-null.
     expect(r.data!.source_text).toBe("");
   });
 
@@ -254,35 +216,22 @@ describe("the résumé is optional only for a project interview", () => {
 
 describe("defaults", () => {
   test("leaves repeats off unless they are asked for", () => {
-    // Off by default is what makes this a repeat-practice tool: with it on, the
-    // same résumé produces the same interview twice.
     expect(interviewConfigSchema.safeParse(cfg()).data!.allow_repeats).toBe(false);
     expect(interviewConfigSchema.safeParse(cfg({ allow_repeats: true })).data!.allow_repeats).toBe(true);
   });
 
   test("pitches a config with no stated difficulty at medium, not at easy", () => {
-    // Difficulty drives how hard every question is pitched, so the fallback for
-    // a row that never stated one is a product decision: defaulting to easy
-    // would silently under-pitch every legacy session.
     expect(interviewConfigSchema.safeParse(cfg()).data!.difficulty).toBe("medium");
     expect(storedConfigSchema.safeParse(cfg()).data!.difficulty).toBe("medium");
   });
 
   test("carries a stored per-answer cap through, and treats its absence as 'use the default'", () => {
-    // A stored session keeps the cap it was created with even if the model's
-    // constants are retuned later; absent must stay absent rather than being
-    // filled in, or the room would enforce a limit the interview never had.
     expect(storedConfigSchema.safeParse({ ...cfg(), max_answer_seconds: 180 }).data!.max_answer_seconds).toBe(180);
     expect(storedConfigSchema.safeParse(cfg()).data!.max_answer_seconds).toBeUndefined();
   });
 });
 
 describe("configs written under older shapes", () => {
-  /**
-   * Sessions are long-lived and replayed by the report, the retry flow and the
-   * room. Every shape this app has ever written has to keep parsing — a row
-   * written by an older deploy must still work after a rollback.
-   */
   test("maps the legacy resume mode onto the resume source", () => {
     const r = storedConfigSchema.safeParse({ mode: "resume", num_questions: 8 });
     expect(r.success).toBe(true);
@@ -298,8 +247,6 @@ describe("configs written under older shapes", () => {
   });
 
   test("leaves an exclusive mode's sources empty rather than assuming a résumé", () => {
-    // The `c.mode ? [] : ["resume"]` fallback. Defaulting to ["resume"] here
-    // would break the XOR for every stored jd/real/weak_spots session at once.
     const r = storedConfigSchema.safeParse({ mode: "weak_spots" });
     expect(r.success).toBe(true);
     expect(r.data!.mode).toBe("weak_spots");
@@ -350,7 +297,6 @@ describe("configs written under older shapes", () => {
   test.each(["cultural", "behavioral"])(
     "folds the legacy %s focus into the cultural source",
     (interview_type) => {
-      // "Focus" was a parallel axis that only restated what the sources say.
       const r = storedConfigSchema.safeParse({ sources: ["resume"], mode: null, interview_type });
       expect(r.success).toBe(true);
       expect(r.data!.sources).toEqual(["resume", "cultural"]);
@@ -358,8 +304,6 @@ describe("configs written under older shapes", () => {
   );
 
   test("does not fold the legacy focus into an exclusive mode, which would break the XOR", () => {
-    // The `s.length > 0` guard. Pushing cultural onto a jd session's empty
-    // sources would make every such stored row unparseable.
     const r = storedConfigSchema.safeParse({ mode: "jd", job_description: "Senior Go role", interview_type: "cultural" });
     expect(r.success).toBe(true);
     expect(r.data!.sources).toEqual([]);
@@ -377,7 +321,6 @@ describe("configs written under older shapes", () => {
   });
 
   test("migrates a row carrying every legacy field at once", () => {
-    // The shapes compose: a single old row is not one migration but four.
     const r = storedConfigSchema.safeParse({
       mode: "topic",
       topic: "Kafka",
@@ -415,9 +358,6 @@ describe("configs written under older shapes", () => {
   });
 
   test("still rejects a stored row that migration cannot rescue", () => {
-    // Migration is not a licence to accept anything: a row naming a source that
-    // has never existed is corrupt, and reading it as valid would brief the
-    // prompt on a source it has no meta for.
     expect(storedConfigSchema.safeParse({ sources: ["astrology"], mode: null }).success).toBe(false);
     expect(storedConfigSchema.safeParse("not a config").success).toBe(false);
     expect(storedConfigSchema.safeParse(null).success).toBe(false);
@@ -671,8 +611,6 @@ describe("the gap comparison the model returns", () => {
 
 describe("questionResponseSchema", () => {
   test("folds a behavioral question type into cultural rather than spending a retry", () => {
-    // The prompt no longer offers `behavioral`, but the two always meant the
-    // same thing — and a rejected value costs a whole model round-trip.
     const r = questionResponseSchema.safeParse({ question: "Tell me about a conflict.", question_type: "behavioral" });
     expect(r.success).toBe(true);
     expect(r.data!.question_type).toBe("cultural");

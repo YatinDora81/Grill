@@ -18,8 +18,6 @@ export default function NewQuestionSetPage() {
         <div className="page-head">
           <div>
             <p className="kicker">03 — Question bank</p>
-            {/* Hard break, same reasoning as /new: all-caps display wraps
-                unpredictably under a ch cap. */}
             <h1 className="h1 mt-4">
               Just the questions,
               <br />
@@ -32,8 +30,6 @@ export default function NewQuestionSetPage() {
           </div>
         </div>
 
-        {/* Same explain: gate as /new — a plain spacer would leave its margin
-            behind on every non-explain view. */}
         <div className="hidden pt-8 explain:block">
           <ExplainBanner />
         </div>

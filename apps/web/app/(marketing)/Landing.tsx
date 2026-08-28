@@ -14,12 +14,6 @@ import { AuthModal, type AuthMode } from "./AuthModal";
 import { HeroRig } from "./HeroRig";
 import { SimZone } from "./SimZone";
 
-/* ── content ──────────────────────────────────────────────────────────────
-   Copy lives next to the markup it fills. All of it describes what the product
-   actually does — the follow-ups are the interviewer's real register, and the
-   four measured numbers are the ones a delivery block actually reports. */
-
-/** The section rail across the top. Every target is an id on this page. */
 const NAV = [
   { href: "#how", label: "How it goes" },
   { href: "#measured", label: "Measurement" },
@@ -68,7 +62,6 @@ const FOLLOW_UPS = [
   "And if the interviewer pushes back?",
 ] as const;
 
-/** The delivery report's headline figures, and where each one comes from. */
 const METRICS = [
   { n: "148", u: "wpm — pace", d: "From word-level timings in your transcription." },
   { n: "310", u: "ms — avg pause", d: "Every silence is on the record, to the millisecond." },
@@ -189,7 +182,6 @@ const PROTOCOL = [
   },
 ] as const;
 
-/** `open` marks the one objection worth answering before it is asked. */
 const FAQ: { q: string; a: ReactNode; open?: boolean }[] = [
   {
     q: "Is it actually free?",
@@ -241,35 +233,17 @@ const FAQ: { q: string; a: ReactNode; open?: boolean }[] = [
   },
 ];
 
-/**
- * The measurement wave. Heights are index-based maths on purpose: the same 44
- * bars have to come out of the server render and the client hydration, and
- * Math.random() would guarantee they don't. The animation only scales each bar
- * about this resting height, so a reduced-motion visitor still gets a waveform
- * rather than a flat line.
- */
 const WAVE = Array.from(
   { length: 44 },
   (_, i) => 24 + Math.round(Math.abs(Math.sin(i * 1.7)) * 62) + (i % 5) * 2,
 );
 
-/** Where a signed-out visitor lands once they're in, absent a ?next=. */
 const DEFAULT_NEXT = "/dashboard";
 
-/**
- * Is this `?next=` somewhere on our own site?
- *
- * The old AuthForm tested `startsWith("/") && !startsWith("//")`. That is one
- * character short: browsers normalise a backslash to a slash while parsing, so
- * `/\evil.tld` passes the check and then resolves as the protocol-relative
- * `//evil.tld` — an open redirect out of our own sign-in. Reject any second
- * character that is a separator at all.
- */
 function isInternalPath(next: string): boolean {
   return next.startsWith("/") && next[1] !== "/" && next[1] !== "\\";
 }
 
-/** The arrow that ends a CTA and closes every protocol row. */
 function Arrow() {
   return (
     <svg
@@ -294,13 +268,10 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
   const triggerRef = useRef<HTMLElement | null>(null);
 
   function openAuth(mode: AuthMode) {
-    // Remembered so focus goes back where it came from on close.
     triggerRef.current = document.activeElement as HTMLElement | null;
     setAuth(mode);
   }
 
-  // Stable identity: AuthModal's key/Esc listener takes this as a dependency,
-  // and a new function each render would tear the listener down every time.
   const closeAuth = useCallback(() => {
     setClosing(true);
     setTimeout(() => {
@@ -310,19 +281,6 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
     }, 190);
   }, []);
 
-  /**
-   * Deep links: /?auth=login&next=/report/xyz. The auth gate (proxy.ts and every
-   * signed-in server component) bounces here, and the old /login and /signup
-   * URLs redirect here, so both have to be able to say which form to open and
-   * where to go afterwards.
-   *
-   * Only internal paths are accepted for `next` — see `isInternalPath`. A
-   * `?next=https://evil.tld` would otherwise make our own sign-in an open
-   * redirect.
-   *
-   * Read off window.location rather than useSearchParams so this page needs no
-   * Suspense boundary to prerender.
-   */
   useEffect(() => {
     if (signedIn) return;
     const params = new URLSearchParams(window.location.search);
@@ -332,8 +290,6 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
     if (m === "login" || m === "signup" || m === "forgot") setAuth(m);
   }, [signedIn]);
 
-  // Reveal-on-scroll. Unobserved once it fires: this is choreography, not state,
-  // and re-animating on the way back up is nausea, not delight.
   useEffect(() => {
     const io = new IntersectionObserver(
       (entries) =>
@@ -349,7 +305,6 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
     return () => io.disconnect();
   }, []);
 
-  /** The one action the whole page sells. Signed in, it is a link instead. */
   const hotSeat = signedIn ? (
     <Link href="/new" className="btn btn-primary">
       Start an interview
@@ -379,7 +334,6 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
               </a>
             ))}
           </nav>
-          {/* Signed in, there is nothing left to sell — one way back in. */}
           <div className="lnav-right">
             {signedIn ? (
               <Link href="/dashboard" className="btn btn-secondary btn-sm">
@@ -419,12 +373,6 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 
             <div className="hero-grid">
               <div>
-                {/*
-                  The signature of the page: three lines that rise out of the rules
-                  above them, one word hollowed out, one red full stop. `aria-label`
-                  because the sentence is cut across six elements and a screen reader
-                  should hear it whole.
-                */}
                 <h1
                   className="disp hero-h1"
                   data-io
@@ -539,8 +487,6 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
           </div>
           <div className="mq" data-paused={mqPaused ? "" : undefined}>
             <div className="mq-track">
-              {/* The second set exists only to make the wrap seamless, so it is
-                  hidden rather than read out twice. */}
               {[0, 1].map((set) => (
                 <div className="mq-set" key={set} aria-hidden={set === 1 ? true : undefined}>
                   {FOLLOW_UPS.map((q, i) => (
@@ -722,22 +668,6 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
           <Link href="/" className="wordmark" aria-label="Grill home">
             grill<i>.</i>
           </Link>
-          {/*
-            The theme control sits in the footer rather than in the top bar, and
-            the reason is measurement rather than taste. Below 800px `.lnav-in`
-            collapses to `auto 1fr` and the right-hand track is already carrying
-            Log in beside Start free; at 375px that leaves under 60px of slack,
-            which no three-state control fits into without shoving the one thing
-            the page is selling off the edge. This row wraps, so it holds one at
-            any width.
-
-            Paired with the link list inside a wrapper rather than dropped into
-            `.foot-top` directly: that row is `space-between`, and a third child
-            would fling the links away from the wordmark into the middle of it.
-            And beside the <nav> rather than inside it, because
-            `.grill-root .foot-links button` restyles every button it contains
-            and would flatten the toggle's three radios into footer links.
-          */}
           <div className="flex flex-wrap items-center gap-x-8 gap-y-4">
             <nav className="foot-links" aria-label="Footer">
               {NAV.map((n) => (
@@ -754,9 +684,6 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
                 </button>
               )}
             </nav>
-            {/* Width stated here, never in the toggle's base class string —
-                see the note on `ExplainToggle`'s className for why a caller
-                could not override one anyway. */}
             <ThemeToggle className="w-auto" />
           </div>
         </div>
@@ -767,7 +694,6 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
         </div>
       </footer>
 
-      {/* Never mounted for a signed-in visitor: there is nothing to sign into. */}
       {!signedIn && auth && (
         <AuthModal
           mode={auth}

@@ -18,24 +18,8 @@ import {
 import { Button, ErrorNote, Field, Input, Spinner, Textarea, cx } from "@/components/ui";
 import { Explain } from "@/components/Explain";
 
-/**
- * The question-bank generator.
- *
- * One flat form rather than /new's three-step wizard, and that's deliberate:
- * the wizard earns its steps because an interview is a commitment (camera, a
- * timer, a report at the end), while a set is a document — the whole promise
- * of this screen is "nothing starts". Four decisions on one page keeps that
- * promise legible.
- *
- * The dial classes are restated from NewInterviewForm rather than imported:
- * they are private to that file by design (see its own hoisting note), and a
- * shared export would couple the interview wizard's look to a page that must
- * be free to drift.
- */
-
 const SOURCES: readonly QuestionSetSource[] = ["resume", "topic", "cultural"] as const;
 
-/** Counts worth one click; the number field remains the authority. */
 const COUNT_PRESETS = [5, 8, 10, 15, 20];
 
 const DIAL = "flex border border-line";
@@ -44,7 +28,6 @@ const DIALB =
 const DIALB_ON = "bg-ink font-semibold text-paper";
 const DIALB_OFF = "text-ink-soft hover:bg-(--surface-hover) hover:text-ink";
 
-/** The panel every section of this form sits in. */
 const PANEL = "border border-line bg-paper-raised px-6 py-6";
 
 export function QuestionSetForm() {
@@ -60,13 +43,6 @@ export function QuestionSetForm() {
 
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  /**
-   * The real double-submit guard, same shape as NewInterviewForm's: `busy`
-   * only disables the button, Enter-in-a-field submits regardless, and POST
-   * /api/questions holds the request open while the model writes the batch —
-   * a wide window. Not idempotent either: every call generates (and pays for)
-   * a whole set.
-   */
   const submitting = useRef(false);
   const [extracting, setExtracting] = useState(false);
   const [fileName, setFileName] = useState("");
@@ -90,7 +66,6 @@ export function QuestionSetForm() {
     try {
       const form = new FormData();
       form.append("resume", file);
-      // Same extractor the interview form uses; the bank only ever takes text.
       const { text } = await apiPostForm<{ text: string; chars: number }>(
         "/api/interview/resume/extract",
         form,
@@ -105,7 +80,6 @@ export function QuestionSetForm() {
       );
     } finally {
       setExtracting(false);
-      // Reset or re-picking the same file fires no change event.
       if (fileRef.current) fileRef.current.value = "";
     }
   }
@@ -144,7 +118,6 @@ export function QuestionSetForm() {
       setError(
         err instanceof ApiClientError ? err.message : "Couldn't generate the questions.",
       );
-      // Only reopened on failure; the success path navigates away.
       submitting.current = false;
       setBusy(false);
     }
@@ -155,7 +128,6 @@ export function QuestionSetForm() {
 
   return (
     <form onSubmit={onSubmit} className="mt-9 grid max-w-[720px] gap-5" noValidate>
-      {/* ── What to draw from ─────────────────────────────────── */}
       <section className={PANEL}>
         <p className="mb-4 font-mono text-[0.58rem] tracking-[0.24em] text-ink-muted uppercase">
           What to draw from
@@ -259,7 +231,6 @@ export function QuestionSetForm() {
         ) : null}
       </section>
 
-      {/* ── How hard, how many ────────────────────────────────── */}
       <section className={PANEL}>
         <p className="mb-4 font-mono text-[0.58rem] tracking-[0.24em] text-ink-muted uppercase">
           How hard, how many
@@ -325,7 +296,6 @@ export function QuestionSetForm() {
         </div>
       </section>
 
-      {/* ── Name it and generate ──────────────────────────────── */}
       <section className={PANEL}>
         <p className="mb-4 font-mono text-[0.58rem] tracking-[0.24em] text-ink-muted uppercase">
           Name it and generate

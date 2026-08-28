@@ -19,8 +19,6 @@ export async function POST(req: Request) {
     const user = await repo.getUserById(userId);
     if (!user) throw notFound("User not found.", "unknown_user");
 
-    // Having the session isn't enough to change the password — an unattended
-    // logged-in tab must not be able to lock the owner out of their account.
     const ok = await verifyPassword(user.passwordHash, current_password);
     if (!ok) throw unauthorized("That's not your current password.", "bad_password");
 
@@ -30,10 +28,6 @@ export async function POST(req: Request) {
 
     await repo.updateUserPassword(userId, await hashPassword(new_password));
 
-    // Re-issue the cookie so the JWT is minted after the change rather than
-    // before it — the old one stays valid until it expires either way (these
-    // are stateless tokens), but the active tab shouldn't be running on a
-    // credential older than the password it belongs to.
     await setSessionCookie(userId);
 
     return json({ ok: true });

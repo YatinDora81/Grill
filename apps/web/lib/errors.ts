@@ -1,4 +1,3 @@
-/** Uniform API error shape: { error: { code, message } }. */
 export class AppError extends Error {
   constructor(
     public readonly status: number,
@@ -23,7 +22,6 @@ export const conflict = (message: string, code = "conflict") =>
 export const serviceUnavailable = (message: string, code = "service_unavailable") =>
   new AppError(503, code, message);
 
-/** Thrown by the key-pool layer when every key in a pool failed. */
 export class AllKeysExhausted extends Error {
   constructor(public readonly lastError: unknown) {
     super("all keys exhausted");

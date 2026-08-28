@@ -11,14 +11,6 @@ import {
 } from "./questionGen";
 import type { SessionContext } from "./questionGen";
 
-/**
- * The angle is the most specific instruction in the prompt, and the most
- * specific instruction is the one the model obeys — so an angle drawn from the
- * wrong pool silently overrides the brief above it. These tests are about which
- * pool each interview shape is allowed to draw from; the draw is random, so
- * every pool is sampled to exhaustion rather than asserted on one roll.
- */
-
 function ctx(config: Partial<InterviewConfig>): SessionContext {
   return {
     sourceType: "resume",
@@ -35,7 +27,6 @@ function ctx(config: Partial<InterviewConfig>): SessionContext {
   };
 }
 
-/** Enough rolls that an 8-entry pool is drawn dry many times over. */
 const ROLLS = 600;
 
 function sample(build: () => string, re: RegExp): Set<string> {
@@ -66,7 +57,6 @@ test("a cultural-only interview never opens on an angle from the résumé pool",
 
   expect(cultural.size).toBeGreaterThan(1);
   expect(disjoint(cultural, resume)).toBe(true);
-  // Nothing in a people interview may reach for the document it doesn't read.
   for (const angle of cultural) expect(angle).not.toMatch(/résumé/);
 });
 
@@ -75,12 +65,8 @@ test("a résumé + cultural blend draws openers from both pools", () => {
   const cultural = openers({ sources: ["cultural"] });
   const blend = openers({ sources: ["resume", "cultural"] });
 
-  // Reaching *both* pools means reaching past either one on its own — asserting
-  // only "some came from résumé, some from cultural" would hold trivially if the
-  // two pools were the same array, which is precisely the bug.
   expect([...blend].some((a) => resume.has(a) && !cultural.has(a))).toBe(true);
   expect([...blend].some((a) => cultural.has(a) && !resume.has(a))).toBe(true);
-  // ...and nowhere else: the union of its own sources is the whole allowance.
   expect([...blend].every((a) => resume.has(a) || cultural.has(a))).toBe(true);
   expect(blend.size).toBe(resume.size + cultural.size);
 });
@@ -107,7 +93,6 @@ test("a cultural-only interview never receives the résumé text", () => {
     expect(culturalOnly(ctx(config).config)).toBe(true);
   }
 
-  // A résumé interview still gets the document — the omission is deliberate, not a bug.
   expect(firstQuestionPrompt(ctx({ sources: ["resume"] }))).toContain(fingerprint);
 });
 
@@ -133,8 +118,6 @@ test("a pure subject drill never leans toward the résumé or how they work with
   const resumeAreas = nextAreas({ sources: ["resume"] });
   const topicAreas = nextAreas({ mode: "topic_only", topic: "Postgres indexing" });
 
-  // The people angle is the tell: it lives in the technical pool, and a pure
-  // subject drill is defined by ignoring both it and the résumé.
   expect(resumeAreas).toContain("how they work with other people");
   expect(topicAreas.size).toBeGreaterThan(1);
   expect(topicAreas).not.toContain("how they work with other people");
@@ -151,12 +134,10 @@ test("a real interview is steered by its stage brief alone, and still reaches it
 
   expect(stageFor(total - 1, total)).toBe("closing");
   const last = followUpPrompt(c, history, 0);
-  // A random angle here would outrank the brief and cost the interview its ending.
   expect(last).not.toContain("lean toward:");
   expect(last).toContain("that the stage brief above calls for.");
   expect(last).toContain("Do you have any questions for us?");
 
-  // Every earlier question too — the angle is suppressed for the whole mode.
   for (let i = 1; i < total - 1; i++) {
     expect(followUpPrompt(c, history.slice(0, i), total - 1 - i)).not.toContain("lean toward:");
   }
@@ -173,7 +154,6 @@ test("a project interview is briefed on the project and carries its material", (
   expect(first).toContain("Interview them on THE PROJECT");
   expect(first).toContain(project);
   expect(first).toContain("Project repository: https://github.com/YatinDora81/Grill");
-  // Its openers name the project, drawn from the project pool.
   expect(openers({ mode: "project", project_context: project }).size).toBeGreaterThan(1);
   expect(nextAreas({ mode: "project", project_context: project }).size).toBeGreaterThan(1);
 });
@@ -182,13 +162,10 @@ test("a project interview shows the résumé only when one was actually provided
   const project = "A URL shortener: Postgres, base62 IDs, a Redis read-through cache.";
   const fingerprint = "Staff engineer. Shipped a billing ledger on Postgres.";
 
-  // With a résumé present it's admitted, but explicitly labelled as background.
   const withResume = firstQuestionPrompt(ctx({ mode: "project", project_context: project }));
   expect(withResume).toContain(fingerprint);
   expect(withResume).toContain("Their résumé, background only");
 
-  // With no résumé the whole résumé section drops — its text and its label — so
-  // an empty one is never handed to the interviewer as something to read.
   const noResume = firstQuestionPrompt({
     ...ctx({ mode: "project", project_context: project }),
     sourceText: "",
@@ -207,7 +184,6 @@ test("weak_spots with no scored history does not point at questions that aren't 
   expect(empty).toContain("Interview them on their own history");
   expect(followUpPrompt(c, [{ question: "Q", answer: "A" }], 3, {})).not.toContain("questions below");
 
-  // With history the brief means what it says, and the list is really there.
   const withWeak = firstQuestionPrompt(c, {
     weakSpots: [{ question: "How did you shard the ledger?", transcript: "um, I don't recall" }],
   });

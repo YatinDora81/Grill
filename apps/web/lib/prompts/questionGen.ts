@@ -15,7 +15,6 @@ export interface WeakSpot {
 
 export interface SessionContext {
   sourceType: SourceType;
-  /** The résumé. Always present — it's the candidate. */
   sourceText: string;
   role: string | null;
   config: InterviewConfig;
@@ -23,18 +22,11 @@ export interface SessionContext {
 
 /** Extra material the services fetch from the DB per request. */
 export interface QuestionInputs {
-  /** Questions this user has already been asked; forbidden when repeats are off. */
   askedBefore?: string[];
-  /** Their worst-scored past answers — the point of `weak_spots`. */
   weakSpots?: WeakSpot[];
   fixedQuestions?: string[];
 }
 
-/**
- * A cultural-only interview has no technical ground to stand on, and calling
- * the model a "technical interviewer" there quietly re-technicalises questions
- * the brief just asked to be about people.
- */
 export function questionSystem(c: InterviewConfig): string {
   const voice = personaBrief(c.persona);
   const persona = voice ? `\n${voice}\n` : "";
@@ -59,14 +51,6 @@ ${TECHNICAL_QUALITY_BAR}
 Respond with JSON only — no prose, no code fences.`;
 }
 
-/**
- * The bar a technical / résumé interview question has to clear.
- *
- * Left to itself the model writes the interview question it has seen most often
- * — stock, compound, and answerable by anyone — because nothing in the prompt
- * ever said what a bad question looks like. Naming the failure modes is what
- * moves it; "ask a good question" does not.
- */
 const TECHNICAL_QUALITY_BAR = `A question earns its place only if it clears all of this:
 - It names something concrete from the context — this system, that project, that
   decision. If the question could be asked of any other candidate unchanged, it is
@@ -79,12 +63,6 @@ const TECHNICAL_QUALITY_BAR = `A question earns its place only if it clears all 
 - It doesn't telegraph the answer you're fishing for.
 - No preamble, no praise, no "great answer" — the question text is the question only.`;
 
-/**
- * Culture-fit interviews are about the person, not the stack. The technical bar
- * above demands project grounding; handed a résumé it quietly rewrites every
- * "how do you work" ask into "tell me about that Postgres ledger". This bar is
- * the opposite: situations, values, working style — never systems.
- */
 const CULTURAL_QUALITY_BAR = `A question earns its place only if it clears all of this:
 - It is about people, values, or working style — not technology. Forbidden topics:
   how a system works, why something broke technically, architecture, languages,
@@ -97,37 +75,12 @@ const CULTURAL_QUALITY_BAR = `A question earns its place only if it clears all o
 - It doesn't telegraph the "right" corporate answer.
 - No preamble, no praise — the question text is the question only.`;
 
-/**
- * Follow-ups are where a cultural interview leaks back into a technical one.
- *
- * Source-aware angles only govern the *new area* branch; the other branch tells
- * the model to dig into whatever the candidate just said. Candidates answer
- * behavioural questions with technical detail ("the ledger drifted so I re-ran
- * the job"), the model pulls that thread, and the next question is "what caused
- * the drift?" — a technical question in an interview that has no technical
- * source. The thread is worth following; the *technology* in it is not.
- */
 const CULTURAL_THREAD = `
 This is a culture-fit interview. When the answer contains technical detail, do not follow the
 technology — follow the person in it: the judgement, the pressure, who else was affected, what
 they'd do differently. Never ask how a system works, why it broke, or about résumé projects.
 `;
 
-/**
- * The one-question rule, as the last thing the model reads.
- *
- * Compound questions ("...what was the trade-off, and how did you fix it?") are
- * the strongest failure mode here — both providers default to them, because a
- * stapled question is what the training data calls an interview question. The
- * rule is in QUALITY_BAR too and there it did nothing; position and bluntness
- * are what move it. Measured stapled rates, small samples but consistent across
- * two models: Gemini 43% over 30 questions with a polite mid-prompt rule; the
- * wording below scored 17% (Gemini, n=12) and 20% (Groq, n=5) against 67% and
- * 86% for the polite version. Treat those as direction, not precision.
- *
- * If this regresses, the next step is mechanical rather than rhetorical: detect
- * the staple and re-ask, instead of asking the model more nicely.
- */
 const ONE_QUESTION = `
 HARD CONSTRAINT — one question, one ask. Reread your question before answering: if it contains
 ", and " followed by another ask, or more than one "?", you have FAILED and must rewrite it.
@@ -135,27 +88,11 @@ Delete the weaker half; keep the sharper one. You get to ask the other next turn
 Bad:  "What was the bottleneck, and how did you fix it?"
 Good: "What was the bottleneck?"`;
 
-/**
- * No technical ground at all — exclusive Cultural only, or every blend source
- * is cultural. Either way the résumé must not enter the prompt.
- */
 export function culturalOnly(c: InterviewConfig): boolean {
   if (c.mode === "cultural_only") return true;
   return c.mode === null && c.sources.length > 0 && c.sources.every((s) => s === "cultural");
 }
 
-/**
- * The same résumé produced the same interview every time. Temperature wasn't
- * the culprit (it's 0.8): the prompt was byte-identical, and on a task this
- * constrained the model still walks to its single most-likely opener. So vary
- * the *instruction* — each session draws an angle of attack, which changes what
- * is being asked for rather than just how it's sampled.
- *
- * The pools are per-source because the angle is the most specific instruction in
- * the prompt, and the most specific instruction is the one that gets obeyed: a
- * résumé angle handed to a cultural interview overrides its own brief and asks
- * a technical question anyway.
- */
 const RESUME_OPENERS = [
   "the most recent role in the résumé — what they actually shipped, not what the team shipped",
   "a specific technology the résumé claims depth in — find out how deep it really runs",
@@ -227,11 +164,6 @@ const TOPIC_NEXT_AREAS = [
   "an area that is conspicuously vague",
 ] as const;
 
-/**
- * `project` carries its own material and its own shape — defend what you built —
- * so it draws from angles about the project, not the résumé or how they work
- * with people. Every angle names the project itself.
- */
 const PROJECT_OPENERS = [
   "the core architectural decision of the project — why this shape and not the obvious alternative",
   "the data model — what it makes easy, and the query or write it makes painful",
@@ -258,13 +190,6 @@ const SOURCE_NEXT_AREAS: Record<InterviewSource, readonly string[]> = {
   cultural: CULTURAL_NEXT_AREAS,
 };
 
-/**
- * Exclusive modes carry no sources, so the pool is chosen by mode instead.
- *
- * `topic_only` may not use TECHNICAL_NEXT_AREAS: those angles reach for the
- * résumé and for how they work with people, and a pure subject drill is defined
- * by ignoring both. `real` never reads these — its stage brief picks the area.
- */
 const MODE_OPENERS: Record<ExclusiveMode, readonly string[]> = {
   topic_only: TOPIC_OPENERS,
   cultural_only: CULTURAL_OPENERS,
@@ -285,12 +210,6 @@ const MODE_NEXT_AREAS: Record<ExclusiveMode, readonly string[]> = {
   project: PROJECT_NEXT_AREAS,
 };
 
-/**
- * The angles this interview is allowed to draw from: the union of its sources'
- * pools, so a blend can go anywhere its brief allows while a single-source
- * interview can only go where that source lives. An exclusive mode has no
- * sources, so it draws from the pool its own shape implies.
- */
 function anglesFor(
   c: InterviewConfig,
   table: Record<InterviewSource, readonly string[]>,
@@ -305,7 +224,6 @@ function pick<T>(xs: readonly T[]): T {
   return xs[Math.floor(Math.random() * xs.length)]!;
 }
 
-/** What each exclusive mode is actually for, in the interviewer's own terms. */
 const MODE_BRIEF: Record<ExclusiveMode, (c: InterviewConfig) => string> = {
   topic_only: (c) =>
     `Drill them on: ${c.topic}. Ignore the résumé entirely; this is a pure subject examination.`,
@@ -326,7 +244,6 @@ const MODE_BRIEF: Record<ExclusiveMode, (c: InterviewConfig) => string> = {
     "résumé or career questions.",
 };
 
-/** What each source contributes to a blended interview. */
 const SOURCE_BRIEF: Record<InterviewSource, (c: InterviewConfig) => string> = {
   resume: () => "their own history — what they built, and what they'd rather gloss over",
   topic: (c) =>
@@ -335,13 +252,6 @@ const SOURCE_BRIEF: Record<InterviewSource, (c: InterviewConfig) => string> = {
     "culture fit — working style, values, conflict, feedback, motivation, and the environment where they thrive (not technology or résumé projects)",
 };
 
-/**
- * The brief for a blended interview.
- *
- * One interview that moves between its sources, not several bolted together:
- * left to itself the model will happily do all the résumé questions, then all
- * the topic ones, which is three interviews in a trench coat.
- */
 function sourcesBrief(c: InterviewConfig): string {
   const briefs = c.sources.map((s) => `- ${SOURCE_BRIEF[s](c)}`);
   if (briefs.length === 1) {
@@ -353,14 +263,6 @@ Move between them as a real interviewer would — follow what the candidate says
 working through the list in order. By the end, every one of them must have been covered.`;
 }
 
-/**
- * The instruction that tells the model what interview it is running.
- *
- * `weak_spots` is briefed on "the questions below" — so with no scored history
- * to draw on, that brief points at a list that isn't there and the model is left
- * inventing what it was supposed to be re-asking. A first-time user reaching the
- * mode early gets a plain résumé interview instead of a dangling reference.
- */
 function brief(c: InterviewConfig, hasWeakSpots = true): string {
   if (c.mode === "weak_spots" && !hasWeakSpots) {
     return `Interview them on ${SOURCE_BRIEF.resume(c)}.`;
@@ -368,19 +270,9 @@ function brief(c: InterviewConfig, hasWeakSpots = true): string {
   return c.mode ? MODE_BRIEF[c.mode](c) : sourcesBrief(c);
 }
 
-/**
- * The arc of a real interview, in order.
- *
- * Three of these are moments rather than sections — the opener, the thread
- * pulled out of it, and the close — and each is exactly one question however
- * long the interview runs. A 40-question interview does not want eight
- * "tell me about yourself"s. The middle three scale to fill whatever is left.
- */
 const STAGE_PLAN: {
   stage: InterviewStage;
-  /** Exactly one question, once the interview is long enough to afford it. */
   fixed?: { minTotal: number };
-  /** Share of whatever the fixed stages leave behind. */
   share?: number;
   brief: string;
 }[] = [
@@ -422,21 +314,9 @@ const STAGE_PLAN: {
   },
 ];
 
-/**
- * How many questions each stage gets, summing to exactly `total`.
- *
- * Fixed stages are paid first, in the order they'd be missed: the opener, then
- * the close, then the intro follow-up — a short interview should lose the
- * follow-up before it loses its ending. Whatever survives is split among the
- * scaling stages by largest remainder, which is the only part that has to land
- * exactly on `total`. (Rounding each share independently doesn't: the parts sum
- * to 7 at total 8, which walks the cursor off the end and means the interview
- * never reaches its close.)
- */
 function stageCounts(total: number): number[] {
   const counts = STAGE_PLAN.map(() => 0);
 
-  // Paid in priority order, not plan order — hence the explicit list.
   const fixedPriority: InterviewStage[] = ["intro", "closing", "intro_followup"];
   let spent = 0;
   for (const stage of fixedPriority) {
@@ -466,7 +346,6 @@ function stageCounts(total: number): number[] {
   return counts;
 }
 
-/** Which stage question `index` of `total` falls in. */
 export function stageFor(index: number, total: number): InterviewStage {
   const counts = stageCounts(total);
   let cursor = 0;
@@ -483,20 +362,10 @@ function stageBlock(index: number, total: number): string {
   return `Stage: ${stage.toUpperCase()} (question ${index + 1} of ${total}).\n${plan.brief}`;
 }
 
-/**
- * What the model may label a question. `behavioral` is deliberately absent — it
- * and `cultural` always meant the same thing, so only `cultural` gets written
- * from here on.
- */
 const EMITTED_TYPES: QuestionType[] = ["technical", "cultural", "followup"];
 
 const TYPE_UNION = EMITTED_TYPES.map((t) => `"${t}"`).join(" | ");
 
-/**
- * New sessions always carry a résumé. Legacy ones put a job description or a
- * topic in the same field, so label it for what it actually is rather than
- * telling the model a pasted posting is the candidate's own history.
- */
 const SOURCE_LABEL: Record<SourceType, string> = {
   resume: "The candidate's résumé",
   jd: "The target job description (older session — no résumé on file)",
@@ -507,11 +376,6 @@ function contextBlock(s: SessionContext): string {
   const c = s.config;
   const parts = [`Interview target role: ${s.role ?? "(unspecified)"}`];
 
-  // A project interview controls its own context: the project IS the material,
-  // the résumé (if any) is background only. Handled first, before the résumé
-  // branch, so the project — not the SOURCE_LABEL résumé — leads the block. The
-  // digest is denser than prose and it is the whole interview, hence 8 000 chars
-  // vs a résumé's 6 000.
   if (c.mode === "project") {
     parts.push(
       "The candidate's project — they built this; the interview is about it:",
@@ -524,9 +388,6 @@ function contextBlock(s: SessionContext): string {
         s.sourceText.slice(0, 2_500),
       );
     }
-    // topic_only and cultural-only must not see the résumé — including it
-    // "just as context" is exactly how those interviews drift back into asking
-    // about projects, systems, and tech the brief told them to ignore.
   } else if (c.mode !== "topic_only" && !culturalOnly(c)) {
     parts.push(`${SOURCE_LABEL[s.sourceType]}:`, s.sourceText.slice(0, 6000));
   } else if (culturalOnly(c)) {
@@ -545,7 +406,6 @@ function contextBlock(s: SessionContext): string {
   return parts.join("\n");
 }
 
-/** What the model may emit for this interview shape. */
 function typeUnionFor(c: InterviewConfig): string {
   if (culturalOnly(c)) return `"cultural" | "followup"`;
   return TYPE_UNION;
@@ -588,8 +448,6 @@ export function firstQuestionPrompt(
   const mode = s.config.mode;
   const stage = mode === "real" ? `\n${stageBlock(0, s.config.num_questions)}\n` : "";
 
-  // In weak_spots the whole point is to reopen old ground, so the opener aims
-  // at a weak answer rather than a random angle.
   const aim =
     mode === "weak_spots" && inputs.weakSpots?.length
       ? "Open on the weakest of the answers listed above."
@@ -598,12 +456,9 @@ export function firstQuestionPrompt(
         : mode === "topic_only"
           ? `Open on the core of the topic: ${s.config.topic}`
           : mode === "real"
-            ? "" // the stage brief already says exactly what the opener is
+            ? ""
             : `Open on: ${angle}`;
 
-  // A `real` interview is the one case where the stock opener is the right
-  // opener — its first stage IS "introduce yourself", and banning it there would
-  // fight the arc. Everywhere else the ban stands.
   const opener =
     mode === "real"
       ? "Follow the stage brief above."
@@ -638,12 +493,6 @@ export function followUpPrompt(
   const index = history.length;
   const stage = mode === "real" ? `\n${stageBlock(index, total)}\n` : "";
 
-  // `real` already knows what this question is: the stage brief says so, by
-  // name. A random angle here is the same mistake that made cultural-only ask
-  // technical questions — the more specific instruction wins, and this one is
-  // both more specific and read later than the brief. At the last question that
-  // costs the interview its ending: the close is "do you have any questions for
-  // us?", and "lean toward a technology that hasn't come up yet" is not that.
   const areaHint =
     mode === "real"
       ? " that the stage brief above calls for."

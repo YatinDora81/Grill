@@ -11,8 +11,6 @@ import { coerceDifficulty, DIFFICULTY_META, SET_SOURCE_META } from "@/lib/interv
 import { SetActions } from "./SetActions";
 
 export const metadata: Metadata = { title: "Question set" };
-// The practised count and runs list move whenever an interview is started
-// from here; never serve them stale.
 export const dynamic = "force-dynamic";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -27,11 +25,9 @@ const TYPE_LABEL: Record<QuestionType, string> = {
   technical: "Technical",
   cultural: "Cultural",
   followup: "Follow-up",
-  // Legacy value; reads as cultural everywhere.
   behavioral: "Cultural",
 };
 
-/** Same status→destination rule the dashboard rows use, restated for runs. */
 function runHref(id: string, status: SessionStatus): string | null {
   if (status === "in_progress") return `/session/${id}`;
   if (status === "completed" || status === "generating_report" || status === "error") {
@@ -58,7 +54,6 @@ export default async function QuestionSetPage({
   if (!userId) redirect("/?auth=login&next=/questions");
 
   const { setId } = await params;
-  // A malformed id is a 404, not a Prisma error page.
   if (!UUID.test(setId)) notFound();
 
   const set = await repo.getQuestionSet(setId, userId);
@@ -85,9 +80,6 @@ export default async function QuestionSetPage({
               </Link>
             </p>
             <h1 className="h1 mt-4 max-w-[22ch]">{set.name}</h1>
-            {/* The set's whole brief on one mono line, the way the room labels
-                its facts — this page is a document, and a document states its
-                edition. */}
             <p className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1.5 font-mono text-[0.66rem] tracking-[0.12em] uppercase text-ink-muted">
               <span>{SET_SOURCE_META[set.source].label}</span>
               <span aria-hidden="true">·</span>
@@ -112,7 +104,6 @@ export default async function QuestionSetPage({
 
         <SetActions setId={set.id} questionCount={items.length} />
 
-        {/* ── The questions ─────────────────────────────────────── */}
         <section className="rv" data-io>
           <div className="ledger-head">
             <h2 className="font-display text-[1.08rem] font-extrabold tracking-[0.01em] uppercase">
@@ -133,8 +124,6 @@ export default async function QuestionSetPage({
                 key={q.id}
                 className="grid grid-cols-[auto_1fr] items-baseline gap-x-5 border-b border-line px-6 py-4.5 last:border-b-0 sm:grid-cols-[auto_1fr_auto]"
               >
-                {/* The index is the reading anchor — mono, muted, two digits so
-                    the column holds its width past question nine. */}
                 <span className="font-mono text-[0.7rem] tracking-[0.08em] text-ink-muted tabular-nums">
                   {String(q.itemIndex + 1).padStart(2, "0")}
                 </span>
@@ -147,7 +136,6 @@ export default async function QuestionSetPage({
           </ol>
         </section>
 
-        {/* ── Runs on this set ──────────────────────────────────── */}
         {runs.length > 0 ? (
           <section className="rv" data-io>
             <div className="ledger-head">
@@ -185,8 +173,6 @@ export default async function QuestionSetPage({
                 );
                 const shell =
                   "grid grid-cols-[1fr_auto_auto_auto] items-center gap-x-5 border-b border-line px-6 py-4 last:border-b-0 transition-colors";
-                // Cancelled/abandoned runs have nothing to open — same rule as
-                // the dashboard: a dead link is worse than plainly none.
                 return href ? (
                   <Link key={r.id} href={href} className={cx(shell, "group hover:bg-(--surface-hover)")}>
                     {body}

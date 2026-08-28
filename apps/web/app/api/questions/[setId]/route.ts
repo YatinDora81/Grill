@@ -8,7 +8,6 @@ import { requireUserId } from "@/lib/auth";
 import * as repo from "@/lib/db/repo";
 import { toItemDTO, toSetDetail } from "@/lib/services/questionBankService";
 
-/** One set, with every question in reading order. */
 export async function GET(
   _req: Request,
   { params }: { params: Promise<{ setId: string }> },
@@ -17,7 +16,6 @@ export async function GET(
     const userId = await requireUserId();
     const { setId } = setIdParamsSchema.parse(await params);
 
-    // User-scoped: someone else's set id is simply "not found".
     const set = await repo.getQuestionSet(setId, userId);
     if (!set) throw notFound("Question set not found.", "unknown_set");
 
@@ -30,11 +28,6 @@ export async function GET(
   }
 }
 
-/**
- * Soft-delete a set. Interviews already run from it are untouched — they own
- * verbatim copies of the questions — so nothing they replay or report on can
- * dangle. Same contract as deleting an interview.
- */
 export async function DELETE(
   _req: Request,
   { params }: { params: Promise<{ setId: string }> },

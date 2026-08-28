@@ -10,14 +10,6 @@ type Entry = { times: number[]; expiresAt: number };
 
 const hits = new Map<string, Entry>();
 
-/**
- * Two bounds on the map, because keys come from the network and most are seen
- * once: the sweep drops entries whose window has fully elapsed, and the cap is
- * the backstop for a burst that outruns the sweep interval. Insertion order is
- * kept as LRU order (delete-then-set below) so the cap sheds the coldest keys
- * first; a shed key does forgive attempts still inside its window, so keep
- * MAX_KEYS far above any plausible legitimate concurrent-client count.
- */
 const MAX_KEYS = 10_000;
 const SWEEP_INTERVAL_MS = 60_000;
 let lastSweep = 0;

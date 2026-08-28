@@ -1,9 +1,4 @@
 import "server-only";
-/**
- * Delivery metrics (Grill §scoring). pace/pauses/filler = TS math from Whisper
- * timestamps; pitch/energy = Python audio-service (Parselmouth). Tonality is
- * NEVER inferred from text — only from these measured signals.
- */
 import type { AcousticMetrics, DeliveryMetrics, TranscriptWord } from "@repo/types";
 import { config } from "@/lib/env";
 import { fetchWithTimeout } from "@/lib/clients/http";

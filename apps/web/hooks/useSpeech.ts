@@ -5,13 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 const VOICE_KEY = "grill.voice";
 const MUTED_KEY = "grill.muted";
 
-/**
- * Best-sounding first; the user's explicit choice always overrides this.
- * These names are a starting point only — the exact set depends on the OS and
- * browser, so it needs checking against real devices via /voices.
- */
 const PRIORITY = [
-  // Apple (macOS/iOS)
   "Ava (Enhanced)",
   "Samantha",
   "Ava",
@@ -21,12 +15,10 @@ const PRIORITY = [
   "Tom",
   "Daniel",
   "Karen",
-  // Windows / Edge
   "Microsoft Aria Online (Natural)",
   "Microsoft Aria",
   "Microsoft Jenny",
   "Microsoft Guy",
-  // Android
   "Google US English",
 ];
 
@@ -61,14 +53,6 @@ export function useSpeech() {
   const [muted, setMuted] = useState(false);
   const [voiceURI, setVoiceURI] = useState<string | null>(null);
 
-  /**
-   * Refs mirror the state that speak() reads. speak() has to stay
-   * referentially stable — the hot seat uses it as an effect dependency, so a
-   * new identity on every voice-list update or mute toggle would restart the
-   * question mid-sentence. Refs also settle synchronously, which matters on
-   * mount: the stored mute preference lands before the first speak() call,
-   * so a muted user doesn't hear question one.
-   */
   const mutedRef = useRef(false);
   const voicesRef = useRef<SpeechSynthesisVoice[]>([]);
   const voiceURIRef = useRef<string | null>(null);
@@ -79,8 +63,6 @@ export function useSpeech() {
 
     const synth = window.speechSynthesis;
 
-    // getVoices() is empty on the first call in most browsers — the list
-    // arrives later on `voiceschanged`, so we have to read it in both places.
     const load = () => {
       const v = synth.getVoices();
       if (v.length) {
@@ -108,8 +90,6 @@ export function useSpeech() {
   const speak = useCallback((text: string) => {
     if (!isSupported() || mutedRef.current || !text.trim()) return;
     const synth = window.speechSynthesis;
-    // Utterances queue rather than replace — without this they stack up and
-    // the interviewer talks over itself.
     synth.cancel();
 
     const u = new SpeechSynthesisUtterance(text);
@@ -138,9 +118,7 @@ export function useSpeech() {
     setMuted(next);
     try {
       localStorage.setItem(MUTED_KEY, next ? "1" : "0");
-    } catch {
-      // Private mode / disabled storage: the toggle still works this session.
-    }
+    } catch {}
     if (next && isSupported()) {
       window.speechSynthesis.cancel();
       setSpeaking(false);
@@ -154,9 +132,7 @@ export function useSpeech() {
     try {
       if (next) localStorage.setItem(VOICE_KEY, next);
       else localStorage.removeItem(VOICE_KEY);
-    } catch {
-      /* see above */
-    }
+    } catch {}
   }, []);
 
   const englishVoices = useMemo(

@@ -3,26 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiPost } from "@/lib/apiClient";
 
-/**
- * The tape: one answer's slice of the session recording.
- *
- * Closed, it's a single slim row — a report is a reading surface, and eight
- * idle 16:9 voids would bury the feedback under black rectangles. Pressing it
- * unfolds the deck: the picture on top, the transport in its own rail below it
- * rather than floating over the frame.
- *
- * Starts as a row and mints its URL on demand — a report with 40 turns must
- * not fetch 40 presigned URLs and start 40 <video> elements downloading.
- *
- * Seeking is the hard part. MediaRecorder's webm has no Duration element and no
- * Cues, so `video.duration` comes back Infinity and a naive `currentTime = x`
- * either no-ops or lands nowhere. The fix below is the standard one: seek past
- * the end first, which forces the browser to scan to the real end and populate
- * duration, and only then seek to the offset we actually want.
- *
- * Collapsing the turn unmounts this whole component, so a reopened turn gets a
- * fresh element that has to be seeked again — which is exactly what happens.
- */
 export function VideoPlayer({
   videoId,
   offsetMs,
@@ -31,9 +11,7 @@ export function VideoPlayer({
 }: {
   videoId: string;
   offsetMs: number;
-  /** 1-based, for the play button's label. */
   turnNumber: number;
-  /** From SessionVideo.expiresAt. Null when the row didn't carry one. */
   expiresInDays: number | null;
 }) {
   const [open, setOpen] = useState(false);
@@ -45,7 +23,6 @@ export function VideoPlayer({
   const [duration, setDuration] = useState(0);
   const videoRef = useRef<HTMLVideoElement>(null);
   const seeked = useRef(false);
-  /** Set when the user pressed play to open — so the seek can roll straight on. */
   const autoplay = useRef(false);
 
   const load = useCallback(async () => {
@@ -72,18 +49,9 @@ export function VideoPlayer({
     const el = videoRef.current;
     if (!el || !autoplay.current) return;
     autoplay.current = false;
-    void el.play?.()?.catch?.(() => {
-      /* autoplay refused — the poster button is still there to press */
-    });
+    void el.play?.()?.catch?.(() => {});
   }, []);
 
-  /**
-   * Force the browser to work out the real duration, then seek.
-   *
-   * Without the first hop, a MediaRecorder webm reports duration Infinity and
-   * the seek is ignored — the answer just plays from the top and the offset we
-   * carefully measured does nothing.
-   */
   const seekToOffset = useCallback(() => {
     const el = videoRef.current;
     if (!el || seeked.current) return;
@@ -92,13 +60,12 @@ export function VideoPlayer({
     if (el.duration === Infinity || Number.isNaN(el.duration)) {
       const onUpdate = () => {
         el.removeEventListener("timeupdate", onUpdate);
-        // Duration is real now; take the seek we actually wanted.
         el.currentTime = Math.min(target, el.duration || target);
         seeked.current = true;
         start();
       };
       el.addEventListener("timeupdate", onUpdate);
-      el.currentTime = 1e101; // past any real end — forces the scan
+      el.currentTime = 1e101;
       return;
     }
     el.currentTime = Math.min(target, el.duration);
@@ -108,8 +75,6 @@ export function VideoPlayer({
 
   function onPress() {
     if (!open || error) {
-      // Clearing the error is what makes a failed presign retryable: `load`
-      // bails only on a URL it already has, and a failure leaves that null.
       setError("");
       autoplay.current = true;
       if (!open) setOpen(true);
@@ -122,8 +87,6 @@ export function VideoPlayer({
     else void el.play?.()?.catch?.(() => {});
   }
 
-  // Ignored while the forced scan is in flight: duration is Infinity or NaN
-  // then, and currentTime is 1e101, which would paint a nonsense bar.
   function onTimeUpdate() {
     const el = videoRef.current;
     if (!el || !Number.isFinite(el.duration) || el.duration <= 0) return;
@@ -138,10 +101,6 @@ export function VideoPlayer({
   }
 
   function scrub(e: React.MouseEvent<HTMLButtonElement>) {
-    // `detail === 0` means Enter or Space, not a pointer. Those clicks report
-    // clientX 0, which would compute ratio 0 and throw the playhead back to the
-    // top of the session tape — the one thing the offset seek exists to avoid.
-    // Keyboard users move the playhead with the arrow keys below instead.
     if (e.detail === 0) return;
     const el = videoRef.current;
     if (!el || !Number.isFinite(el.duration) || el.duration <= 0) return;
@@ -155,7 +114,6 @@ export function VideoPlayer({
     `starts at ${fmt(offsetMs)}` +
     (expiresInDays !== null ? ` · ${expiryPhrase(expiresInDays)}` : "");
 
-  // Closed: the whole thing is one row. The report stays a reading surface.
   if (!open) {
     return (
       <div>
@@ -184,7 +142,6 @@ export function VideoPlayer({
       <div className="deck" data-playing={playing}>
         <div className="deck-screen">
           {url ? (
-            // Clicking the picture is play/pause, like every player people know.
             <video
               ref={videoRef}
               src={url}
@@ -200,9 +157,6 @@ export function VideoPlayer({
               onEnded={() => setPlaying(false)}
             />
           ) : null}
-          {/* Center button only while there is nothing rolling: before the
-              first frame, after the end, on an error. A ❚❚ floating over the
-              candidate's own face was the old design's worst habit. */}
           {!playing && (
             <button
               type="button"
@@ -218,7 +172,6 @@ export function VideoPlayer({
           )}
         </div>
 
-        {/* The transport, in its own rail — never over the frame. */}
         <div className="deck-ctl">
           <button
             type="button"
@@ -261,11 +214,6 @@ export function VideoPlayer({
           </span>
         </div>
       </div>
-      {/* The colour is a class, not the inline style it used to be. An inline
-          declaration sits at the top of the cascade, so no scoped rule could
-          ever correct the player's only error message; and a utility could not
-          take its place either, because `.mono-note` is unlayered bespoke CSS
-          and beats anything Tailwind compiles into `@layer utilities`. */}
       {error ? (
         <p className="mono-note mono-note-error" role="alert" style={{ marginTop: 7 }}>
           {error} press play to try again
@@ -283,7 +231,6 @@ function fmt(ms: number): string {
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
 }
 
-/** Retention, in words. "expires in 1 days" is how you lose someone's trust in a footnote. */
 function expiryPhrase(days: number): string {
   if (days <= 0) return "expires today";
   if (days === 1) return "expires tomorrow";

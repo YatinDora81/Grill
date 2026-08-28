@@ -24,16 +24,6 @@ import {
   personaLabel,
 } from "./interviewMeta";
 
-/**
- * Nothing here is mocked and nothing is stubbed: these three functions are the
- * arithmetic and the vocabulary that the room, the form and the prompt builder
- * all read off. A drift in any of them is silent — the interview still runs, it
- * just runs as something other than what was asked for.
- */
-
-// The unions are restated as literals rather than read back off MODE_META /
-// SOURCE_META. Deriving the expectation from the thing under test would make the
-// coverage assertions below unable to fail.
 const ALL_MODES: ExclusiveMode[] = [
   "topic_only",
   "cultural_only",
@@ -54,24 +44,14 @@ const ALL_PERSONAS: Persona[] = [
 ];
 
 describe("perAnswerCapSeconds", () => {
-  /**
-   * The formula is documented as exact, so it is pinned at values computed by
-   * hand from ANSWER_CAP_MODEL rather than from the code. A retune of the
-   * constants SHOULD break this — that is the point: the caps are frozen into
-   * every session at creation, so a change to them is a change to the product.
-   */
   test("matches the documented formula at hand-computed question counts", () => {
-    // buildTerm(N) = ((300-60) / ((1/5)*N) - 2) / 0.15, floored to a clean 0:30.
-    expect(perAnswerCapSeconds(32)).toBe(210); // 236.67s -> 3:30
-    expect(perAnswerCapSeconds(40)).toBe(180); // 186.67s -> 3:00
-    expect(perAnswerCapSeconds(50)).toBe(120); // 146.67s -> 2:00
-    expect(perAnswerCapSeconds(64)).toBe(90); //  113.54s -> 1:30
+    expect(perAnswerCapSeconds(32)).toBe(210);
+    expect(perAnswerCapSeconds(40)).toBe(180);
+    expect(perAnswerCapSeconds(50)).toBe(120);
+    expect(perAnswerCapSeconds(64)).toBe(90);
   });
 
   test("gives every answer less time as the question count grows", () => {
-    // The report build is one fixed budget shared across N clips. If this ever
-    // stopped falling, a long interview would be handed a cap its own report
-    // cannot finish inside — the failure mode the whole model exists to prevent.
     let prev = Infinity;
     for (let n = QUESTION_BOUNDS.min; n <= QUESTION_BOUNDS.max; n++) {
       const cap = perAnswerCapSeconds(n);
@@ -91,18 +71,12 @@ describe("perAnswerCapSeconds", () => {
   });
 
   test("clamps short interviews to the flat transcription ceiling", () => {
-    // Below N=32 the build budget is not the binding constraint — the 4-minute
-    // product ceiling is. A regression that let buildTerm win here would hand a
-    // 3-question interview a cap past the Whisper timeout.
     expect(perAnswerCapSeconds(QUESTION_BOUNDS.min)).toBe(ANSWER_CAP_MODEL.answerCeilingS);
     expect(perAnswerCapSeconds(8)).toBe(ANSWER_CAP_MODEL.answerCeilingS);
     expect(perAnswerCapSeconds(31)).toBe(ANSWER_CAP_MODEL.answerCeilingS);
   });
 
   test("refuses a question count whose answers would fall under the floor", () => {
-    // 109 is the last count that still clears answerFloorS; 110 is the first
-    // that cannot. Catches an off-by-one that would offer an interview whose
-    // answers are too short to be worth recording.
     expect(perAnswerCapSeconds(109)).toBe(ANSWER_CAP_MODEL.answerFloorS);
     expect(perAnswerCapSeconds(110)).toBeNull();
   });
@@ -162,11 +136,6 @@ describe("interviewLabel", () => {
     };
   }
 
-  /**
-   * MODE_META and SOURCE_META are indexed without a guard, so a union member
-   * missing an entry is not a bad label — it is a TypeError thrown while
-   * building the prompt, i.e. the interview never starts.
-   */
   test("names every exclusive mode", () => {
     for (const mode of ALL_MODES) {
       const label = interviewLabel(cfg({ mode }));
@@ -192,9 +161,6 @@ describe("interviewLabel", () => {
   });
 
   test("lets the mode win over sources, since a mode never blends", () => {
-    // sources should be empty under a mode, but if a stale row somehow carries
-    // both, the label must still name the mode — that is what the interviewer
-    // was briefed with.
     expect(interviewLabel(cfg({ mode: "real", sources: ["resume"] }))).toBe("Real interview");
   });
 

@@ -16,10 +16,6 @@ client = TestClient(app)
 
 
 def test_body_ceiling_leaves_room_for_the_multipart_envelope():
-    # A clip exactly at the clip cap is legal to apps/web. If the body ceiling
-    # were the same number, its own envelope would push it over and this service
-    # would refuse a clip the caller was told was fine — with no way for the
-    # caller to tell which end said no.
     assert MAX_UPLOAD_BYTES == MAX_AUDIO_BYTES + MULTIPART_OVERHEAD_BYTES
     assert MAX_UPLOAD_BYTES > MAX_AUDIO_BYTES
 
@@ -31,8 +27,6 @@ def test_oversized_upload_is_refused_with_413():
 
 
 def test_oversized_upload_is_refused_by_declared_length_alone():
-    # The declared length is enough to refuse on: reading the body to find out
-    # how big it is would be doing the exact thing the cap exists to prevent.
     res = client.post(
         "/analyze",
         headers={"content-length": str(MAX_UPLOAD_BYTES + 1)},
@@ -48,8 +42,6 @@ def test_an_empty_upload_is_rejected_but_not_as_too_large():
 
 
 def test_a_clip_within_the_cap_is_not_refused_by_the_ceiling():
-    # Not asserting 200: the bytes are not real audio, so analysis fails on its
-    # own terms. What matters is that the ceiling is not what stopped it.
     res = client.post("/analyze", files={"file": ("ok.webm", b"x" * 2048, "audio/webm")})
     assert res.status_code != 413
 

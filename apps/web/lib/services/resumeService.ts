@@ -1,8 +1,4 @@
 import "server-only";
-/**
- * Resume text extraction. Optional helper for source_type = "resume": accept an
- * uploaded PDF/DOCX/TXT and return plain text to use as source_text.
- */
 import mammoth from "mammoth";
 import { extractText, getDocumentProxy } from "unpdf";
 import { badRequest } from "@/lib/errors";

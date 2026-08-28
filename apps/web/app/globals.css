@@ -1,59 +1,10 @@
 @import "tailwindcss";
 
-/**
- * Explain mode, as a variant rather than a provider.
- *
- * The plain-English notes have to be reachable from server components — the
- * dashboard, the report and the profile are all server-rendered, and making them
- * client components just to read a boolean would be a bad trade. So the state
- * lives in one class on <body> and every note is written `hidden explain:block`.
- *
- * Two consequences worth keeping: the note stays in the DOM in both states, so a
- * screen reader reaches it either way; and nothing re-renders when the mode
- * flips, so `Reveal`'s one-shot IntersectionObserver never sees content appear
- * after it stopped watching.
- */
 @custom-variant explain (&:where(.explain *));
 
-/* A `light:` variant, NOT `dark:`. Tailwind v4 already ships `dark:` meaning
-   `@media (prefers-color-scheme: dark)`, which follows the OS and would ignore
-   the app's own preference; and an attribute-keyed `dark:` would additionally
-   fail for a JS-off reader who never receives the attribute. `light:` is purely
-   additive on top of a dark base that needs no attribute at all. */
 @custom-variant light (&:where([data-theme="light"], [data-theme="light"] *));
 
-/**
- * Grill design tokens.
- *
- * Dark is the default and the origin, independent of the OS: one warm dark room
- * — near-black brown, cream ink, lit by a single ember key-light. Everything
- * declared in this block is that room, and it is what a reader with no stored
- * preference, and a reader with JavaScript off, both get.
- *
- * Light is not the same room with the lights on. It is the print that came out
- * of it: one warm uncoated stock, a dense warm black, and ember demoted from a
- * lamp to a spot plate. Nothing emits, so every ramp that meant *more light*
- * means *more ink* and reverses in lightness while keeping every relationship
- * it encodes. Those values live in the `:root[data-theme="light"]` block below,
- * never in here — and never behind `prefers-color-scheme`, which answers to the
- * OS rather than to the app's own preference. The interview room is exempt and
- * stays dark in both themes; see the pin block under the light one.
- *
- * Ember is heat: reserved for the live/recording state, primary actions and
- * accents. It must never be used for large fills, or it stops reading as
- * pressure — and on the sheet a large low-alpha ember has nothing to fade to
- * and reads as a stain rather than as light.
- */
 @theme {
-  /*
-   * Surfaces — `paper` is historical; it means "the base surface".
-   *
-   * Sampled from the redesign reference renders, not eyeballed: the page is a
-   * near-neutral black, the raised card is five points lighter, and the only
-   * warmth left in the greys is in the hairline. The previous warm-brown set
-   * (#16120e / #221c15) read as a lit room; this reads as a darkroom with one
-   * red light in it, which is what the reference is going for.
-   */
   --color-paper: #0e0e0e;
   --color-paper-raised: #131313;
   --color-paper-sunken: #0a0a0a;
@@ -63,27 +14,17 @@
   --color-line: #262521;
   --color-line-strong: #3a3833;
 
-  /*
-   * Heat. `ember` is now a true red rather than an orange — at #0e0e0e the old
-   * #f2642f sat too close to the amber used for a middling verdict, and the two
-   * competed. Kept under the `ember` name so no call site has to change.
-   */
   --color-ember: #ff4633;
   --color-ember-hot: #ff6a5a;
   --color-ember-glow: #ff8a72;
   --color-ember-soft: #2a1512;
 
-  /* The room. Identical to the base surface — kept so session code reads in its
-     own vocabulary. */
   --color-room: #0e0e0e;
   --color-room-raised: #131313;
   --color-room-line: #262521;
   --color-room-ink: #e9e6df;
   --color-room-muted: #9b978e;
 
-  /* Verdict scale — also used by score meters. Desaturated against the previous
-     set so a passing score reads as considered rather than as a success toast,
-     and so none of the three can be mistaken for `ember`. */
   --color-strong: #8fbf6b;
   --color-mixed: #d9a441;
   --color-weak: #e05c4f;
@@ -92,199 +33,70 @@
   --font-sans: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 
-  /*
-   * Square. The reference has no rounded corner anywhere — cards, buttons,
-   * chips, the score band and the avatar are all hard-edged, and that squared
-   * geometry is doing as much of the work as the palette is.
-   *
-   * Kept as a token set to `0` rather than deleted, because ~40 call sites read
-   * `rounded-card`; they all collapse to square from this one line, and a future
-   * change of mind is one line back.
-   */
   --radius-card: 0px;
 
-  /* Animations the redesign needs as utilities. Keyframes are defined with the
-     rest of the `grill-`-prefixed set in `@layer utilities` below; these tokens
-     are what turn them into `animate-sheen` / `animate-eq`. */
   --animate-sheen: grill-sheen 1.7s linear infinite;
   --animate-eq: grill-eq 0.85s ease-in-out infinite;
 
-  /* The rail's width, referenced by both the rail itself and the padding the
-     shell reserves for it. One value so the two can never disagree. */
   --rail-w: 15rem;
 
-  /*
-   * Height of the sticky chrome above the content, and 0 once the rail takes
-   * over.
-   *
-   * Below `lg` the rail collapses into AppRail's header — a ~65px brand row over
-   * a ~41px section scroller. At `lg` and up that header is `lg:hidden` and the
-   * rail is `fixed` down the left, so nothing sticky sits above the content and
-   * every offset derived from this must collapse to zero.
-   *
-   * Three things read it and would otherwise drift apart: ReportNav's sticky
-   * `top` (without it the section nav pins to the same y as the header and is
-   * painted straight over), `.turn`'s anchor margin, and the `#section` targets
-   * on the report. The number that used to be baked into each of them was
-   * calibrated against the deleted AppTopbar, which was 61px.
-   */
   --app-header-h: 106px;
-  /* ReportNav's own height, which stacks under the header on the report page. */
   --report-nav-h: 44px;
 
-  /* ─────────────────────────────────────────────────────────────────────────
-     Tokens minted for the light-mode port. Every value below is the DARK one
-     and reproduces today's rendered output exactly, so nothing here moves a
-     pixel until `data-theme="light"` is set.
-
-     Only `--color-*` entries live in `@theme`, because those are the ones that
-     want a matching Tailwind utility (`text-ink-faint`, `bg-track`,
-     `fill-band-low`). The other ~90 minted tokens belong to no Tailwind
-     namespace at all: inside `@theme` they would be tree-shaken unless
-     something happened to reference them, and they would advertise utilities
-     (`shadow-modal`, `blur-veil`) that no call site should ever reach for. They
-     are declared in the plain `:root` block immediately after this one.
-     ───────────────────────────────────────────────────────────────────────── */
-
-  /* The two faint ink steps, which today are `/70`, `/45` and `/40` alpha
-     modifiers typed at five call sites. An alpha modifier cannot express what
-     light needs — there the faint step collapses to solid `ink-muted`, which is
-     the only reason it finally clears AA — so the step has to be a token. */
   --color-ink-faint: color-mix(in oklab, var(--color-ink-muted) 70%, transparent);
   --color-ink-faintest: color-mix(in oklab, var(--color-ink-muted) 45%, transparent);
 
-  /* `--color-line` used as a solid 3-5px SLAB rather than as a 1px hairline.
-     One value serves both roles today; once the divider direction flips, a
-     value picked for a hairline cannot hold a slab, so the roles split. */
   --color-track: var(--color-line);
 
-  /* ScoreBand's four segments. Alpha steps on dark, solid inks on light: the
-     ramp has to stay monotonic in luminance across all four, and stacked
-     alphas over a bright ground do not. */
   --color-band-empty: color-mix(in oklab, var(--color-ink-muted) 20%, transparent);
   --color-band-low: color-mix(in oklab, var(--color-ink-muted) 40%, transparent);
   --color-band-partial: color-mix(in oklab, var(--color-strong) 55%, transparent);
 
-  /* The tape player's letterbox. Derived from `paper` today, which would
-     silently become mid-grey mud the moment paper turns cream. A letterbox is
-     media, not a theme surface, and stays near-black in both modes. */
   --color-lens: color-mix(in srgb, var(--color-paper) 45%, black);
 
-  /* The rig's inset node boxes. States the "cut into the plate" intent, so a
-     light palette cannot invert the figure's depth by accident. */
   --color-surface-well: var(--color-paper);
 
-  /* Display-sized, on the brief's name field, which is why it gets its own
-     strength rather than riding a muted-caption value. */
   --color-placeholder: color-mix(in srgb, var(--color-ink-muted) 65%, transparent);
 }
 
-/**
- * The rest of the minted token set, in a plain `:root` rather than in `@theme`.
- *
- * None of these are `--color-*`, so none of them belong to a Tailwind
- * namespace: see the note at the end of `@theme` for why that keeps them out
- * of it. Everything below is the DARK value, and every one of them reproduces
- * today's rendered output exactly.
- *
- * Several are complete shadow, filter or gradient VALUES rather than colours.
- * That is deliberate and not laziness: on paper the honest answer for half the
- * blooms is to switch off rather than to retune, and a colour token cannot
- * express `none`.
- */
 :root {
-  /* ── ink and structure ──────────────────────────────────────────────────── */
-
-  /* Control chrome, split off the two divider tokens. A divider separates two
-     regions; a control edge IS the control, and once the ground flips the two
-     want different weights. Dark keeps the divider values, so nothing moves. */
   --edge-control: var(--color-line);
   --edge-control-strong: var(--color-line-strong);
-  /* The meter's 5px boundary, which has to hold an extent rather than split
-     two fields, so it cannot ride a hairline value. */
   --edge-track: var(--color-line);
-  /* `--color-line-strong` used as a slab: switch tracks, range tracks, the
-     deck scrubber. Same split as `--color-track`, one step louder. */
   --track-strong: var(--color-line-strong);
 
-  /* The wash under a hovered or selected ROW, split from the static-card
-     surface it happens to share a value with today. On dark a hover lightens;
-     on light it has to darken, while a static card still goes the other way. */
   --surface-hover: var(--color-paper-raised);
-  /* The rail's own fill, split off `--surface-hover` because the two sit on
-     different grounds and pull opposite ways: a row on a raised CARD wants a
-     value that keeps muted metadata legible, while a row on the SUNKEN rail
-     wants one that steps off a surface which is itself already darker than the
-     page. One value served both only while every surface was near-black.
-     Nothing muted is ever painted on this one — the rail pairs `hover:bg` with
-     `hover:text-ink` at every call site. */
   --rail-hover: var(--color-paper-raised);
 
-  /* Secondary type on the inverted `.trow` slab, which borrows
-     `--color-line-strong` today and works only by coincidence. */
   --invert-ink-soft: #3a3833;
 
-  /* `-webkit-text-stroke` on the hollow watermark numerals. Not just
-     `--color-line-strong`: on light the divider value would turn a 52px
-     watermark into a competing headline. */
   --stroke-ghost: var(--color-line-strong);
 
-  /* The landing's hollow display type. Solid and hollow words alternate inside
-     one line, so on the sheet they read as one ink at two coverages — which
-     only works if they are literally the same ink, never a caption grey. */
   --stroke-hollow: #82807a;
   --stroke-hollow-w: 1.5px;
 
-  /* ── heat ───────────────────────────────────────────────────────────────── */
-
-  /* The base hue for every low-alpha ember TINT, split off the ramp so the ink
-     ramp can invert without dragging ~14 washes with it. It is the top of the
-     ramp on dark and the spot plate on light, which is the whole point. */
   --ember-wash: var(--color-ember-glow);
 
   --wash-heat-faint: color-mix(in srgb, var(--ember-wash) 4%, transparent);
   --wash-heat: color-mix(in srgb, var(--ember-wash) 6%, transparent);
   --wash-heat-on: color-mix(in srgb, var(--ember-wash) 8%, transparent);
-  /* Row hover. The strength has to travel with the value — 35% of the near-black
-     maroon over cream is a heavy grey slab — which is why redefining
-     `--color-ember-soft` alone could never have fixed this one. */
   --wash-hover: color-mix(in srgb, var(--color-ember-soft) 35%, transparent);
   --edge-heat: color-mix(in srgb, var(--ember-wash) 35%, transparent);
   --edge-heat-strong: color-mix(in srgb, var(--ember-wash) 50%, transparent);
-  /* One token for every `border-ember/40` and `/45` in the product. 40 against
-     45 was never a meaningful distinction, and two idioms was one too many. */
   --ember-edge: color-mix(in srgb, var(--color-ember) 40%, transparent);
   --edge-fix: color-mix(in srgb, var(--color-ember) 25%, transparent);
-  /* The mid stop of the 2px filaments that fade to nothing at both ends. The
-     same value serves both modes — a dark ember at 2px on cream is a printed
-     rule, which is exactly the reading — but the four sites get a token so
-     they cannot drift. */
   --heat-hairline: var(--color-ember);
 
-  /* The burner's centre stop. Mixing toward `white` is monotonic in LIGHTNESS
-     by construction and therefore cannot also be monotonic in contrast on a
-     pale ground; mixing toward the surface's opposite is what actually keeps
-     the four-stop ramp inside one hue. */
   --burner-core: color-mix(in srgb, var(--color-ember-glow) 40%, white);
 
-  /* Every ember-filled bar. Gains contrast toward its leading edge in both
-     modes with no per-mode expression; minted so the two ends of the five bars
-     that use it can never be re-tuned independently. */
   --meter-fill-grad: linear-gradient(90deg, var(--color-ember), var(--color-ember-glow));
 
-  /* `.flame`'s stops. No `.tsx` renders `.flame`; these exist so the mark
-     cannot rot behind a token change, not because it is worth any budget. */
   --flame-1: var(--color-ember-glow);
   --flame-2: var(--color-ember-hot);
   --flame-3: var(--color-ember);
   --flame-bloom: drop-shadow(0 0 26px color-mix(in srgb, var(--color-ember) 34%, transparent));
 
-  /* The key light, typed once for both `.keylight` and `.keylight-report`. */
   --keylight-wash: color-mix(in srgb, var(--color-ember-glow) 9%, transparent);
-  /* Gradient terminator. `transparent` is alpha-zero BLACK: invisible fading
-     out of a black page, and a grey-brown cast dragged through the middle of
-     the same fade over cream. All six fade-outs in the file route through
-     here so the fix lands once. */
   --keylight-fade: transparent;
 
   --pulse-ring: color-mix(in srgb, var(--color-ember) 55%, transparent);
@@ -293,20 +105,13 @@
   --blink-floor: 0.25;
   --focus-glow: color-mix(in srgb, var(--color-ember) 16%, transparent);
 
-  /* Blooms, as complete shadow and filter values. Three of the five have no
-     press equivalent and switch off entirely on light; the other two trade the
-     halo for a real contact shadow. None of that fits in a colour. */
   --glow-modal: 0 0 120px -40px color-mix(in srgb, var(--color-ember) 30%, transparent);
   --glow-ring: drop-shadow(0 0 12px color-mix(in srgb, var(--color-ember) 30%, transparent));
   --glow-tick: 0 0 10px color-mix(in srgb, var(--color-ember-glow) 60%, transparent);
   --glow-seal: 0 0 34px -8px color-mix(in srgb, var(--color-ember) 45%, transparent);
   --glow-thumb: 0 0 16px -2px color-mix(in srgb, var(--color-ember) 60%, transparent);
 
-  /* The sweep across the report's ember bar. It has to move TOWARD the page's
-     own surface in either mode, or the glint reads as a smudge. */
   --sheen-hi: color-mix(in oklab, var(--color-ink) 30%, transparent);
-
-  /* ── verdict-scale alphas ───────────────────────────────────────────────── */
 
   --wash-zone-strong: color-mix(in srgb, var(--color-strong) 14%, transparent);
   --edge-zone-strong: color-mix(in srgb, var(--color-strong) 30%, transparent);
@@ -315,226 +120,90 @@
   --danger-edge: color-mix(in srgb, var(--color-weak) 40%, transparent);
   --danger-line: color-mix(in srgb, var(--color-weak) 35%, transparent);
   --danger-wash: color-mix(in srgb, var(--color-weak) 7%, transparent);
-  /* Both call sites are inside the pinned room, so the light value is never
-     painted; minted anyway so the pair reads as one idiom. */
   --edge-mixed: color-mix(in srgb, var(--color-mixed) 35%, transparent);
-  /* A STRENGTH, not a colour. The status chips come in four hues, so their
-     borders are written `color-mix(in srgb, <hue> var(--chip-edge),
-     transparent)` and one edit repairs every one of them. */
   --chip-edge: 30%;
 
-  /* ── optical ────────────────────────────────────────────────────────────── */
-
-  /* A scrim must DARKEN in both modes. Mixing it out of the surface token is
-     only correct while the surface is near-black; on light it becomes the ink,
-     which is also the better reading — a fresh sheet laid over a page knocked
-     back to a tint. Two tokens rather than one purely so `.overlay`'s 82% and
-     the delete confirm's 80% each keep their own dark value. */
   --scrim: color-mix(in srgb, var(--color-paper) 82%, transparent);
   --scrim-confirm: color-mix(in srgb, var(--color-paper) 80%, transparent);
 
-  /* Percentages, not colours, so the veils still derive from `--color-paper`.
-     Blur preserves luminance — it smears ink into grey rather than removing it
-     — so a light veil needs both a higher fill and a bigger radius. The
-     prefixed and unprefixed declarations at each site must take the token in
-     the same edit, or Safari alone ghosts. */
   --veil-mix: 92%;
   --veil-mix-chrome: 80%;
   --veil-blur: blur(10px);
   --scrim-blur: blur(8px);
 
-  /* Complete shadow values, because light needs different geometry as well as a
-     different alpha, and the black has to go warm: on the sheet a shadow is not
-     depth, it is the lift of one sheet lying on another, and a neutral shadow
-     under a warm stock reads as dirty grey. */
   --shadow-modal: 0 40px 100px -30px rgba(0, 0, 0, 0.8);
   --shadow-card: 0 22px 60px -32px rgba(0, 0, 0, 0.85);
   --shadow-toast: 0 22px 60px -32px rgba(0, 0, 0, 0.85);
   --shadow-float: 0 22px 60px -20px rgba(0, 0, 0, 0.9);
 
-  /* Grain: see `.grain` below for why the noise itself is never inverted. */
   --grain-opacity: 0.04;
   --grain-opacity-landing: 0.05;
   --grain-blend: normal;
   --grain-filter: none;
 
-  /* `antialiased` kills subpixel rendering and thins stems — right for light
-     type on a dark ground, actively harmful for dark type on a pale one, where
-     it erodes `--color-ink-muted`'s 4.97:1. All three sites in the file move
-     together, and the third is inside `.room-root`, so it is pinned too. */
   --font-smoothing: antialiased;
 
-  /* 0.7 in BOTH modes. `opacity` composites the button as a group, so the
-     primary's label rides down with its own slab and the pair still measures
-     6.4:1; the rule beside it sets `cursor: wait`, which makes this the
-     *pending* state, whose label has to stay readable. Minted only so the
-     number lives in one place. */
   --disabled-opacity: 0.7;
-  /* A disabled LINK is type on the page rather than a group being dimmed, so
-     unlike the button it does need a per-mode value. */
   --opacity-disabled-link: 0.4;
 
-  /* Both room-only. Minted so the pin below has something to pin, which is
-     cheaper than remembering that they are room-only. */
   --busy-dim: 0.4;
   --word-in-blur: 5px;
 
-  /* ── rig (landing fig.01 plate) ─────────────────────────────────────────── */
-
   --rig-key-glow: color-mix(in srgb, var(--color-ember) 11%, transparent);
-  /* The light-mode analogue of an additive glow is a blend, not a tint: it
-     darkens and warms the stock instead of painting pink over it. This is the
-     only `mix-blend-mode` the file gains, and deliberately the only one —
-     a blend makes the result depend on whatever happens to be underneath,
-     which is the exact coupling the token set exists to remove. */
   --rig-key-blend: normal;
-  /* `--color-line` used as a DRAWN GRAPHIC rather than as a divider. A divider
-     value picked for legibility makes the wires jump forward and compete with
-     the pulses they are drawn to carry. */
   --rig-wire: var(--color-line);
   --rig-box-stroke: var(--color-line);
-  /* The translucency only produces heat because the backdrop is black; on the
-     sheet the lit boxes need saturation instead. Alpha on one side, solid on
-     the other. */
   --rig-box-hot-stroke: color-mix(in srgb, var(--color-ember) 55%, transparent);
   --track-unfilled: color-mix(in srgb, var(--color-ink) 12%, transparent);
   --rig-grid-dot: color-mix(in srgb, var(--color-ink) 7%, transparent);
   --rig-mark: var(--color-ink-muted);
-  /* Fine dark marks on paper carry more weight than fine light marks on black
-     at equal alpha, which is why the two opacities here go DOWN on light while
-     the four dimmers below go up. */
   --rig-mark-opacity: 0.65;
   --rig-trace-opacity: 0.75;
-  /* Dimming toward black banks ember into a deep coal; dimming toward white
-     tints it pastel pink, so less alpha reduction is needed on light to
-     protect the hue. These four go UP there, not down. */
   --rig-dim-deep: 0.35;
   --rig-dim-mid: 0.45;
   --rig-dim-soft: 0.55;
   --rig-dim-cite: 0.7;
   --rig-pulse-idle: 0.3;
 
-  /* ── sim (landing live simulation) ──────────────────────────────────────── */
-
-  /* paper-inside-paper-raised is a visible groove at the black end of the scale
-     and imperceptible at the white end, so both cut-outs get named rather than
-     borrowing the page colour. */
   --sim-groove: var(--color-paper);
   --surface-recessed: var(--color-paper);
-  /* The idle bars must stay QUIETER than the live ember ones. Inverting
-     `--color-ink-muted` flips that ordering, because muted grey gains contrast
-     on light while ember loses it. */
   --mic-idle: var(--color-ink-muted);
-  /* An accent mark, not a divider. */
   --rule-quote: var(--color-line);
-  /* Must stay visibly weaker than the earned ember state it sits beside. */
   --rule-pending: var(--color-line-strong);
-  /* Transparent on dark, so the painted output is unchanged. On light a faint
-     tint carries "boxed, not merely coloured" better than a heavier border. */
   --fmark-fill: transparent;
-  /* `--color-line` as a 2px fill that the ember gradient slides over, so it has
-     to stay quieter than a divider would be. */
   --rule-unlit: var(--color-line);
-  /* Dashed rules are chalk-quiet on black and heavy on cream — the construct
-     most sensitive to the perceived-weight asymmetry between the two modes. */
   --stroke-dashed: var(--color-line-strong);
 
-  /* ── late arrivals ──────────────────────────────────────────────────────────
-     These were minted by the surface work rather than by the palette, so they
-     landed after the groups above rather than inside them. Every dark value here
-     is transcribed from the pre-light file, not re-derived — they are the exact
-     expressions their call sites used to carry inline. */
-
-  /* The `.g-stop-ember-22` SVG stop. 22% of an emitting ember over black is a
-     suggestion; 22% of a printed one over cream is a block. */
   --area-heat: color-mix(in srgb, var(--color-ember) 22%, transparent);
 
-  /* Status-chip fill strength, paired with `--chip-edge`. A strength rather
-     than a colour so one edit retunes `.chip-ok`, `.chip-error` and the brief's
-     chips together, whatever hue each is cut from. */
   --chip-fill: 7%;
 
-  /* 25%, not 60%: hover is one step up from `line-strong`, not a different
-     border. "One visible step" is a per-mode number, though — on the sheet both
-     ends of the mix have moved and the two inks have swapped which is lighter. */
   --field-border-hover: color-mix(in srgb, var(--color-ink-muted) 25%, var(--color-line-strong));
 
-  /* The difficulty tiles. Strengths rather than colours because `--heat` is set
-     inline per tile from DIFFICULTY_META, and a custom property substitutes its
-     own var()s where it is DECLARED — a `:root` colour token could never see a
-     `--heat` that exists only on the button. The strength is the only half of
-     these mixes the two modes can share, so it is the half that gets tokenised. */
   --tint-border-strong: 55%;
   --tint-tile: 8%;
   --tint-chip-loud: 13%;
 
-  /* The verdict panel's corner wash, set inline on the report. */
   --verdict-wash: color-mix(in srgb, var(--color-ember) 9%, transparent);
 
-  /* The trend chart. `--chart-area` is the area wash under the series and
-     `--chart-guide` the dashed gridlines; both are cut from `--color-ember`
-     rather than from `--ember-wash`, so that the DARK stroke stays the exact
-     `ember/25` and `ember/10` it has always been. A wash needs more of the plate
-     on the sheet than off it: a red fading over cream has nowhere to fade to. */
   --chart-area: color-mix(in oklab, var(--color-ember) 10%, transparent);
   --chart-guide: color-mix(in oklab, var(--color-ember) 25%, transparent);
 
-  /* The two live backdrop-blurred veils — the mobile rail header and the
-     report's section nav. Blur preserves luminance, so it smears dark ink into
-     grey rather than removing it, and a light veil has to run denser to stop
-     text ghosting through as legible shape rather than as texture. */
   --veil-chrome: color-mix(in oklab, var(--color-paper-sunken) 90%, transparent);
   --veil-nav: color-mix(in oklab, var(--color-paper) 90%, transparent);
 
-  /* Two ember hairlines that sit one step ABOVE the shared strengths and always
-     did. `--edge-heat` is 35% and `--ember-edge` is 40%; the star's hover and
-     the seal/footnote pair were 40% and 45% before this change. Folding them
-     into the shared tokens would have moved dark by five points of alpha on
-     three live elements, which is a visible change dressed up as a refactor. */
   --edge-heat-mid: color-mix(in srgb, var(--ember-wash) 40%, transparent);
   --ember-edge-loud: color-mix(in srgb, var(--color-ember) 45%, transparent);
 
-  /* The build screen's completed-stage tick. 45%, not the 50% every other
-     verdict edge takes — it has always been the quieter of the two and folding
-     it in would move dark. */
   --edge-stage-done: color-mix(in srgb, var(--color-strong) 45%, transparent);
 
-  /* Ember type sitting on an ember WASH rather than on the surface — the theme
-     switcher's selected cell, at 9.6px. The wash lifts the ground toward the
-     ink, so the ramp has to step up with it or the one cell whose job is to say
-     "this is the one you picked" becomes the least readable label in the group. */
   --label-on-wash: var(--color-ember);
 
-  /* The end-of-interview screen's 62vh ember field. THIS ONE IS A DECISION, NOT
-     A STRENGTH: a low-alpha ember fading over 62vh of cream has nowhere to fade
-     to and becomes a stain, which is the single construct the press reading has
-     no answer for. It goes out on light, the way every other bloom does — the
-     seal and the headline were always what carried that screen. */
   --done-glow-wash: color-mix(in srgb, var(--color-ember) 15%, transparent);
 
-  /* The trend chart's resting dot, which is knocked out of the CARD it is drawn
-     on rather than out of the page. On dark the two surfaces are 1.039 apart and
-     `--color-paper` agreed with the card closely enough to pass; on the sheet
-     they are 1.10 apart and the same fill would read as a dull grey bead. A
-     token rather than changing the class, so dark keeps the fill it has. */
   --dot-rest: var(--color-paper);
 }
 
-/**
- * `color-scheme`, out here instead of `style={{ colorScheme: "dark" }}` on
- * <html>.
- *
- * An inline style sits at the top of the cascade, so no stylesheet rule could
- * override it and the UA would keep painting scrollbar gutters, <select>
- * popups, date pickers, spellcheck underlines, `:-webkit-autofill` fills and
- * the overscroll area dark — black holes punched through a cream page. The bare
- * `:root` rule reproduces the deleted inline declaration exactly, including for
- * a reader with JavaScript off who never receives the attribute at all.
- *
- * Unlayered on purpose: `@theme` compiles into `@layer theme`, and an unlayered
- * rule beats every layered one regardless of specificity. That is also what
- * lets the light block below win without a single `!important`.
- */
 :root {
   color-scheme: dark;
 }
@@ -542,140 +211,45 @@
   color-scheme: light;
 }
 
-/* READ BEFORE EDITING ANY VALUE BELOW.
-   Four things in this block are deliberately the reverse of the dark set:
-     1. --color-paper-sunken is DARKER than --color-paper. A recess that goes
-        toward white becomes a bump, and every score meter reads inside-out.
-     2. --color-ink-muted is LIGHTER than --color-ink-soft. The hierarchy is
-        carried by CONTRAST, not by lightness, and the hex ordering reverses.
-     3. The heat ramp gets DARKER as it gets hotter: ember → hot → glow is
-        5.17 → 7.22 → 9.83 against the stock. Monotonic in contrast, not in
-        lightness. More ink, not more light.
-     4. --color-line and --color-line-strong are DARKER than the surface.
-   Every accent and verdict value here was derived from a target contrast ratio
-   against the stock, never by mirroring a dark hex. Do not "fix" any of them
-   toward their dark counterpart.
-   HARD FLOOR: --color-ember must stay ≥3:1 on --color-paper-raised, or the
-   focus ring fails WCAG 1.4.11 across the entire product. */
 :root[data-theme="light"] {
-  /* ── the stock ──────────────────────────────────────────────────────────── */
-
-  /* Warm uncoated, and not #ffffff: pure white makes the black plate read as
-     screen UI and costs the raised card its headroom. This one value carries
-     the entire warmth budget, which is why no ember wash is needed anywhere
-     else to make the page feel warm. */
   --color-paper: #f4f0e6;
-  /* Elevation is MORE separated here than on dark, 1.10 against 1.039, and
-     deliberately so: the eye resolves near-white steps far worse than
-     near-black ones. */
   --color-paper-raised: #fdfbf6;
-  /* REVERSAL 1 — the one surface token whose direction does not invert. */
   --color-paper-sunken: #ece7da;
 
-  /* Warm rich black, not #000. Also a FILL, for `.btn-primary` and the
-     reversed-out `.trow` slab. */
   --color-ink: #17140e;
   --color-ink-soft: #535045;
-  /* REVERSAL 2 — lighter than `ink-soft` above, and correct: 4.97 against
-     7.09. Specified by ratio, never by mirroring a dark hex. */
   --color-ink-muted: #6b6759;
 
-  /* REVERSAL 4 — and 75 `border-line` call sites ride this one value. Both are
-     slightly above dark's ratio because a low-contrast edge on a bright surface
-     is perceptually weaker than the same edge on a dark one. They stay
-     DIVIDERS; control chrome has moved to `--edge-control*`. */
   --color-line: #d7d0be;
   --color-line-strong: #9d9787;
 
-  /* ── heat ───────────────────────────────────────────────────────────────── */
-
-  /* THE SPOT PLATE. HSV 9.3°/0.92/0.75 against dark's 5.6°/0.80/1.00 — a ~4°
-     hue drift with saturation RISING and value falling: same ink, more density,
-     less emission. Because it is dark, `color: var(--color-paper)` on an ember
-     fill inverts correctly on its own at 5.17:1, which is why this file has no
-     `--color-on-ember` and needs none.
-     HARD CONSTRAINT: ≥3:1 on `--color-paper-raised` — currently 5.69 — or the
-     focus ring breaks product-wide. */
   --color-ember: #bf2b10;
-  /* REVERSAL 3 — hover means pressing harder, which on a press means more ink,
-     so hot and glow are DARKER than ember rather than brighter. 7.22 and 9.83
-     against the stock; the ramp stays monotonic in contrast. */
   --color-ember-hot: #991f0b;
   --color-ember-glow: #741808;
-  /* A pre-baked composite, not a hue, and it must stay a hand-picked literal:
-     12% of the light ember into the stock gives #eed8cc, on which ember falls
-     to 4.30 and fails. Do NOT derive this one with color-mix. */
   --color-ember-soft: #f7e2da;
 
-  /* ── verdict ────────────────────────────────────────────────────────────── */
-
-  /* Ordering preserved from dark — 7.97 / 7.59 / 5.37 — because a failing
-     verdict must never become the loudest mark on the report. Under
-     deuteranopia strong and mixed are near-inseparable in BOTH modes, which is
-     a property of the palette and not of this port, so the standing rule
-     holds: VERDICT IS NEVER ENCODED BY COLOUR ALONE. `ScoreBand` carries four
-     labels and `.tone-*` always sits next to the word it colours; neither may
-     be dropped to save height. */
   --color-strong: #305117;
-  /* A yellow earth ink, which is what a mustard reads as when it is printed
-     rather than emitted. This was the worst offender under naive inversion. */
   --color-mixed: #654606;
-  /* Deliberately cooler than the spot plate — 351.8° against 9.3° — and less
-     saturated. The dark pair sit 0.2° apart and separate by value alone, so
-     light separates its two reds better than dark does, not worse. */
   --color-weak: #a63f4d;
 
-  /* ── ink and structure ──────────────────────────────────────────────────── */
-
-  /* The alpha collapses to solid, which is the only reason this step finally
-     clears AA. Dark's 2.97 is a documented pre-existing failure, out of scope. */
   --color-ink-faint: var(--color-ink-muted);
   --color-ink-faintest: color-mix(in oklab, var(--color-ink-muted) 60%, transparent);
   --edge-control: #c9c2ae;
-  /* Clears WCAG 1.4.11's 3:1 on every surface it lands on, including the
-     ember-soft tint at 3.06. With `--edge-control` it forms a DARKENING ramp
-     mirroring dark's lightening one, so hover always firms the edge up. */
   --edge-control-strong: #898273;
   --edge-track: #b5ae9c;
   --color-track: #ded7c6;
   --track-strong: #c3bcaa;
-  /* Hover DARKENS here, where on dark it lightens. Same gesture, opposite
-     sign — and the static raised card still goes the other way. */
-  /* Lifted one step off the value the ramp suggested: at #e9e4d6 the muted
-     metadata inside a hovered row measured 4.457:1, an AA failure that only
-     appears under the pointer. This clears it at 4.54 and still reads as a
-     step off the page (1.096). */
   --surface-hover: #ebe6d8;
-  /* 1.12 off the rail where dark manages 1.066 — deliberately the stronger of
-     the two, because a low-contrast step reads weaker on a bright ground. */
   --rail-hover: #e0dbce;
-  /* Runs opposite to everything else in this block, because its ground does:
-     it is secondary type on the reversed-out `.trow` panel. */
   --invert-ink-soft: #a9a294;
-  /* Light `--color-line-strong` here (2.82 vs the card) would turn a 52px
-     watermark into a competing headline. */
   --stroke-ghost: #d0cabb;
-  /* A dense ink, NOT `--color-ink-muted`: the marquee alternation reads as ink
-     COVERAGE, so the solid and hollow words have to be the same ink laid down
-     two ways. Fallback if the stroke out-weighs the solid words beside it:
-     #565248 (6.84). */
   --stroke-hollow: #3f3b31;
-  /* A light stroke on black blooms; a dark stroke on cream does not, so it
-     needs the extra half-pixel to hold the same weight. */
   --stroke-hollow-w: 2px;
-  /* Solid rather than alpha steps, so the four-segment ramp stays monotonic in
-     luminance: 0.8727 → 0.6745 → 0.4430 → 0.2359 → 0.0658. */
   --color-band-empty: #ddd6c4;
   --color-band-low: #b9b1a0;
   --color-band-partial: #6f8f4f;
-  /* Still near-black — a letterbox is media, not a theme surface. */
   --color-lens: #141310;
 
-  /* ── heat ───────────────────────────────────────────────────────────────── */
-
-  /* The washes take the SPOT PLATE, not the top of the ramp. 9% of a pale
-     salmon over cream is the single most conspicuous artefact of a naive
-     inversion of this design, and this split is what avoids it. */
   --ember-wash: var(--color-ember);
   --wash-heat-faint: color-mix(in srgb, var(--ember-wash) 7%, transparent);
   --wash-heat: color-mix(in srgb, var(--ember-wash) 11%, transparent);
@@ -685,52 +259,21 @@
   --edge-heat-strong: color-mix(in srgb, var(--ember-wash) 65%, transparent);
   --ember-edge: color-mix(in srgb, var(--color-ember) 55%, transparent);
   --edge-fix: color-mix(in srgb, var(--color-ember) 40%, transparent);
-  /* Toward the INK, not toward white — see the definition. This is what keeps
-     the burner's four stops monotonic in contrast: 14.06 → 9.83 → 7.22 → 5.17. */
   --burner-core: color-mix(in srgb, var(--color-ember-glow) 40%, var(--color-ink));
-  /* A misregistration ghost, not a halo: the press equivalent of a bloom is a
-     plate landing a hair off register. Fallback if it reads as a rendering
-     bug: `none`. Never a soft glow. */
   --flame-bloom: drop-shadow(1px 1px 0 color-mix(in srgb, var(--color-ember-glow) 20%, transparent));
-  /* A SCORCH IN THE STOCK, not a lamp. 7% of the dense red composites to
-     HSV 26.4° at S 0.10 — a warm tan at 1.114 against the stock, in parity
-     with dark's 1.127 peak. Vestigial is the one outcome not permitted here:
-     if it reads as a stain, take it to `transparent` and say so. */
   --keylight-wash: color-mix(in srgb, var(--color-ember) 7%, transparent);
-  /* An alpha-zero copy of the wash rather than `transparent`, which is
-     alpha-zero BLACK and drags a grey-brown cast through the middle of every
-     fade over cream. Check Safari as well as Chromium — premultiplication is
-     the part most likely to differ. */
   --keylight-fade: rgb(240 226 215 / 0);
-  /* Deliberately UNDER parity with dark's 2.43: a dark annulus on paper reads
-     heavier than a light one on black at the same ratio, and the 7px dot inside
-     it already carries the signal at 5.17. */
   --pulse-ring: color-mix(in srgb, var(--color-ember) 40%, transparent);
-  /* 0.68 is the first value clearing 1.4.11's 3:1 floor for the live recording
-     indicator; 0.58 gives 2.63 and 0.45 gives 2.09. Dark's 1.97 is a
-     pre-existing failure this change deliberately does not touch. */
   --pulse-trough: 0.68;
   --ring-trough: 0.72;
-  /* At 0.25 a light-mode ember composites to near-invisible, turning three
-     `step-end` dips into hard on/off strobes. */
   --blink-floor: 0.45;
   --focus-glow: color-mix(in srgb, var(--color-ember) 38%, transparent);
-  /* The pure halos switch OFF rather than retune. A bloom is a dark-room
-     device; there is no press equivalent, and a 10px halo around a 2px tick
-     makes the reading it marks imprecise. */
   --glow-modal: 0 0 0 0 transparent;
   --glow-ring: none;
   --glow-tick: 0 0 0 0 transparent;
-  /* The two LIFTED objects keep their lift, but as a real contact shadow plus
-     a containing ring instead of a halo. */
   --glow-seal: 0 2px 8px -3px rgba(60, 48, 30, 0.22), 0 0 0 1px color-mix(in srgb, var(--color-ember) 22%, transparent);
   --glow-thumb: 0 1px 3px rgba(60, 48, 30, 0.28);
-  /* Toward the surface, so the sweep still lightens what it crosses.
-     `--color-ink` here would darken the ember bar and invert a glint into a
-     smudge. */
   --sheen-hi: color-mix(in oklab, var(--color-paper) 45%, transparent);
-
-  /* ── verdict-scale alphas ───────────────────────────────────────────────── */
 
   --wash-zone-strong: color-mix(in srgb, var(--color-strong) 22%, transparent);
   --edge-zone-strong: color-mix(in srgb, var(--color-strong) 55%, transparent);
@@ -739,65 +282,30 @@
   --danger-edge: color-mix(in srgb, var(--color-weak) 60%, transparent);
   --danger-line: color-mix(in srgb, var(--color-weak) 55%, transparent);
   --danger-wash: color-mix(in srgb, var(--color-weak) 12%, transparent);
-  /* Dead on light — both call sites are inside the pinned room — but stated so
-     the pair cannot drift if one of them ever moves out of it. */
   --edge-mixed: color-mix(in srgb, var(--color-mixed) 55%, transparent);
   --chip-edge: 50%;
 
-  /* ── optical ────────────────────────────────────────────────────────────── */
-
-  /* The INK at 45%, not the surface: a scrim has to darken in both modes. This
-     also beats dark on its own terms — 3.20:1 of panel separation against
-     1.03:1 — and reads as the page knocked back to a tint under a fresh sheet. */
   --scrim: color-mix(in srgb, var(--color-ink) 45%, transparent);
   --scrim-confirm: color-mix(in srgb, var(--color-ink) 45%, transparent);
-  /* Fill up and radius up: blur preserves luminance, so at the dark
-     percentages ink ghosts through a light veil as legible shape rather than
-     as texture. */
   --veil-mix: 96%;
   --veil-mix-chrome: 95%;
   --veil-blur: blur(16px) saturate(1.1);
   --scrim-blur: blur(14px);
-  /* The alpha collapses, the geometry tightens and the black goes WARM. All
-     three are required: a black shadow is nearly invisible on #0e0e0e and
-     heavy-handed on cream, and a neutral shadow under a warm stock reads as
-     dirty grey. */
   --shadow-modal: 0 24px 56px -28px rgba(60, 48, 30, 0.20);
   --shadow-card: 0 14px 34px -26px rgba(60, 48, 30, 0.16);
-  /* The toast is #fdfbf6 bordered #d7d0be sitting on #f4f0e6, so this shadow
-     is the only thing lifting it off the page. */
   --shadow-toast: 0 10px 28px -12px rgba(60, 48, 30, 0.16), 0 2px 6px -2px rgba(60, 48, 30, 0.10);
-  /* Tooth rather than grain: lighter, multiplied INTO the stock, and stripped
-     of chroma — feTurbulence perturbs R/G/B independently, and that fringing is
-     invisible against black but shows as coloured speckle on cream. Grayscale
-     and NOT invert(1): inverting mid-grey noise about 0.5 is close to identity,
-     and `filter` never touches the alpha channel that drives the polarity, so
-     invert would ship as a no-op. If this still reads as dirt rather than
-     tooth, the honest fallback is 0 — not more tuning. */
   --grain-opacity: 0.022;
   --grain-opacity-landing: 0.028;
   --grain-blend: multiply;
   --grain-filter: grayscale(1);
-  /* The exact reverse of dark, for the same reason dark chose `antialiased`:
-     subpixel rendering thickens stems, which light-on-dark cannot afford and
-     dark-on-light needs. */
   --font-smoothing: auto;
-  /* 0.4 of the light muted ink over cream lands near 1.6:1 — invisible rather
-     than quiet. */
   --opacity-disabled-link: 0.5;
-  /* Room-only, so never actually painted; stated for completeness. */
   --busy-dim: 0.55;
 
-  /* ── rig ────────────────────────────────────────────────────────────────── */
-
-  /* Light mode's one deliberate warmth-in-the-air moment, and on-doctrine only
-     because the multiply below makes it a scorch in the stock rather than a
-     lamp in the room. */
   --rig-key-glow: color-mix(in srgb, var(--color-ember) 6%, transparent);
   --rig-key-blend: multiply;
   --rig-wire: color-mix(in srgb, var(--color-line) 55%, transparent);
   --rig-box-stroke: color-mix(in srgb, var(--color-line) 70%, transparent);
-  /* Solid where dark is 55% translucent — see the definition. */
   --rig-box-hot-stroke: var(--color-ember);
   --color-surface-well: #ece8e0;
   --track-unfilled: color-mix(in srgb, var(--color-ink) 16%, transparent);
@@ -805,20 +313,14 @@
   --rig-mark: color-mix(in srgb, var(--color-ink) 42%, transparent);
   --rig-mark-opacity: 0.5;
   --rig-trace-opacity: 1;
-  /* These four go UP, not down — see the definitions. Validate the PRODUCT on
-     `.pl`, which compounds `--rig-trace-opacity` with `--rig-dim-mid`. */
   --rig-dim-deep: 0.5;
   --rig-dim-mid: 0.55;
   --rig-dim-soft: 0.62;
   --rig-dim-cite: 0.78;
   --rig-pulse-idle: 0.65;
 
-  /* ── sim ────────────────────────────────────────────────────────────────── */
-
   --sim-groove: #ded8cb;
   --surface-recessed: #ebe6db;
-  /* Quieter than the live ember bars, which inverting `--color-ink-muted`
-     would not have been. */
   --mic-idle: #948f83;
   --rule-quote: #d6d0c3;
   --rule-pending: #c3bcae;
@@ -827,17 +329,12 @@
   --stroke-dashed: color-mix(in srgb, var(--color-ink) 22%, transparent);
   --color-placeholder: color-mix(in srgb, var(--color-ink-muted) 85%, transparent);
 
-  /* ── late arrivals ─────────────────────────────────────────────────────── */
-
   --area-heat: color-mix(in srgb, var(--color-ember) 14%, transparent);
   --chip-fill: 12%;
   --field-border-hover: color-mix(in srgb, var(--color-ink-muted) 38%, var(--color-line-strong));
   --tint-border-strong: 70%;
   --tint-tile: 12%;
   --tint-chip-loud: 18%;
-  /* Down from 9%, not up: this is the one wash that sits under the verdict, and
-     the stock is already carrying the warmth budget the dark room needed the
-     ember for. Composited it is a scorch in the sheet, not a pink corner. */
   --verdict-wash: color-mix(in srgb, var(--color-ember) 7%, transparent);
   --chart-area: color-mix(in oklab, var(--color-ember) 14%, transparent);
   --chart-guide: color-mix(in oklab, var(--color-ember) 40%, transparent);
@@ -851,37 +348,8 @@
   --dot-rest: var(--color-paper-raised);
 }
 
-/**
- * The interview room is PINNED DARK in both themes.
- *
- * Product: the hot seat is a video surface where a candidate watches their own
- * webcam feed, and a cream page reflected off the monitor drags the camera's
- * auto-exposure and white balance. Every serious video product keeps the stage
- * dark for exactly that reason.
- *
- * Narrative: a press sheet is printed FROM something developed in a darkroom.
- * The metaphor already contains the dark room — the interview is the exposure,
- * the report is the print — so turning the lights on in here is not
- * consistency, it is fogging the negative.
- *
- * THE INVARIANT, which must be enforced by a test rather than by memory: every
- * custom property declared in the light block above must ALSO be declared here
- * with its dark value. `HotSeat.tsx` is written almost entirely in BASE tokens
- * and only `SelfView`/`Interviewer` speak `room-*`, so pinning the five
- * `--color-room-*` tokens alone would leave near-black text on a near-black
- * surface.
- *
- * And the non-obvious half of that invariant: a custom property's var()
- * references are substituted where it is DECLARED, not where it is used. An
- * unpinned `--wash-heat` therefore inherits into the room already resolved
- * against the LIGHT ember, and no amount of re-pinning `--color-ember` here can
- * undo it. That is why the five tokens whose two modes share an identical
- * expression — `--heat-hairline`, `--meter-fill-grad` and the three `--flame-*`
- * — still have to be restated below. Identical text, different substitution.
- */
 :root[data-theme="light"] .room-root {
   color-scheme: dark;
-  /* surfaces & ink */
   --color-paper: #0e0e0e; --color-paper-raised: #131313; --color-paper-sunken: #0a0a0a;
   --color-ink: #e9e6df; --color-ink-soft: #9b978e; --color-ink-muted: #82807a;
   --color-ink-faint: color-mix(in oklab, var(--color-ink-muted) 70%, transparent);
@@ -889,11 +357,9 @@
   --color-line: #262521; --color-line-strong: #3a3833;
   --invert-ink-soft: #3a3833;
   --stroke-hollow: #82807a; --stroke-hollow-w: 1.5px;
-  /* heat & verdict */
   --color-ember: #ff4633; --color-ember-hot: #ff6a5a; --color-ember-glow: #ff8a72;
   --color-ember-soft: #2a1512;
   --color-strong: #8fbf6b; --color-mixed: #d9a441; --color-weak: #e05c4f;
-  /* every minted token whose value differs */
   --ember-wash: var(--color-ember-glow);
   --edge-control: var(--color-line); --edge-control-strong: var(--color-line-strong);
   --edge-track: var(--color-line); --color-track: var(--color-line);
@@ -911,12 +377,8 @@
   --color-band-empty: color-mix(in oklab, var(--color-ink-muted) 20%, transparent);
   --color-band-low: color-mix(in oklab, var(--color-ink-muted) 40%, transparent);
   --color-band-partial: color-mix(in oklab, var(--color-strong) 55%, transparent);
-  /* `.deck-*` is the report's tape player and is never nested under
-     `.room-root`, so pinning these two cannot reach it. Pinned anyway: an
-     invariant with a remembered exception is not an invariant. */
   --color-lens: color-mix(in srgb, var(--color-paper) 45%, black);
   --color-surface-well: var(--color-paper);
-  /* heat */
   --wash-heat-faint: color-mix(in srgb, var(--ember-wash) 4%, transparent);
   --wash-heat: color-mix(in srgb, var(--ember-wash) 6%, transparent);
   --wash-heat-on: color-mix(in srgb, var(--ember-wash) 8%, transparent);
@@ -934,14 +396,10 @@
   --glow-seal: 0 0 34px -8px color-mix(in srgb, var(--color-ember) 45%, transparent);
   --glow-thumb: 0 0 16px -2px color-mix(in srgb, var(--color-ember) 60%, transparent);
   --sheen-hi: color-mix(in oklab, var(--color-ink) 30%, transparent);
-  /* Same expression in both modes, restated for the substitution reason in the
-     docblock above. `.q-n`'s filament and the two segment meters are inside the
-     room and would otherwise paint the light ember. */
   --heat-hairline: var(--color-ember);
   --meter-fill-grad: linear-gradient(90deg, var(--color-ember), var(--color-ember-glow));
   --flame-1: var(--color-ember-glow); --flame-2: var(--color-ember-hot); --flame-3: var(--color-ember);
   --flame-bloom: drop-shadow(0 0 26px color-mix(in srgb, var(--color-ember) 34%, transparent));
-  /* verdict-scale alphas */
   --wash-zone-strong: color-mix(in srgb, var(--color-strong) 14%, transparent);
   --edge-zone-strong: color-mix(in srgb, var(--color-strong) 30%, transparent);
   --edge-verdict-strong: color-mix(in srgb, var(--color-strong) 50%, transparent);
@@ -950,7 +408,6 @@
   --danger-line: color-mix(in srgb, var(--color-weak) 35%, transparent);
   --danger-wash: color-mix(in srgb, var(--color-weak) 7%, transparent);
   --chip-edge: 30%;
-  /* optical */
   --scrim: color-mix(in srgb, var(--color-paper) 82%, transparent);
   --scrim-confirm: color-mix(in srgb, var(--color-paper) 80%, transparent);
   --veil-mix: 92%; --veil-mix-chrome: 80%;
@@ -959,9 +416,6 @@
   --shadow-toast: 0 22px 60px -32px rgba(0, 0, 0, 0.85);
   --grain-opacity-landing: 0.05;
   --opacity-disabled-link: 0.4;
-  /* rig & sim. Neither the landing plate nor the simulation renders inside the
-     room; they are here because the invariant admits no exceptions, and an
-     unpinned token is one a future call site can drag in. */
   --rig-key-glow: color-mix(in srgb, var(--color-ember) 11%, transparent);
   --rig-key-blend: normal;
   --rig-wire: var(--color-line); --rig-box-stroke: var(--color-line);
@@ -992,19 +446,7 @@
   --dot-rest: var(--color-paper);
 }
 
-/* Forced colours. The system palette replaces every colour anyway, so the
-   atmosphere is zeroed rather than fought: a bloom or a grain wash that
-   survives here survives only as an artefact the reader cannot switch off.
-
-   The selector is `:root`, as specified. Note that it therefore loses to the
-   (0,1,1) light block above for a reader who is in light mode AND forced
-   colours; the affected values are all decorative, but the gap is real and is
-   recorded here so it is found deliberately rather than rediscovered. */
 @media (forced-colors: active) {
-  /* Selector list, not a bare `:root`. The light block is
-     `:root[data-theme="light"]` at (0,2,0) and this reset was (0,1,0), so in
-     LIGHT mode — the only mode with atmosphere values worth zeroing — every
-     declaration below lost the cascade and the block did nothing at all. */
   :root,
   :root[data-theme="light"],
   :root[data-theme="light"] .room-root {
@@ -1022,8 +464,6 @@
   }
 }
 
-/* 64rem is Tailwind's `lg`, which is what `lg:hidden` on the header and
-   `lg:flex` on the rail key off. The two must flip on the same line. */
 @media (min-width: 64rem) {
   :root {
     --app-header-h: 0px;
@@ -1041,16 +481,11 @@
     font-family: var(--font-sans);
   }
 
-  /* Archivo is a grotesque, not a serif — it needs weight and tightening to
-     read as display. Lives in `base` so components can still override weight.
-     The `-0.01em` is the floor for mixed-case body-ish display text; the heavy
-     uppercase headlines below all restate a tighter value of their own. */
   .font-display {
     font-weight: 500;
     letter-spacing: -0.01em;
   }
 
-  /* Numbers in tables/meters must not jitter as they change. */
   .tabular {
     font-variant-numeric: tabular-nums;
   }
@@ -1060,12 +495,6 @@
     color: var(--color-paper);
   }
 
-  /* No `border-radius` here, deliberately. It used to force a 4px radius so the
-     outline would round off against square controls; now that the whole product
-     is square the outline already fits, and re-declaring a radius on focus would
-     square off the handful of things that are still genuinely circular (the
-     record button's ring, a status dot inside a focusable row) the moment they
-     took focus. Letting `outline` follow each element's own shape is the fix. */
   :focus-visible {
     outline: 2px solid var(--color-ember);
     outline-offset: 2px;
@@ -1073,23 +502,6 @@
 }
 
 @layer utilities {
-  /* The key-light behind the question. Decorative: pointer-events-none, and it
-     must sit under content.
-
-     The stops were three re-typed literals of the old orange palette
-     (242,100,47 / 246,166,78), so they kept painting an orange bloom after
-     `ember` went red — the one place in the product where the two hues were
-     visible side by side. Now mixed from the tokens.
-
-     22% → 12%, because the strength was calibrated against the old warm-brown
-     base. The same alpha over #0e0e0e reads roughly twice as hot, and the
-     reference hot seat has barely a suggestion of light behind the question.
-
-     Those two stops are now permanent rather than provisional. The only call
-     site is inside `.room-root`, which is pinned dark in both themes, so
-     #0e0e0e is the only base they will ever composite over and a light-mode
-     value would be dead code. Only the terminator is tokenised, and only so
-     that the six fade-to-nothing gradients in this file stay one idiom. */
   .ember-glow {
     background: radial-gradient(
       58% 60% at 50% 0%,
@@ -1099,8 +511,6 @@
     );
   }
 
-  /* Recording pulse. Reduced-motion users get a static dot — the ember colour
-     already carries the "live" meaning, so no information is lost. */
   @keyframes grill-pulse {
     0%,
     100% {
@@ -1116,8 +526,6 @@
     animation: grill-pulse 1.3s ease-in-out infinite;
   }
 
-  /* Ring around the record button — expands rather than fades, so it reads as
-     output level, not a loading state. */
   @keyframes grill-ring {
     0%,
     100% {
@@ -1147,9 +555,6 @@
     animation: grill-rise 0.4s ease-out both;
   }
 
-  /* A new question resolving into focus, word by word — the interviewer
-     forming the sentence rather than pasting it. Each word carries its own
-     delay (set inline), and `both` keeps it invisible until its turn comes. */
   @keyframes grill-word-in {
     from {
       opacity: 0;
@@ -1166,9 +571,6 @@
     animation: grill-word-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
   }
 
-  /* A light sweeping across a surface that is still being assembled — the build
-     screen's progress bar and the skeleton of the report it's writing. Motion
-     rather than a spinner, because it says "being built" instead of "waiting". */
   @keyframes grill-sheen {
     from {
       transform: translateX(-100%);
@@ -1178,9 +580,6 @@
     }
   }
 
-  /* Mic-level bars. Only used as an idle "the mic is on" shimmer — once a real
-     level is available the heights are set inline and the animation is dropped,
-     because a decorative loop over live data reads as noise. */
   @keyframes grill-eq {
     0%,
     100% {
@@ -1203,32 +602,6 @@
   }
 }
 
-/* ══════════════════════════════════════════════════════════════════════════
-   ── landing & report bespoke ──
-
-   Hand-written CSS for the pieces Tailwind is the wrong tool for: the grain
-   overlay, key-light, heat haze, the waveform horizon, the follow-up marquee,
-   flame text, the burner spiral, the auth modal shell, the trend draw, the
-   score ring, the pace band, rubric meters, the video shell — and every
-   @keyframes in the product's marketing/report surfaces.
-
-   Three rules hold this section together:
-
-   1. Colour comes from the @theme tokens above and nowhere else. Alpha is
-      `color-mix(… , transparent)` of a token, never a re-typed hex. The only
-      literals are optical: scrims, vignettes and drop-shadows, which are black
-      at an opacity, not palette entries.
-   2. Class names are the design's own, so the markup ports 1:1. Where the three
-      designs give one name two values (`.btn`, `.kicker`, `.ledger`, `.meter`,
-      `.section`, `.h1`), the difference is scoped to the page shell that owns
-      it — `.grill-root` (landing), `.app-root` (signed-in), `.report-main`.
-   3. Every @keyframes is `g-`-prefixed. `spin` and `pulse` are Tailwind's own
-      animation names; redefining them here would silently retune every
-      `animate-spin` in the app.
-   ══════════════════════════════════════════════════════════════════════════ */
-
-/* ── shells ─────────────────────────────────────────────────────────────── */
-
 .grill-root,
 .app-root {
   --pad-x: clamp(20px, 4.5vw, 48px);
@@ -1246,22 +619,12 @@
   --wrap-max: 1160px;
   --lnav-h: 64px;
 }
-/* Column + `.foot { margin-top: auto }` so a short page still pins its footer. */
 .app-root {
   --wrap-max: 1060px;
   display: flex;
   flex-direction: column;
 }
 
-/* These element resets live in `@layer base`, not out here with the rest of the
-   bespoke rules, and that placement is load-bearing.
-   `:where()` zeroes their specificity, but specificity is not what decides this:
-   an UNLAYERED rule beats every layered one, and Tailwind compiles its utilities
-   into `@layer utilities`. Out here, `a { color: inherit }` would strip
-   `text-ink-muted` / `underline` / `hover:text-ember` off every link on the
-   pages this port left in Tailwind (`/new`, `/profile`, `/starred`,
-   FinishReport) but moved inside `.app-root`. In `base` they sit below the
-   utilities, which is where a reset belongs. */
 @layer base {
   :where(.grill-root, .app-root) a {
     color: inherit;
@@ -1271,8 +634,6 @@
     background: var(--color-ember);
     color: var(--color-paper);
   }
-  /* Offset only — the shape of the ring is left to the element, same reasoning
-     as the root `:focus-visible` above. */
   :where(.grill-root, .app-root) :focus-visible {
     outline: 2px solid var(--color-ember);
     outline-offset: 3px;
@@ -1288,18 +649,11 @@
   padding-inline: var(--pad-x);
 }
 
-/* ── atmosphere ─────────────────────────────────────────────────────────── */
-
 .grain {
   position: fixed;
   inset: 0;
   z-index: 40;
   pointer-events: none;
-  /* Film grain lifting the blacks on dark; paper tooth on light. The noise is
-     never inverted — it is subtractive by nature, so its polarity is already
-     right — and only its weight, blend and chroma move. `normal` and `none`
-     are the initial values of the two properties below, so dark paints exactly
-     what it painted before they were declared. */
   opacity: var(--grain-opacity);
   mix-blend-mode: var(--grain-blend);
   filter: var(--grain-filter);
@@ -1309,10 +663,6 @@
   opacity: var(--grain-opacity-landing);
 }
 
-/* The single ember key-light. Decorative and under everything: z-index 0,
-   pointer-events none. The wash is typed once for both rules below — only the
-   gradient's geometry differs, a 30% origin here and 70% on the report — so the
-   two can never be re-tuned apart. */
 .keylight {
   position: absolute;
   inset: -12% -20% auto;
@@ -1325,7 +675,6 @@
     var(--keylight-fade) 68%
   );
 }
-/* The report reads right-to-left off the ring, so its light comes from there. */
 .keylight-report {
   height: 56vh;
   background: radial-gradient(
@@ -1335,17 +684,6 @@
   );
 }
 
-/* ── buttons ────────────────────────────────────────────────────────────── */
-
-/*
- * Mono, uppercase, wide-tracked, and square — the reference sets every control
- * this way, and it is what keeps a button reading as a switch on a machine
- * rather than as a web link. `min-height` rather than symmetric padding so the
- * slab keeps its height whatever the label does.
- *
- * The base paints nothing; the variants below do. `.btn` on its own is never a
- * finished control.
- */
 .btn {
   display: inline-flex;
   align-items: center;
@@ -1382,11 +720,6 @@
 .btn-block {
   width: 100%;
 }
-/* Signed-in surfaces run a tighter button than the marketing page; the report,
-   tighter still. Modifiers are restated inside each scope because a bare
-   `.btn-sm` would otherwise lose to `.app-root .btn` on specificity.
-   Only the metrics change here — the mono/uppercase/tracking treatment is the
-   button's identity and must survive every scope. */
 .app-root .btn {
   min-height: 48px;
   padding: 0.9rem 1.6rem;
@@ -1408,21 +741,6 @@
   font-size: 0.62rem;
 }
 
-/*
- * Bone, not ember — and this is the one that surprises people.
- *
- * The accent is reserved for heat: live state, the unfinished session's edge,
- * the marker on a score band. A filled ember button competes with all of it, so
- * the primary action is instead the boldest mark the sheet can carry — which is
- * the ink itself in either mode: on a near-black page the brightest thing
- * available, on the press sheet the densest. It turns red under the cursor: the
- * heat is what the press promises, not what the button already is.
- *
- * Stated at that altitude the rule needs no light value and gets better rather
- * than merely surviving — 16.15:1 at rest, 5.17:1 on hover, both above dark's.
- * Ink and paper are an exact inverting pair, so a black plate at rest and a red
- * plate on hover is a two-colour press run described literally.
- */
 .btn-primary {
   border-color: var(--color-ink);
   background: var(--color-ink);
@@ -1433,10 +751,6 @@
   background: var(--color-ember);
   color: var(--color-paper);
 }
-/* The border IS the control here, which is why it takes the control-chrome
-   token rather than the divider it happens to share a value with on dark. A
-   divider separates two regions and can afford to be faint; an edge that is the
-   only thing drawing the button has to be found. */
 .btn-secondary {
   border-color: var(--edge-control-strong);
   background: transparent;
@@ -1454,10 +768,6 @@
 .btn-ghost:hover {
   color: var(--color-ink);
 }
-/* On the report a ghost button is a mono chip, not a nav link. Its rest edge is
-   decorative and its hover edge is the control proper, so the two take different
-   tokens: that pair lightens on dark and darkens on light, which is what makes
-   hover firm the chip up in both modes rather than only in one. */
 .report-main .btn-ghost {
   border-color: var(--edge-control);
   font-family: var(--font-mono);
@@ -1469,10 +779,6 @@
   border-color: var(--edge-control-strong);
   color: var(--color-ink);
 }
-/* Quiet until you reach for it: a decorative chip edge and muted type at rest,
-   and only the hover says danger. The hover edge is a token because its strength
-   has to travel with its value — the 40% that reads as a warning over black is
-   too faint to register over paper, where it takes 60%. */
 .btn-danger {
   border-color: var(--edge-control);
   background: transparent;
@@ -1496,28 +802,19 @@
   cursor: pointer;
 }
 
-/* ── shared marks ───────────────────────────────────────────────────────── */
-
 .wordmark {
   font-family: var(--font-display);
   font-size: 23px;
   font-weight: 800;
   line-height: 1;
   letter-spacing: -0.02em;
-  /* Declared here, not at each call site: the rail said GRILL. and the
-     footer directly under it said grill. */
   text-transform: uppercase;
 }
-/* Smaller than the app's, and set on a baseline row so the mono product tag can
-   sit beside it. The landing has one enormous headline per screen and a 26px
-   wordmark competed with it in the corner of the eye. */
 .grill-root .wordmark {
   display: inline-flex;
   align-items: baseline;
   font-size: 21px;
 }
-/* Margin rather than a flex `gap`: the full stop is a flex item too, and a gap
-   would push it off the end of the word it belongs to. */
 .grill-root .wordmark small {
   margin-left: 0.55rem;
   font-family: var(--font-mono);
@@ -1554,20 +851,11 @@
   100% {
     box-shadow: 0 0 0 0 var(--pulse-ring);
   }
-  /* The vanishing end stays an inline 0% mix rather than a second token: it is
-     an alpha-zero copy of the same hue, and box-shadow colours interpolate
-     premultiplied, so neither end of the ring can fringe. Tokenising it for
-     symmetry would only invent a way for the two ends to disagree. */
   55% {
     box-shadow: 0 0 0 7px color-mix(in srgb, var(--color-ember) 0%, transparent);
   }
 }
 
-/* The word that carries the heat. Gradient-clipped text, so it needs a
-   transparent fill — and a `display: inline-block` to keep the clip box sane.
-   The stops are tokens so the pan cannot rot behind a ramp change: on light the
-   same four run the other way in lightness while gaining contrast, and never
-   fall below 5.17:1 at any point in the 5.5s sweep. */
 .flame {
   display: inline-block;
   padding-right: 0.06em;
@@ -1583,20 +871,12 @@
   background-clip: text;
   -webkit-text-fill-color: transparent;
   color: transparent;
-  /* Upright, not italic. The gradient is the heat; slanting the word as well
-     was the old idiom and there is no italic left anywhere in the design. */
   font-style: normal;
   font-weight: 800;
   letter-spacing: -0.02em;
   filter: var(--flame-bloom);
   animation: g-flame 5.5s ease-in-out infinite alternate;
 }
-/* Where `background-clip: text` is unsupported — older and embedded UAs, and
-   some print pipelines — the declarations above leave transparent type over a
-   fill that never lands, so the word vanishes rather than degrading. It has had
-   no solid fallback at all until now, which costs nothing on screen and
-   everything on paper; print stops being hypothetical the moment the page is a
-   sheet. */
 @supports not ((background-clip: text) or (-webkit-background-clip: text)) {
   .flame {
     -webkit-text-fill-color: var(--color-ember);
@@ -1612,14 +892,6 @@
   }
 }
 
-/* ── shared vocabulary ──────────────────────────────────────────────────────
-   Two names the signed-in surfaces read but no single page owns. They used to
-   sit inside the landing block because the marketing page happened to define
-   them first; the landing now sets its own type and its own bars, so they live
-   out here where /new and the report can find them without reading a section
-   that no longer applies to them.
-   ────────────────────────────────────────────────────────────────────────── */
-
 .kicker {
   font-family: var(--font-mono);
   font-size: 11px;
@@ -1627,12 +899,6 @@
   text-transform: uppercase;
   color: var(--color-ember);
 }
-/* The report rules off its kicker; the dashboard's sits in a tight head row
-   where a trailing rule would only add noise. The 40px tick takes the
-   control-edge token rather than the divider it matches today — it is a mark
-   attached to a label, not a boundary between two regions — which also keeps
-   decorative rules and control chrome from drifting once the divider
-   direction flips. */
 .report-main .kicker {
   display: flex;
   align-items: center;
@@ -1645,21 +911,12 @@
   background: var(--edge-control-strong);
 }
 
-/* A 5px well, so its boundary has to hold an extent rather than split two
-   fields, and a hairline divider value cannot do that once the direction flips.
-   The fill stays `--color-paper-sunken`, the one surface token that does NOT
-   invert on light: a recess that goes toward white becomes a bump and every
-   score meter in the product reads inside-out. Do not "fix" it lighter. */
 .meter {
   overflow: hidden;
   height: 5px;
   border: 1px solid var(--edge-track);
   background: var(--color-paper-sunken);
 }
-/* Five bars across the product copy this fill, so the gradient is a token and
-   its two ends can never be re-tuned independently. It gains contrast toward
-   its leading edge in both modes — lighter on dark, denser on light — which is
-   the same reading of "hotter" made out of ink instead of out of light. */
 .meter-fill {
   height: 100%;
   background: var(--meter-fill-grad);
@@ -1672,29 +929,6 @@
   }
 }
 
-/* ══════════════════════════ landing ══════════════════════════
-   The marketing page is a spec sheet, not a website: hairline rules instead of
-   cards, mono labels instead of chrome, and one enormous headline per screen.
-
-   Everything below is scoped to `.grill-root`. The names are short and generic
-   on purpose — `.rail`, `.mode`, `.tbl`, `.red` — because they are the design's
-   own; the scope is what keeps them from ever reaching the signed-in app, where
-   `.rail` already means the left navigation.
-   ══════════════════════════════════════════════════════════════ */
-
-/* ── the display idiom ──────────────────────────────────────────────────── */
-
-/*
- * Heavy uppercase on a leading under 1, which is what makes a three-line
- * headline read as one slab rather than three sentences. `-0.01em` is the
- * floor: uppercase has no descenders and no x-height contrast to absorb
- * tightening, and past about -0.025em the caps start colliding.
- *
- * The reference also sets `font-variation-settings: "wdth" 122`. Archivo is
- * loaded here as three static weights (see app/layout.tsx), so there is no
- * width axis to push — the declaration is left out rather than shipped as a
- * no-op that reads like it is doing something.
- */
 .grill-root .disp {
   font-family: var(--font-display);
   font-weight: 800;
@@ -1703,33 +937,12 @@
   text-transform: uppercase;
 }
 
-/*
- * The outline device — one hollow word per headline. It is the signature of the
- * whole page, so it must never be the thing that breaks.
- *
- * `-webkit-text-stroke` has no unprefixed form and no fallback, and the failure
- * is not "unstyled": a browser that ignores the stroke still honours
- * `color: transparent`, which erases the word outright and leaves a headline
- * with a hole in it. So the @supports test wraps BOTH declarations — it is the
- * guard, not a progressive enhancement — and anything that can't stroke text
- * gets a solid ink word and a headline that still reads.
- *
- * Named `.hollow` rather than the reference's `.outline` because Tailwind emits
- * an `.outline` utility; an unlayered rule of that name would beat it anywhere
- * the two ever met, which is the same trap that renamed the reference's
- * `.grid` to `.feature-grid` in the previous pass.
- */
 .grill-root .hollow {
   color: var(--color-ink);
 }
 @supports (-webkit-text-stroke: 1px black) {
   .grill-root .hollow {
     color: transparent;
-    /* Its own ink, not the caption grey it happens to share a hex with on
-       dark: solid and hollow words alternate inside one line, so on the sheet
-       they have to read as one ink laid down at two coverages. The width goes
-       UP on light for the matching reason — a light stroke on black blooms, a
-       dark stroke on cream does not. */
     -webkit-text-stroke: var(--stroke-hollow-w) var(--stroke-hollow);
   }
 }
@@ -1737,17 +950,6 @@
   color: var(--color-ember);
 }
 
-/*
- * The headline lands line by line: each line is a block clipped by its parent
- * and pushed a full line below it, so the words rise out of the rule above them
- * rather than fading in place.
- *
- * Released by `.io-in`, which is the same IntersectionObserver that drives
- * `.rv` — one mechanism for the whole page. Under `prefers-reduced-motion` the
- * shared block near the bottom of this file collapses the transition to nothing
- * and the lines simply appear; the observer is not motion-gated, so they are
- * never left stuck below the fold.
- */
 .grill-root .lift {
   display: block;
   overflow: hidden;
@@ -1767,30 +969,20 @@
   transform: none;
 }
 
-/* The arrow inside a CTA. Sized here so no call site has to. */
 .grill-root .btn svg {
   width: 14px;
   height: 14px;
 }
-
-/* ── top bar ────────────────────────────────────────────────────────────── */
 
 .grill-root .lnav {
   position: sticky;
   top: 0;
   z-index: 30;
   border-bottom: 1px solid var(--color-line);
-  /* Fill strength and blur radius are both per-mode. Blur preserves luminance
-     — it smears ink into grey rather than removing it — so a light veil at the
-     dark percentage lets the headline underneath ghost through as legible
-     shape rather than as texture. The prefixed and unprefixed declarations
-     have to take the token in the same edit, or Safari alone ghosts. */
   background: color-mix(in srgb, var(--color-paper) var(--veil-mix), transparent);
   backdrop-filter: var(--veil-blur);
   -webkit-backdrop-filter: var(--veil-blur);
 }
-/* Three tracks, not flex: the links must be centred against the page, not
-   against whatever the two ends happen to measure. */
 .grill-root .lnav-in {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
@@ -1827,8 +1019,6 @@
   gap: 1.4rem;
 }
 
-/* ── hero ───────────────────────────────────────────────────────────────── */
-
 .grill-root .hero {
   padding: 4.6rem 0 3.6rem;
 }
@@ -1855,16 +1045,9 @@
   gap: 0.5rem;
   color: var(--color-ink-soft);
 }
-/*
- * The one headline the page is built around. `clamp()` rather than a fixed
- * size for a reason that is not taste: "THE INTERVIEW" set at a desktop size
- * is wider than a 390px phone, and the page would scroll sideways.
- */
 .grill-root .hero-h1 {
   font-size: clamp(2.3rem, 8.2vw, 6.4rem);
 }
-/* Indents the middle line a fraction so the three lines read as a stack that
-   was set, not three paragraphs that happened to line up. */
 .grill-root .row2 {
   padding-left: 0.1em;
 }
@@ -1893,8 +1076,6 @@
   color: var(--color-ink-muted);
 }
 
-/* ── the three steps ────────────────────────────────────────────────────── */
-
 .grill-root .strip {
   border-top: 1px solid var(--color-line);
   border-bottom: 1px solid var(--color-line);
@@ -1907,8 +1088,6 @@
   padding: 1.9rem 2rem 2rem;
   border-left: 1px solid var(--color-line);
 }
-/* The first column sits flush with the page measure; a leading rule there would
-   read as a second frame around the content. */
 .grill-root .stepc:first-child {
   padding-left: 0;
   border-left: 0;
@@ -1943,8 +1122,6 @@
   color: var(--color-ink-muted);
 }
 
-/* ── sections & their rails ─────────────────────────────────────────────── */
-
 .grill-root .sect {
   padding: 5.5rem 0 6rem;
   border-top: 1px solid var(--color-line);
@@ -1970,8 +1147,6 @@
   content: "/ ";
   color: var(--color-ember);
 }
-
-/* ── statement: no script, it listens ───────────────────────────────────── */
 
 .grill-root .stmt-grid {
   display: grid;
@@ -2014,8 +1189,6 @@
   color: var(--color-ink-soft);
 }
 
-/* ── the follow-ups, on a loop ──────────────────────────────────────────── */
-
 .grill-root .press {
   overflow: hidden;
   padding: 5rem 0 5.5rem;
@@ -2024,12 +1197,6 @@
 .grill-root .mq {
   overflow: hidden;
 }
-/*
- * Two identical sets and a -50% shift, so the wrap has no seam. The gap lives
- * on each question rather than on the track: a `gap` between the two sets would
- * make half the track wider than the other half, and -50% would then land
- * mid-question every lap.
- */
 .grill-root .mq-track {
   display: flex;
   width: max-content;
@@ -2050,9 +1217,6 @@
   letter-spacing: inherit;
   text-transform: inherit;
   color: var(--color-ink-soft);
-  /* The underline IS the control here rather than a divider between two
-     regions, so it takes the control edge: the same value on dark, but on
-     light it firms up to one that carries a real affordance. */
   border-bottom: 1px solid var(--edge-control-strong);
   padding-bottom: 1px;
   transition:
@@ -2094,8 +1258,6 @@
   -webkit-text-stroke: 0;
   transform: translateY(-0.3em);
 }
-/* Beats the @supports rule above on specificity, so a hollow question fills in
-   solid ember on hover rather than only recolouring its stroke. */
 .grill-root .mq-set > span:hover {
   color: var(--color-ember);
   -webkit-text-stroke-color: var(--color-ember);
@@ -2113,14 +1275,10 @@
   color: var(--color-ink-soft);
 }
 
-/* ── statement: measured, not vibes ─────────────────────────────────────── */
-
 .grill-root .meas-h {
   margin-bottom: 3rem;
   font-size: clamp(2.4rem, 7vw, 5.4rem);
 }
-/* -1px so the wave's bottom edge and the numbers' top edge are one rule, not
-   two stacked hairlines reading as a double line. */
 .grill-root .wave {
   display: flex;
   align-items: flex-end;
@@ -2132,12 +1290,6 @@
   border-bottom: 0;
   background: var(--color-paper-raised);
 }
-/*
- * Each bar keeps a resting height from index maths (see WAVE in Landing.tsx)
- * and the animation only scales about it. Animating `height` instead would make
- * every bar identical the moment motion is switched off — a flat line where a
- * waveform should be.
- */
 .grill-root .wave i {
   flex: 1;
   height: var(--h);
@@ -2147,12 +1299,6 @@
   animation: g-wave 1.4s ease-in-out infinite alternate;
   animation-delay: calc(var(--n) * -0.08s);
 }
-/* 3px of decoration wants a ~3:1 target, not type's 4.5:1: the light muted ink
-   reads at 4.97 and would turn the waveform into a barcode. Scoped rather than
-   swapped on the rule above, because the faintest step is a 45% alpha on dark
-   where these bars are solid today. The `:not()` is load-bearing — this
-   selector out-specifies the ember accent below, which keeps its colour in
-   both modes. */
 :root[data-theme="light"] .grill-root .wave i:not(:nth-child(7n)) {
   background: var(--color-ink-faintest);
 }
@@ -2180,10 +1326,6 @@
 .grill-root .bn:first-child {
   border-left: 0;
 }
-/* The row-hover wash, not the raised-card surface it shares a value with on
-   dark. A hovered row and a static card move in opposite directions on the
-   sheet — the row darkens, the card lifts — so the two roles are separate
-   tokens even where one value serves both today. */
 .grill-root .bn:hover {
   background: var(--surface-hover);
 }
@@ -2236,8 +1378,6 @@
   color: var(--color-ember);
 }
 
-/* ── modes ──────────────────────────────────────────────────────────────── */
-
 .grill-root .modegrid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -2256,13 +1396,6 @@
 .grill-root .mode:nth-child(3n + 1) {
   border-left: 0;
 }
-/* Hover darkens rather than lightens: the grid is the raised surface, so the
-   cell under the cursor drops back to the page and reads as cut into it.
-   On light it drops one step further, to the shared row-hover wash, so this
-   cell reads at the same strength as every other hovered row on the page. That
-   is scoped rather than swapped outright because the same token resolves to
-   the raised surface on dark — the colour the grid is already painted in —
-   which would erase this hover entirely. */
 .grill-root .mode:hover {
   background: var(--color-paper);
 }
@@ -2325,8 +1458,6 @@
   color: var(--color-ink-soft);
 }
 
-/* ── protocol table ─────────────────────────────────────────────────────── */
-
 .grill-root .tbl {
   border-top: 1px solid var(--color-line);
 }
@@ -2341,17 +1472,6 @@
     background-color 0.22s ease,
     padding 0.3s ease;
 }
-/*
- * The row inverts under the cursor and grows a gutter as it does — the sheet
- * physically making room for the line you are reading. Everything inside has to
- * be restated against bone, including the arrow's stroke, or the row goes blank
- * on hover.
- *
- * The slab is the page's own opposite in both modes, which is why none of it is
- * per-mode: on dark a bone sheet lands on black, on light a reversed-out panel
- * lands on the sheet. `--color-ink` as the fill and `--color-paper` as the
- * knockout are an exact inverting pair, so neither is ever a literal here.
- */
 .grill-root .trow:hover {
   padding-inline: 1.4rem;
   background: var(--color-ink);
@@ -2399,12 +1519,6 @@
   color: var(--color-paper);
   stroke: var(--color-paper);
 }
-/* Secondary type on the reversed-out slab. It borrowed `line-strong` — the
-   darkest grey in the set, which on bone lands as body copy rather than as a
-   second heading, which is what the paper reads like — and worked only by
-   coincidence. Named now, because it is the one value in this range that has
-   to run opposite to the rest of the palette: its ground is the page's
-   opposite, so it lightens where everything else darkens. */
 .grill-root .trow:hover p {
   color: var(--invert-ink-soft);
 }
@@ -2412,8 +1526,6 @@
   border-color: var(--color-paper);
   transform: translateX(4px);
 }
-
-/* ── faq ────────────────────────────────────────────────────────────────── */
 
 .grill-root .faq {
   border-top: 1px solid var(--color-line);
@@ -2427,8 +1539,6 @@
   justify-content: space-between;
   gap: 1.5rem;
   padding: 1.35rem 0;
-  /* Both, deliberately: Safari needs the -webkit- pseudo-element to drop the
-     disclosure triangle, everything else needs `list-style`. */
   list-style: none;
   cursor: pointer;
   transition:
@@ -2465,8 +1575,6 @@
     transform 0.25s ease,
     stroke 0.25s ease;
 }
-/* A plus rotated into a cross — one glyph doing both states, so open and closed
-   can never disagree about which row is which. */
 .grill-root .faqi[open] .fc svg {
   transform: rotate(45deg);
   stroke: var(--color-ember);
@@ -2483,12 +1591,6 @@
   color: var(--color-ink);
 }
 
-/* ── the closing verdict ────────────────────────────────────────────────── */
-
-/* `.closer`, not the reference's `.verdict`: the report already owns a bare
-   `.verdict` (the headline over the score ring). Scoping saves the properties
-   this rule sets, but not the ones it doesn't — the report's `max-width: 17ch`
-   would still leak in and squeeze the closing headline into a column. */
 .grill-root .closer {
   padding: 7rem 0 7.5rem;
   border-top: 1px solid var(--color-line);
@@ -2496,8 +1598,6 @@
 .grill-root .vh {
   font-size: clamp(2.4rem, 9vw, 7rem);
 }
-/* The second line hangs off the right margin, so the two lines bracket the page
-   instead of stacking flush left like a paragraph. */
 .grill-root .vh .row2 {
   padding-left: 0;
   text-align: right;
@@ -2523,14 +1623,9 @@
   color: var(--color-ink-soft);
 }
 
-/* ── footer ─────────────────────────────────────────────────────────────── */
-
 .grill-root .lfooter {
   border-top: 1px solid var(--color-line);
 }
-/* `padding-block`, not the `padding` shorthand: both footer rows are also
-   `.wrap`, and a shorthand here would reset the wrap's own `padding-inline` and
-   leave the footer hanging wider than every other row on the page. */
 .grill-root .foot-top {
   display: flex;
   flex-wrap: wrap;
@@ -2573,12 +1668,6 @@
   text-transform: uppercase;
   color: var(--color-ink-muted);
 }
-
-/* ── landing, narrowed ──────────────────────────────────────────────────────
-   Every multi-column grid on this page collapses by moving its dividing rule
-   from the left edge to the top edge, so the sheet never loses its ruling and
-   never scrolls sideways.
-   ────────────────────────────────────────────────────────────────────────── */
 
 @media (max-width: 1024px) {
   .grill-root .stmt-grid {
@@ -2644,9 +1733,6 @@
   }
 }
 
-/* The product tag goes first, well before the links do: it is the only thing in
-   the bar that can wrap onto a second line, and a two-line wordmark shoves the
-   whole nav off centre. */
 @media (max-width: 900px) {
   .grill-root .wordmark small {
     display: none;
@@ -2721,8 +1807,6 @@
   }
 }
 
-/* ══════════════════════════ auth modal ══════════════════════════ */
-
 .overlay {
   position: fixed;
   inset: 0;
@@ -2731,21 +1815,6 @@
   align-items: center;
   justify-content: center;
   padding: 20px;
-  /* A scrim, not a surface: the base surface at 82%, so the room reads as
-     dimmed rather than recoloured. It used to be a re-typed warm near-black
-     (12, 9, 6) picked to sit under the brown paper; against a neutral #0e0e0e
-     that literal tinted the dimmed room amber. Mixing from `paper` means the
-     scrim can never drift from the surface it is dimming again.
-     That last sentence only holds while the surface is near-black, which is why
-     the 82% now lives in `--scrim` and not here: a scrim has to DARKEN in both
-     modes, so on the sheet it is mixed out of the INK instead, and the panel
-     gets 3.20:1 of separation against the 1.03:1 dark manages. The dark value
-     is unchanged, and has its own token so the delete confirm's 80% can never
-     drag `.overlay` down to 80% with it.
-     The blur goes up with it. Blur preserves luminance — it smears ink into
-     grey rather than removing it — so at 8px a light veil lets the dimmed page
-     read through as shape. Prefixed and unprefixed take the token in the same
-     edit, or Safari alone ghosts. */
   background: var(--scrim);
   backdrop-filter: var(--scrim-blur);
   -webkit-backdrop-filter: var(--scrim-blur);
@@ -2773,16 +1842,7 @@
   padding: 26px 28px 24px;
   border: 1px solid var(--color-line-strong);
   border-radius: var(--radius-card);
-  /* Raised at the near edge falling to sunken at 80%: a top-lit panel. It needs
-     no per-mode expression because `--color-paper-sunken` is the one surface
-     token whose direction does NOT invert — a recess stays darker than paper on
-     the sheet too — so 170deg still runs from the lit edge to the shaded one. */
   background: linear-gradient(170deg, var(--color-paper-raised), var(--color-paper-sunken) 80%);
-  /* Two layers, and only the first has a press equivalent. The lift survives
-     but goes tight and warm on light, because a neutral shadow under a warm
-     stock reads as dirty grey; the ember bloom is a darkroom device with
-     nothing to fade into on cream, so it switches off rather than being
-     retuned to a value that would only ever be a stain. */
   box-shadow: var(--shadow-modal), var(--glow-modal);
   animation: g-dlg-in 0.38s cubic-bezier(0.2, 0.7, 0.2, 1) both;
 }
@@ -2807,11 +1867,6 @@
   inset: 0 0 auto;
   height: 2px;
   border-radius: var(--radius-card) var(--radius-card) 0 0;
-  /* The terminators are `--keylight-fade` despite there being no key light in a
-     dialog: `transparent` is alpha-zero BLACK, which is invisible fading out of
-     a black page and drags a grey-brown cast through both tails of the same
-     fade over cream. The mid stop is the shared filament token — at 2px a dark
-     ember on paper is simply a printed rule, so it wants no per-mode value. */
   background: linear-gradient(90deg, var(--keylight-fade), var(--heat-hairline), var(--keylight-fade));
 }
 .modal-top {
@@ -2890,11 +1945,6 @@
   color: var(--color-ink-muted);
   transition: color 0.3s ease;
 }
-/* The one accent in the dialog that used to be an inline style, which is why it
-   gets a class of its own rather than `.link-ember`: that one resets `font` to
-   inherit and would blow this 10.5px mono row up to body size. Kept as three
-   declarations here so a scoped theme rule can reach them — an inline style sits
-   at the top of the cascade where nothing can. */
 .hint-link {
   color: var(--color-ember);
   text-decoration: underline;
@@ -2912,8 +1962,6 @@
   border: 1px solid var(--color-line-strong);
   background: var(--color-paper-sunken);
   font-family: var(--font-sans);
-  /* 16px, deliberately: iOS Safari force-zooms the page on focusing any field
-     under 16px and never zooms back out. */
   font-size: 16px;
   line-height: 1.4;
   color: var(--color-ink);
@@ -2930,15 +1978,6 @@
 .input::placeholder {
   color: var(--color-ink-muted);
 }
-/* 25%, not 60%: hover is meant to be one step up from `line-strong`, not a
-   different border. A 60% mix lands most of the way to `ink-muted` and reads as
-   focus, which the ember ring below is already saying. Re-checked against the
-   neutral tokens — the 25% mix still lands a single visible step up.
-   "One visible step" is a per-mode number rather than a constant, though, and
-   25% was hand-tuned against the dark greys: on the sheet both ends of the mix
-   have moved and the two inks have swapped which is lighter, so the strength
-   travels with the mode in `--field-border-hover` and is 38% there. The dark
-   mix is the same expression it always was. */
 .input:hover {
   border-color: var(--field-border-hover);
 }
@@ -2946,10 +1985,6 @@
   outline: none;
   border-color: var(--color-ember);
   background: var(--color-paper);
-  /* Reinforcement, not the indicator — the 1px ember border above carries that
-     on its own at 5.69:1 against the card. Which is why the ring can go from
-     16% to 38% on light without shouting: a low-alpha red over cream has
-     nothing to fade into, so it needs the density to register at all. */
   box-shadow: 0 0 0 3px var(--focus-glow);
 }
 .input.has-toggle {
@@ -2978,8 +2013,6 @@
   overflow: hidden;
   height: 3px;
   margin-top: 8px;
-  /* The track is a 3px slab, not a hairline, so it takes `--color-track`: the
-     divider value cannot hold an extent once the direction flips. */
   background: var(--color-track);
 }
 .pw-meter-fill {
@@ -3074,25 +2107,11 @@
   color: var(--color-ink-soft);
 }
 
-/* ══════════════════════════ signed-in chrome ══════════════════════════ */
-
-/* Nothing renders `.topbar` any more — `AppRail.tsx:14` and `layout.tsx:32` both
-   call it the old topbar. Kept and tokenised with the rest anyway: the veil
-   below is exactly what the rail will want the day it goes sticky, and porting a
-   stale hardcode then is worse than carrying a live one now. */
 .topbar {
   position: sticky;
   top: 0;
   z-index: 30;
-  /* Chrome, not a rule between two blocks of content. It rides the control ramp
-     so this edge can firm up on light without dragging all 75 `border-line`
-     call sites along with it. */
   border-bottom: 1px solid var(--edge-control);
-  /* Light raises both the fill and the blur radius (80% → 95%, 10px → 16px):
-     blur preserves luminance, so it smears ink into grey rather than removing
-     it, and a veil tuned over black lets dark type ghost through cream as
-     legible shape. The prefixed and unprefixed declarations must take the token
-     in the same edit, or Safari alone ghosts. */
   background: color-mix(in srgb, var(--color-paper) var(--veil-mix-chrome), transparent);
   backdrop-filter: var(--veil-blur);
   -webkit-backdrop-filter: var(--veil-blur);
@@ -3118,9 +2137,6 @@
     background-color 0.18s ease;
 }
 .topnav a:hover {
-  /* Deliberately not the raised-card token it happens to equal on dark: a hover
-     has to step away from the page, which is lighter on black and DARKER on
-     cream, while a static card steps up on both. */
   background: var(--surface-hover);
   color: var(--color-ink);
 }
@@ -3145,16 +2161,8 @@
   font-family: var(--font-mono);
   font-size: 11px;
   letter-spacing: 0.06em;
-  /* The ramp top on its own tint, and it survives the flip because the heat ramp
-     is monotonic in CONTRAST rather than lightness: dark `#ff8a72` on `#2a1512`
-     is 6.9, light `#741808` on `#f7e2da` is 8.65. The name misleads on paper —
-     there the glow is the DENSEST ember, and dropping to `--color-ember` to
-     "brighten" these initials would cost half the contrast (4.72). */
   color: var(--color-ember-glow);
 }
-/* The design hides this row on a phone. Wired to real routes, hiding it would
-   strand Starred and Profile with no other way in, so it wraps onto its own
-   line instead — desktop is untouched. */
 @media (max-width: 640px) {
   .topbar-in {
     flex-wrap: wrap;
@@ -3190,8 +2198,6 @@
   color: var(--color-ink-muted);
 }
 
-/* ══════════════════════════ dashboard ══════════════════════════ */
-
 .page-head {
   display: flex;
   flex-wrap: wrap;
@@ -3200,11 +2206,6 @@
   gap: 20px;
   padding-top: clamp(36px, 6vh, 60px);
 }
-/*
- * The signed-in headline. Bigger than it was — in the reference this is the
- * loudest thing on the dashboard by some distance, and at the old top of
- * 2.9rem the stat strip underneath was competing with it.
- */
 .app-root .h1 {
   font-family: var(--font-display);
   font-size: clamp(2.2rem, 5vw, 3.5rem);
@@ -3213,9 +2214,6 @@
   letter-spacing: -0.02em;
   text-transform: uppercase;
 }
-/* Same call as `.h2 em`: the accent word is ember and upright. Ember rather
-   than ember-glow because glow is a tint for small type and washes out at
-   headline weight. */
 .app-root .h1 i {
   font-style: normal;
   color: var(--color-ember);
@@ -3230,7 +2228,6 @@
   color: var(--color-ink);
 }
 
-/* still on the burner — the unfinished interview, pulled out of the list */
 .resume {
   position: relative;
   display: flex;
@@ -3243,11 +2240,6 @@
   border: 1px solid var(--color-line);
   border-left: 2px solid var(--color-ember);
   border-radius: var(--radius-card);
-  /* The tint at full strength. `--color-ember-soft` is a pre-baked composite
-     per mode rather than a hue, so a second alpha on top of it would be one
-     number trying to serve two different bases: on the press sheet 50% of
-     `#f7e2da` over the raised card is nothing at all. The dark composite does
-     move a shade with this — `.resume` has no call site, so nothing paints it. */
   background: linear-gradient(
     90deg,
     var(--color-ember-soft),
@@ -3371,10 +2363,6 @@
   position: absolute;
   inset: 0 0 auto;
   height: 2px;
-  /* `transparent` is alpha-zero *black*, which drags a grey-brown cast through
-     the middle of a fade over cream; `--keylight-fade` is an alpha-zero copy of
-     the stock and stays in hue end to end. The mid stop is shared with the
-     file's three other 2px filaments so the four can never drift. */
   background: linear-gradient(
     90deg,
     var(--keylight-fade),
@@ -3400,9 +2388,6 @@
   height: auto;
   margin-top: 10px;
   cursor: crosshair;
-  /* NOT `none`: only the horizontal axis carries the hover readout, so the
-     browser keeps vertical panning and pinch-zoom. Taking those meant a swipe
-     that happened to start on the chart scrolled nothing and the page stuck. */
   touch-action: pan-y pinch-zoom;
 }
 .trend-line {
@@ -3412,7 +2397,6 @@
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-/* pathLength="1" on the path, so one dash covers it whatever the geometry. */
 .trend-draw {
   stroke-dasharray: 1;
   stroke-dashoffset: 1;
@@ -3433,11 +2417,6 @@
     opacity: 1;
   }
 }
-/* Raised, not paper: the dot is knocked out of the card it is drawn on, not out
-   of the page behind it. In the dark room the two are one step apart and nobody
-   could tell; on the press sheet the card is the *lighter* of the pair, so the
-   wrong one punches a dull cream hole in a white dot. The same fix belongs on
-   `Trend.tsx`'s `fill-paper` circles, which are what actually renders today. */
 .trend-dot {
   fill: var(--color-paper-raised);
   stroke: var(--color-ember-glow);
@@ -3448,32 +2427,14 @@
   stroke: var(--edge-heat);
   stroke-width: 6;
 }
-/* A ring that cannot glow reads as nothing but weight, and 6px of ink around a
-   4px dot is a blot rather than a halo. The only width the light scope touches
-   anywhere in the product — everything else moves value and hue alone. */
 :root[data-theme="light"] .trend-dot-last {
   stroke-width: 4;
 }
-/* The hovered point borrows the latest point's treatment, one notch cooler so
-   "where you stand now" still reads as the brighter of the two. On paper the
-   ring is ink, so "brighter" becomes "heavier": the latest point's ring opens to
-   50% coverage while this one holds at 22%, and the ranking comes through the
-   inversion unchanged. Left as its own expression rather than folded into
-   `--edge-heat` precisely so that two-step gap can be tuned as a gap. */
 .trend-dot-hover {
   fill: var(--color-ember-glow);
   stroke: color-mix(in srgb, var(--ember-wash) 22%, transparent);
   stroke-width: 5;
 }
-/* Tinted toward the series hue rather than the border grey. A `line-strong`
-   guide on the card surface is about 1.5:1 and reads as nothing happening at
-   all; the reference draws these gridlines faintly red for the same reason. It
-   still sits well under the dots and the numbers, which is the order that
-   matters. The 30% was set against the black card and survives the flip only
-   because the hue is `--ember-wash` and not a rung of the ink ramp: 30% of the
-   spot red over a near-white card is about 2.2:1, a printed crosshair. Light
-   `--color-ember-glow` is the *densest* ember, and would have drawn an oxblood
-   rule straight through the chart. */
 .trend-guide {
   stroke: color-mix(in srgb, var(--ember-wash) 30%, transparent);
   stroke-width: 1;
@@ -3559,27 +2520,11 @@
   white-space: nowrap;
   color: var(--color-ink-muted);
 }
-/* Scoped to `.app-root` for the same reason `.app-root .btn-sm` is: the base
-   `.app-root .chip` above is (0,2,0) and sets `color` and the `border`
-   shorthand, so an unscoped `.chip-error` (0,1,0) would lose both and every
-   status chip would paint the same neutral grey.
-
-   Strengths rather than colours, because a tint calibrated to hold against
-   black is too thin to survive on cream: these two and the brief's `.chip-ok` /
-   `.chip-req` are one idiom, and `--chip-edge` / `--chip-fill` let it be
-   retuned in one place for every hue at once. The pair drops from 35% to the
-   shared 30% on dark; `.chip-error` renders that edge on the karaoke filler
-   count, on the report and on the anonymous sample, and it reads on the light
-   stock too. */
 .app-root .chip-error {
   border-color: color-mix(in srgb, var(--color-weak) var(--chip-edge), transparent);
   background: color-mix(in srgb, var(--color-weak) var(--chip-fill), transparent);
   color: var(--color-weak);
 }
-/* Edge and fill ride `--ember-wash`, the type stays on `--color-ember-glow`: a
-   low-alpha tint must not follow the ink ramp when the ramp inverts, or the
-   chip's outline turns oxblood on paper while its label — which *should* be the
-   densest ember it can be — is the one thing that wanted that value. */
 .app-root .chip-gen {
   border-color: color-mix(in srgb, var(--ember-wash) var(--chip-edge), transparent);
   background: var(--wash-heat);
@@ -3607,18 +2552,13 @@
   }
 }
 
-/* ══════════════════════════ report ══════════════════════════ */
-
 .report-main {
   flex: 1;
   max-width: 860px;
 }
-/* `.foot`'s shared `margin-top: auto` resolves to 0 here, because `flex: 1`
-   above has already eaten the free space — so the report states its own gap. */
 .report-main + .foot {
   margin-top: 56px;
 }
-/* The chrome stays the app's full width; only the reading column narrows. */
 .app-root .topbar-in,
 .app-root .foot-in {
   max-width: 1060px;
@@ -3648,10 +2588,6 @@
   letter-spacing: 0.06em;
   color: var(--color-ink-muted);
 }
-/* The tape player's only error message. A modifier rather than the inline colour
-   it used to be, for the same reason as `.hint-link` — and not a Tailwind utility
-   either, because `.mono-note` is unlayered bespoke CSS and beats anything
-   compiled into `@layer utilities`. */
 .mono-note-error {
   color: var(--color-weak);
 }
@@ -3683,10 +2619,6 @@
   text-transform: uppercase;
   color: var(--color-ink-muted);
 }
-/* `max-width` in ch, not px, so the measure tracks the type size — the report
-   title is meant to break onto two or three lines whatever the viewport. 17ch
-   of caps is a touch narrower than 17ch of mixed case, which is the right way
-   for it to drift now that the text is uppercase. */
 .verdict {
   max-width: 17ch;
   margin-top: 12px;
@@ -3710,7 +2642,6 @@
   letter-spacing: -0.005em;
 }
 
-/* the seared ring */
 .ring-wrap {
   position: relative;
   flex: none;
@@ -3727,8 +2658,6 @@
   stroke: var(--color-line);
   stroke-width: 7;
 }
-/* `currentColor`, so the arc takes its verdict colour from the same `.tone-*`
-   class the number inside the ring wears. */
 .ring-fill {
   fill: none;
   stroke: currentColor;
@@ -3767,7 +2696,6 @@
   color: var(--color-ink-muted);
 }
 
-/* vs the run this one retried — identical questions, comparable numbers */
 .vs {
   display: flex;
   flex-wrap: wrap;
@@ -3842,7 +2770,6 @@ a.vs-label:hover {
   }
 }
 
-/* delivery — measured, not guessed */
 .dgrid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -3954,7 +2881,6 @@ a.vs-label:hover {
   color: var(--color-ink-soft);
 }
 
-/* evidence — every verdict cites your own words back to you */
 .point {
   margin-top: 20px;
 }
@@ -3965,11 +2891,6 @@ a.vs-label:hover {
   font-size: 15px;
   font-weight: 600;
 }
-/* Upright, not italic. Every quote in this product is a verbatim transcript of
-   something the candidate said, and the rule down the left already says so —
-   the italic was a second, weaker signal that cost legibility on the longest
-   passages in the report. It also went with the old mixed-case display voice,
-   which the redesign dropped. Same call at `.hl-quote`, `.transcript`, `.ans p`. */
 .quote {
   margin-top: 8px;
   padding: 10px 14px;
@@ -4081,27 +3002,15 @@ a.vs-label:hover {
   color: var(--color-ember);
 }
 
-/* A section ReportNav can jump to, or that a `#hash` can land on directly.
-   Same offset as `.turn` below and for the same reason — it clears the shell
-   header (below `lg`) and the sticky section nav. Written as a class rather than
-   `scroll-mt-*` at each call site so the four report sections and the replay's
-   turns can never drift apart; the utility form also can't be shared, since a
-   Tailwind arbitrary value can't hold a readable `calc`. */
 .nav-target {
   scroll-margin-top: calc(var(--app-header-h) + var(--report-nav-h) + 16px);
 }
 
-/* the replay — one accordion per turn */
 .turn {
   overflow: hidden;
   margin-top: 10px;
   border: 1px solid var(--color-line);
   background: var(--color-paper-raised);
-  /* `#turn-N` anchors from the best/worst cards land here, and two things above
-     are sticky — without this the turn scrolls in underneath them. The 76px this
-     replaces was calibrated against the 61px AppTopbar, which no longer exists;
-     the tokens collapse to just ReportNav's height at `lg`, where the rail is
-     fixed to the left and nothing sticky sits above the content. */
   scroll-margin-top: calc(var(--app-header-h) + var(--report-nav-h) + 16px);
 }
 .turn-head {
@@ -4189,9 +3098,6 @@ a.vs-label:hover {
 .transcript {
   margin-top: 6px;
   padding: 6px 12px;
-  /* A 2px slab, not a hairline, so it takes the slab token: on the sheet a
-     divider value picked for a 1px rule turns this into a near-black bar that
-     out-weighs the card it sits inside. Same value on dark. */
   border-left: 2px solid var(--track-strong);
   font-size: 13.5px;
   color: var(--color-ink-soft);
@@ -4281,15 +3187,6 @@ a.vs-label:hover {
   color: var(--color-ink-soft);
 }
 
-/* The recording blink outlived the `.vid-*` tape player it was written for. That
-   player had no call site left once playback moved to `.deck-*`, and its whole
-   block — stage vignette, media scrim, transport, letterbox and ember bloom —
-   went with it; the keyframe stays because the deck's own REC dot on the report
-   and three of the landing's live marks still animate on it.
-
-   The floor is a token rather than 0.25 because a printed ember at a quarter
-   composites to near nothing: the dip stops reading as a blink and starts
-   reading as a strobe. */
 @keyframes g-blinkrec {
   0%,
   100% {
@@ -4341,22 +3238,6 @@ a.vs-label:hover {
   border-top: 1px solid var(--color-line);
 }
 
-/* ── SVG gradient stops ─────────────────────────────────────────────────── */
-
-/* `stop-color` is set here rather than as a `stopColor` presentation attribute
-   on the <stop>: presentation attributes are not a portable place to put
-   `var()`, and these stops have to come from the theme tokens.
-
-   The core is the white-hot centre of the burner coil, and it used to be a
-   literal `#ffdca8` — a cream-amber picked to sit one step above the old amber
-   `ember-glow`. It is the top of a four-stop ramp whose other three are now red,
-   so left alone it put a yellow flare in the middle of a red coil. What holds the
-   ramp inside one hue is blowing that stop out toward the SURFACE'S OPPOSITE —
-   white in the dark room, the ink on the sheet — and not toward white in both.
-   Mixing toward white is monotonic in lightness by construction and therefore
-   cannot also be monotonic in contrast on a pale ground: it would leave the coil's
-   core the faintest of its four stops instead of the densest. `--burner-core`
-   carries the pair. */
 .g-stop-core {
   stop-color: var(--burner-core);
 }
@@ -4369,17 +3250,12 @@ a.vs-label:hover {
 .g-stop-ember {
   stop-color: var(--color-ember);
 }
-/* A per-mode strength, which is why it is a token rather than a percentage typed
-   here: 22% of an emitting ember over black is a suggestion, and 22% of a printed
-   one over cream is a block. */
 .g-stop-ember-22 {
   stop-color: var(--area-heat);
 }
 .g-stop-ember-0 {
   stop-color: color-mix(in srgb, var(--color-ember) 0%, transparent);
 }
-
-/* ── reveal choreography ────────────────────────────────────────────────── */
 
 .rv {
   opacity: 0;
@@ -4410,15 +3286,9 @@ a.vs-label:hover {
     animation-duration: 0.001s !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.001s !important;
-    /* The delays matter as much as the durations: the ring, the meters and the
-       trend area all animate `both`, so a surviving 1.1s delay leaves them
-       blank and then pops them in — the exact jolt this query exists to remove. */
     animation-delay: 0s !important;
     transition-delay: 0s !important;
   }
-  /* `.grill-root .rv` is restated because it is (0,2,0): a media query adds no
-     specificity, so a bare `.rv` reset here would lose to it and every landing
-     block would still sit 16px low until the observer fired. */
   .rv,
   .grill-root .rv {
     opacity: 1;
@@ -4432,23 +3302,6 @@ a.vs-label:hover {
   }
 }
 
-/* ══════════════════════════════════════════════════════════════════════════
-   ── profile, the brief, and the room ──
-
-   The port's last three surfaces: /profile, /new and the session room, moved
-   off Tailwind and into the design's own vocabulary. Same three rules as the
-   section above: colour comes from the @theme tokens (alpha via color-mix,
-   never a re-typed hex), class names are the design's own, and every
-   @keyframes is `g-`-prefixed.
-
-   Paste this whole block at the END of app/globals.css — after the reveal
-   choreography section. Everything here is either namespaced (brief-, room-,
-   q-, id-) or scoped to `.app-root` / `.room-root`, so appending is safe.
-   ══════════════════════════════════════════════════════════════════════════ */
-
-/* ══════════════════════════ profile ══════════════════════════ */
-
-/* Who the interviewer thinks it's grilling: one plate, not a settings page. */
 .id-plate {
   display: flex;
   flex-wrap: wrap;
@@ -4504,8 +3357,6 @@ a.vs-label:hover {
   color: var(--color-ember-glow);
 }
 
-/* The Starred stat doubles as the way to /starred. Hovering warms the number
-   rather than underlining the label — the strip stays a ledger, not a nav. */
 .stat-link {
   transition: background-color 0.2s ease;
 }
@@ -4540,8 +3391,6 @@ a.vs-label:hover {
   }
 }
 
-/* Mono footnote under the forms. Dashed, like every other piece of fine print
-   in the product — the receipt foot, the modal foot, the delivery foot. */
 .fineprint {
   margin-top: 26px;
   padding-top: 16px;
@@ -4557,8 +3406,6 @@ a.vs-label:hover {
   color: var(--color-ink-soft);
 }
 
-/* The email field: shown, not editable. Sunken and quiet, but still legible —
-   greying the one thing that identifies the account would be self-defeating. */
 .input:disabled {
   background: var(--color-paper-sunken);
   color: var(--color-ink-soft);
@@ -4568,32 +3415,16 @@ a.vs-label:hover {
   border-color: var(--color-line-strong);
 }
 
-/* Status chips the brief and the profile share. Restated inside `.app-root`
-   for the same reason `.chip-error` is: the base `.app-root .chip` is (0,2,0)
-   and sets both `color` and the `border` shorthand. */
 .app-root .chip-ok {
   border-color: color-mix(in srgb, var(--color-strong) var(--chip-edge), transparent);
   background: color-mix(in srgb, var(--color-strong) var(--chip-fill), transparent);
   color: var(--color-strong);
 }
 .app-root .chip-req {
-  /* `--ember-edge`, not the `--chip-edge` strength its two siblings take: this
-     chip's border has always been 40% where theirs were 30%, and it is the only
-     one of the three with a call site, so folding it into the shared strength
-     would have been a visible dark-mode change dressed up as a refactor.
-     `--ember-edge` is exactly that 40/55 pair and is what the rest of the
-     product's ember hairlines already ride. */
   border-color: var(--ember-edge);
-  /* Keeps the pre-baked tint where `.chip-ok` above takes `--chip-fill`:
-     `--color-ember-soft` is a hand-picked literal in both modes and is the
-     page's one ember tint block — the seal, the drag state, a checked pick
-     and the selected segment all share it. Deriving this one from a strength
-     mix instead would fork that block into two nearly-identical pinks. */
   background: var(--color-ember-soft);
   color: var(--color-ember-glow);
 }
-
-/* ══════════════════════════ the brief (/new) ══════════════════════════ */
 
 .brief {
   display: flex;
@@ -4602,10 +3433,6 @@ a.vs-label:hover {
   margin-top: 30px;
 }
 
-/* The name leads, borderless and display-sized: it's the title of the thing
-   being made, not another field in a stack of fields. The rule underneath
-   catches fire on focus — the one place the page uses motion to say "this is
-   where you are". */
 .brief-name-wrap {
   margin-bottom: 6px;
 }
@@ -4618,10 +3445,6 @@ a.vs-label:hover {
   font-weight: 800;
   letter-spacing: -0.02em;
   line-height: 1.05;
-  /* Uppercase, like every other display heading — this reads as the brief's
-     title, so it has to sit in the same voice as the page headline above it.
-     `text-transform` is presentation only: the value posted to the API is
-     whatever the user actually typed, in their own casing. */
   text-transform: uppercase;
   color: var(--color-ink);
 }
@@ -4651,8 +3474,6 @@ a.vs-label:hover {
   transform: scaleX(1);
 }
 
-/* Step heads: a stroke numeral and a title, straight off the landing ledger —
-   but sized for a form card, not a manifesto. */
 .bstep-head {
   display: flex;
   align-items: center;
@@ -4689,8 +3510,6 @@ a.vs-label:hover {
   margin-left: auto;
 }
 
-/* The drop zone. Exists only until there's a résumé — once the text is in,
-   the text IS the control. */
 .drop {
   display: block;
   margin-top: 18px;
@@ -4754,8 +3573,6 @@ a.vs-label:hover {
   gap: 14px;
 }
 
-/* Underlined mono micro-action — Replace / Clear / mode swaps. The
-   pseudo-element grows the touch target without taxing the layout. */
 .underlink {
   position: relative;
   padding: 0;
@@ -4786,9 +3603,6 @@ a.vs-label:hover {
   cursor: default;
 }
 
-/* Editable extraction targets (résumé, project digest) run mono: what the
-   parser produced is source material, and it should read like it. 16px under
-   640px for the same iOS reason as `.input`. */
 .area {
   resize: vertical;
   min-height: 150px;
@@ -4814,7 +3628,6 @@ a.vs-label:hover {
   font-variant-numeric: tabular-nums;
 }
 
-/* Quiet guidance between controls — what a choice means, not another label. */
 .form-note {
   margin-top: 16px;
   font-size: 12px;
@@ -4841,8 +3654,6 @@ a.vs-label:hover {
   background: var(--color-line);
 }
 
-/* One option in either picker. Styling keys off aria-checked so the state the
-   screen reader hears and the state the eye sees can never disagree. */
 .pick-grid-3 {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -4924,7 +3735,6 @@ a.vs-label:hover {
   color: var(--color-ink-muted);
 }
 
-/* Paste-vs-import: a segmented control, mono like every other machine label. */
 .seg {
   display: inline-flex;
   gap: 2px;
@@ -4992,7 +3802,6 @@ a.vs-label:hover {
   margin-top: 12px;
 }
 
-/* Repeats toggle. */
 .switch-row {
   display: flex;
   align-items: flex-start;
@@ -5042,8 +3851,6 @@ a.vs-label:hover {
   background: var(--color-paper);
 }
 
-/* Difficulty: each tile carries its own `--heat`, straight from
-   DIFFICULTY_META — green is warm-up, red is a promise. */
 .heat-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -5075,12 +3882,6 @@ a.vs-label:hover {
   background: var(--color-paper-sunken);
 }
 .heat[aria-checked="true"] {
-  /* Percentages rather than colours — here and on `.heat-chip` below —
-     because `--heat` is set inline per tile from DIFFICULTY_META, and a
-     custom property substitutes its own var()s where it is DECLARED: a
-     `:root` colour token could never see a `--heat` that exists only on the
-     button. The strength is the only half of these mixes the two modes can
-     share, so it is the half that gets tokenised. */
   border-color: color-mix(in srgb, var(--heat) var(--tint-border-strong), transparent);
   background: color-mix(in srgb, var(--heat) var(--tint-tile), transparent);
   color: var(--color-ink);
@@ -5131,8 +3932,6 @@ a.vs-label:hover {
   color: var(--color-ink-muted);
 }
 
-/* The burner dial. `--fill` is set inline from the value, so the track's lit
-   segment is plain CSS — no script painting on drag. */
 .range {
   -webkit-appearance: none;
   appearance: none;
@@ -5189,9 +3988,6 @@ a.vs-label:hover {
   font-variant-numeric: tabular-nums;
 }
 
-/* What this interview will cost, itemised — questions, runtime, per-answer
-   cap. `.dk`/`.dv` come from the report's delivery grid; a receipt is a
-   receipt. */
 .tally {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -5222,13 +4018,6 @@ a.vs-label:hover {
   }
 }
 
-/* ══════════════════════════ the room ══════════════════════════ */
-
-/* The room is a fixed pane, not a document: exactly the viewport, never a
-   page scrollbar. Anything that doesn't fit scrolls inside `.room-main`, so
-   the header and the mic stay put — a control that slides away mid-answer is
-   worse than a short scroll. Vertical rhythm is keyed off viewport HEIGHT,
-   not width: a 1280×720 laptop is wide but short. */
 .room-root {
   position: relative;
   display: flex;
@@ -5240,10 +4029,6 @@ a.vs-label:hover {
   font-family: var(--font-sans);
   font-size: 16px;
   line-height: 1.6;
-  /* The one of the file's three smoothing sites that is inside the room, so the
-     value it reads comes from the pin rather than from the light block — the
-     ground in here is still #0e0e0e and still wants stems thinned. Tokenised
-     anyway: three literals that have to agree is three chances to drift. */
   -webkit-font-smoothing: var(--font-smoothing);
 }
 @layer base {
@@ -5266,8 +4051,6 @@ a.vs-label:hover {
   border-bottom: 1px solid var(--color-line);
   background: color-mix(in srgb, var(--color-paper) 88%, transparent);
 }
-/* Wraps to two lines on a phone: title + controls, then the progress across
-   the full width. Unwrapped, the control cluster pinned the bar at 0px. */
 .room-top-in {
   display: flex;
   flex-wrap: wrap;
@@ -5318,9 +4101,6 @@ a.vs-label:hover {
   color: var(--color-ember-glow);
 }
 
-/* Progress: one cell per question, filling left to right — a countdown you
-   can feel. Past 24 questions the cells drop below legibility, so the strip
-   degrades to a plain bar (the JSX decides which to render). */
 .rprog {
   order: 3;
   width: 100%;
@@ -5337,13 +4117,6 @@ a.vs-label:hover {
   gap: 4px;
   height: 5px;
 }
-/* Two token swaps, neither of which moves this strip a pixel — the room is
-   pinned. `--color-track` because a 5px slab is not a 1px hairline and the two
-   roles part company the moment the divider direction flips; the live cell
-   below mixes 36% ember INTO it, so it needs a substrate with real contrast
-   under it rather than a value picked to be nearly invisible. And
-   `--meter-fill-grad` because the same ember fill runs in five bars across the
-   product, and the two ends of it must never be re-tuned apart. */
 .seg-i {
   flex: 1;
   background: var(--color-track);
@@ -5412,8 +4185,6 @@ a.vs-label:hover {
   margin-inline: auto;
   padding: 18px 20px;
 }
-/* Auto margins centre without making the top unreachable when content
-   overflows — `justify-content: center` on a scroller does exactly that. */
 .room-center {
   width: 100%;
   margin-block: auto;
@@ -5449,9 +4220,6 @@ a.vs-label:hover {
   color: var(--color-ink-muted);
 }
 
-/* The question sits under the key-light — the one lit object in the room.
-   While the answer is scored it dims and softens: the light is off you until
-   the next question turns it back on. */
 .q-wrap {
   position: relative;
   margin-top: 12px;
@@ -5485,9 +4253,6 @@ a.vs-label:hover {
   border: 1px solid var(--color-line);
   border-radius: var(--radius-card);
   background: var(--color-paper-raised);
-  /* Hygiene only: the room is pinned, so the card keeps the deep black lift a
-     black ground needs. Tokenised so that the last hardcoded rgba() in this
-     range is not what a future light-mode sweep finds and "fixes" by hand. */
   box-shadow: var(--shadow-card);
 }
 .q-card::before {
@@ -5495,9 +4260,6 @@ a.vs-label:hover {
   position: absolute;
   inset: 0 0 auto;
   height: 2px;
-  /* The filament, and one of four in the file that fade to nothing at both
-     ends. It gets a token not because the value moves — a 2px ember on cream is
-     a printed rule and wants the same hex — but so the four cannot drift. */
   background: linear-gradient(90deg, transparent, var(--heat-hairline), transparent);
 }
 @media (min-height: 820px) {
@@ -5505,8 +4267,6 @@ a.vs-label:hover {
     padding: 28px 28px 30px;
   }
 }
-/* The turn number, seared into the card behind the words. Decorative: hidden
-   from the tree, unselectable, and under the text. */
 .q-n {
   position: absolute;
   top: 6px;
@@ -5518,21 +4278,10 @@ a.vs-label:hover {
   line-height: 1;
   letter-spacing: -0.02em;
   color: transparent;
-  /* `--stroke-ghost`, which equals the divider on dark and deliberately does
-     not on light: a watermark outlined in the light `--color-line-strong` stops
-     being a watermark and becomes a 52px headline competing with the question.
-     Pinned in here, so this one keeps the divider value. */
   -webkit-text-stroke: 1px var(--stroke-ghost);
   pointer-events: none;
   user-select: none;
 }
-/*
- * The question is the loudest headline in the product, not a paragraph on a
- * card — in the reference it fills the left half of the room in heavy caps and
- * every other control is quiet next to it. Weight goes 500 → 800 and the
- * leading collapses from 1.4 to 1.08: at four lines of caps a 1.4 leading reads
- * as four separate sentences rather than one question.
- */
 .q-text {
   position: relative;
   z-index: 1;
@@ -5574,11 +4323,8 @@ a.vs-label:hover {
 }
 .lvl-bar {
   width: 4px;
-  /* A 4px slab, so the same split as the progress cells above. */
   background: var(--color-track);
 }
-/* No height transition while live: the level updates every frame, so an ease
-   never finishes and the bars crawl. The analyser's smoothing does the work. */
 .lvl-bar[data-hot="true"] {
   background: linear-gradient(180deg, var(--color-ember-glow), var(--color-ember));
 }
@@ -5648,7 +4394,6 @@ a.vs-label:hover {
   height: 22px;
   background: var(--color-paper);
 }
-/* The ring expands rather than fades — it reads as output level, not loading. */
 .stop-ring {
   position: absolute;
   inset: -7px;
@@ -5721,7 +4466,6 @@ a.vs-label:hover {
   color: var(--color-ink-muted);
 }
 
-/* The end of the interview. */
 .done {
   position: relative;
   display: flex;
@@ -5735,17 +4479,6 @@ a.vs-label:hover {
   color: var(--color-ink);
   text-align: center;
 }
-/* This screen is NOT inside `.room-root`, despite sitting among the room's
-   rules: `HotSeat` returns `ThankYou` INSTEAD of the room, never within it, so
-   the done screen and the seal further down follow the theme like any other
-   page and the room pin cannot reach them.
-   Only the terminator is tokenised here. `transparent` is alpha-zero BLACK,
-   which is invisible fading out of a black page and drags a grey-brown cast
-   through the middle of the same fade over cream. The 15% ember stop above it
-   is a 62vh low-alpha ember field, which is the one construct the press reading
-   has no answer for. The decision, since `ThankYou` deliberately renders OUTSIDE
-   `.room-root` and therefore follows the reader's theme: it goes out on light
-   rather than being retuned, the way every other bloom in the file does. */
 .done-glow {
   position: absolute;
   inset: auto 0 0;
@@ -5788,9 +4521,6 @@ a.vs-label:hover {
   margin-top: 30px;
 }
 
-/* The room and the done screen sit outside `.app-root`, so the global
-   reduced-motion blanket above doesn't reach them. Restated here — the
-   Tailwind-layer animate-* utilities already guard themselves. */
 @media (prefers-reduced-motion: reduce) {
   .room-root *,
   .room-root *::before,
@@ -5806,17 +4536,6 @@ a.vs-label:hover {
   }
 }
 
-/* ============================================================================
-   THE REPORT, SHARPENED — the tape as a row, the coach's notes, model answers
-   you can lift, and the done seal that replaced the coil.
-   Same rules as everything above: tokens only, g- keyframes, no Tailwind
-   collisions. `g-draw` and `g-blinkrec` are reused, not redefined.
-   ========================================================================== */
-
-/* ── the done seal ─────────────────────────────────────────────────────────
-   The profile's initials seal, earned: the arc takes one ember lap around the
-   disc and the check draws itself a beat later. Both are `g-draw` — the same
-   dash trick at two speeds. */
 .done-mark {
   width: 64px;
   height: 64px;
@@ -5841,16 +4560,11 @@ a.vs-label:hover {
   stroke-width: 3.4;
   stroke-linecap: round;
   stroke-linejoin: round;
-  /* pathLength=100 on the element makes 100 the whole stroke. */
   stroke-dasharray: 100;
   stroke-dashoffset: 100;
   animation: g-draw 0.45s ease-out 0.65s forwards;
 }
 
-/* ── the tape, closed ──────────────────────────────────────────────────────
-   One slim row per answer. The report is a reading surface; eight idle 16:9
-   voids would bury the feedback under black rectangles. Dashed because nothing
-   is loaded yet — the border goes solid once the deck is open. */
 .tape {
   display: flex;
   align-items: center;
@@ -5904,10 +4618,6 @@ a.vs-label:hover {
   color: var(--color-ink-muted);
 }
 
-/* ── the deck, open ────────────────────────────────────────────────────────
-   Picture on top, transport in its own rail below — controls never float over
-   the candidate's face. The centre button exists only while nothing rolls;
-   once playing, the frame itself is the pause. */
 .deck {
   margin-top: 8px;
   overflow: hidden;
@@ -5917,12 +4627,6 @@ a.vs-label:hover {
 .deck-screen {
   position: relative;
   aspect-ratio: 16 / 9;
-  /* Darker than any surface: a lens, not a card. Token-derived, not re-typed —
-     but deriving it from `--color-paper` was only ever correct while paper was
-     near-black: the same 45% mix over the stock lands on #6e6c68, mid-grey mud
-     behind a video. A letterbox is media, not a theme surface. The tape player
-     renders on the REPORT, so this is one of exactly two rules in this range
-     the room pin must not reach, and its light value does apply. */
   background: var(--color-lens);
 }
 .deck-el {
@@ -5930,8 +4634,6 @@ a.vs-label:hover {
   inset: 0;
   width: 100%;
   height: 100%;
-  /* NOT mirrored, unlike the live self-view: the recorded file was never
-     flipped, so mirroring playback would reverse the real room. */
   object-fit: contain;
   cursor: pointer;
 }
@@ -5960,11 +4662,6 @@ a.vs-label:hover {
 }
 .deck-poster:disabled {
   cursor: wait;
-  /* 0.85 rather than the shared `--disabled-opacity`, which is 0.7. It is the
-     only disabled state in the file that is not 0.7 and nobody recorded why,
-     so it is very likely an oversight — but correcting it would move DARK, and
-     that is not this change's to make. Left exactly as it was; worth its own
-     commit if the inconsistency is real. */
   opacity: 0.85;
 }
 .deck-poster .spinner {
@@ -6009,7 +4706,6 @@ a.vs-label:hover {
 .deck-skip:hover {
   color: var(--color-ember-glow);
 }
-/* The hit target is 14px tall; the drawn track is the 4px line inside it. */
 .deck-track {
   position: relative;
   flex: 1 1 120px;
@@ -6023,10 +4719,6 @@ a.vs-label:hover {
   right: 0;
   left: 0;
   height: 4px;
-  /* A 4px slab, not a divider, and the second of the two rules in this range
-     the pin must not reach — the deck is on the report. Its light value matters
-     more than its dark one: a hairline value under the ember fill would let the
-     unfilled remainder outweigh the part that has played. */
   background: var(--track-strong);
   transform: translateY(-50%);
 }
@@ -6071,8 +4763,6 @@ a.vs-label:hover {
   animation: g-blinkrec 1.4s ease-in-out infinite;
 }
 
-/* ── the coach's notes ─────────────────────────────────────────────────────
-   Numbered, because "do 01 first" is a plan and a bullet list is a shrug. */
 .coach {
   padding: 13px 15px 14px;
   border: 1px solid var(--color-line);
@@ -6124,9 +4814,6 @@ a.vs-label:hover {
   color: var(--color-ink-soft);
 }
 
-/* ── model answers ─────────────────────────────────────────────────────────
-   Cards you can lift: the labelled angle, the take under an oversized quote
-   mark, and a copy control — a model answer exists to be taken away. */
 .answers {
   gap: 10px;
 }
@@ -6173,17 +4860,10 @@ a.vs-label:hover {
   font-size: 31px;
   font-weight: 700;
   line-height: 1;
-  /* The 55% moved out of `opacity` and into the colour. The composite is
-     identical either way, but an alpha leaves the glyph tied to whatever it
-     happens to be sitting on, and on the stock a quote mark has to read as a
-     quiet ink rather than as a washed-out one — 2.4:1 at 31px, decorative, and
-     2.6:1 for the dark equivalent it replaces. `opacity: 1` is stated rather
-     than dropped so the alpha cannot quietly come back. */
   color: color-mix(in srgb, var(--color-ember) 55%, var(--color-paper-raised));
   opacity: 1;
 }
 
-/* Stillness for the seal, same policy as the rest of the room. */
 @media (prefers-reduced-motion: reduce) {
   .dmark-arc,
   .dmark-check {
@@ -6192,65 +4872,26 @@ a.vs-label:hover {
   }
 }
 
-
-
-/* ── the hero, in two columns ───────────────────────────────────────────── */
-
-/* Ratio and gap are the reference's: the headline's track is a hair wider than
-   the diagram's, so the type still leads and the rig reads as its annotation. */
 .grill-root .hero-grid {
   display: grid;
   grid-template-columns: 1.06fr 0.94fr;
   gap: 3.4rem;
   align-items: center;
 }
-/* A grid item's floor is its own content, and this row holds the two widest
-   things on the page — a 520-unit diagram and a thirteen-character headline set
-   in Archivo 800. Without this, either one can set the track's width and take
-   the page sideways with it. */
 .grill-root .hero-grid > * {
   min-width: 0;
 }
 
-/*
- * Half the measure means half the headline. The full-bleed clamp above tops out
- * at 6.4rem, which is wider than a 0.94-share column can hold; the shell's
- * `overflow-x: clip` means that failure is silent — the end of "INTERVIEW"
- * simply stops existing. The ceiling here is sized to land the longest line
- * just inside its own column at the widest layout, which is where the reference
- * puts it too. Paired with the collapse below: same 1024px line, opposite side.
- *
- * Qualified by `.hero` rather than written as a bare `.grill-root .hero-h1`,
- * because a media query adds no specificity: at (0,2,0) this rule would only
- * beat the base one if it happened to be pasted below it, and a block about the
- * hero belongs beside the rest of the hero — above it. Same reasoning, and the
- * same fix, as the `.rv` restatement in the reduced-motion block further down.
- */
 @media (min-width: 1025px) {
   .grill-root .hero .hero-h1 {
     font-size: clamp(2.4rem, 4.4vw, 3.9rem);
   }
 }
 
-/* ── fig. 01, the signal chain ──────────────────────────────────────────────
-   The hero's second column: a session drawn as the path a signal takes. The
-   split down the middle is the product's whole argument — the transcript is
-   scored by one machine, the audio measured by another — so the diagram is
-   animated in the direction the data flows, and the CSS dims whichever stage
-   does not currently have the floor.
-
-   Geometry is the reference's, coordinate for coordinate (see SignalRig): the
-   wires are hand-aligned to the boxes they leave and enter.
-   ────────────────────────────────────────────────────────────────────────── */
-
 .grill-root .rig {
   position: relative;
   overflow: hidden;
   border: 1px solid var(--color-line);
-  /* Raised surface plus a faint ink grid: the diagram is drawn on graph paper,
-     not floated over the page. The second stop sits at the same 1px as the
-     first, so nothing interpolates between them — that `transparent` is a hard
-     edge rather than a fade terminator, and must not take `--keylight-fade`. */
   background-color: var(--color-paper-raised);
   background-image: radial-gradient(
     var(--rig-grid-dot) 1px,
@@ -6258,10 +4899,6 @@ a.vs-label:hover {
   );
   background-size: 22px 22px;
 }
-/* The room's one light, caught in the corner the verdict sits in — and on the
-   press sheet the one place any warmth is permitted in the air at all. It earns
-   that exception only through `--rig-key-blend`: a multiply scorches the corner
-   into the stock instead of lighting it from behind, so nothing here emits. */
 .grill-root .rig::after {
   content: "";
   position: absolute;
@@ -6277,8 +4914,6 @@ a.vs-label:hover {
   );
 }
 
-/* Crop marks. They are what make the panel read as a figure plate rather than a
-   card, which is the entire justification for the "fig. 01" label above it. */
 .grill-root .rig-marks span {
   position: absolute;
   z-index: 2;
@@ -6312,10 +4947,6 @@ a.vs-label:hover {
   border-right: 1px solid var(--rig-mark);
 }
 
-/* Above the glow, which is painted on the panel itself. `flex-wrap` for the same
-   reason `.hero-kick` carries it: at the narrowest width the plate loses its
-   gutters and these two mono strings no longer fit on one line — wrapping
-   between the spans is a second row, wrapping inside them is a mess. */
 .grill-root .rig-head,
 .grill-root .rig-foot {
   position: relative;
@@ -6363,8 +4994,6 @@ a.vs-label:hover {
   height: auto;
 }
 
-/* ── the plate's type ───────────────────────────────────────────────────── */
-
 .grill-root .rig text {
   font-family: var(--font-mono);
   text-transform: uppercase;
@@ -6406,9 +5035,6 @@ a.vs-label:hover {
   letter-spacing: -0.01em;
   fill: var(--color-ink);
 }
-/* These are the only figures on the page that change while you are looking at
-   them: proportional digits would shuffle the wpm readout sideways on every
-   tick and make the score breathe as it rolls. */
 .grill-root .rig .nv,
 .grill-root .rig .score {
   font-variant-numeric: tabular-nums;
@@ -6423,15 +5049,10 @@ a.vs-label:hover {
   fill: var(--color-ember);
 }
 
-/* ── boxes, wires, and what travels along them ──────────────────────────── */
-
 .grill-root .rig .nbox {
   fill: var(--color-surface-well);
   stroke: var(--rig-box-stroke);
 }
-/* Only the two processors are lit. The heat is what says "running", and putting
-   it on the input or the output would flatten the distinction the figure is
-   drawn to make. */
 .grill-root .rig .nbox.hot {
   stroke: var(--rig-box-hot-stroke);
 }
@@ -6440,16 +5061,6 @@ a.vs-label:hover {
   stroke: var(--rig-wire);
   stroke-width: 1.5;
 }
-/*
- * A travelling pulse is one short dash on a long gap, walked down the wire by
- * `g-draw` — the same `stroke-dashoffset: 0` keyframe the report's trend line
- * draws itself with, so no near-duplicate is added here. It has no `from`, so
- * the 95 below is what it animates out of.
- *
- * The phase machine switches opacity rather than the animation: pausing an
- * animation would freeze a dash mid-wire, and restarting one would snap it back
- * to the top. Only the visibility of the pulse should change with the phase.
- */
 .grill-root .rig .flow {
   fill: none;
   stroke: var(--color-ember);
@@ -6467,16 +5078,6 @@ a.vs-label:hover {
   animation-delay: -1.7s;
 }
 
-/*
- * Mic level. Each bar's resting height is drawn into the rect itself (see
- * RIG_EQ), and `g-wave` only scales about it — the same bargain `.wave` makes
- * further down the page, and the reason the rest value is geometry rather than
- * a base `transform`: `g-wave` declares `transform` at both ends, and a
- * keyframe's declared value outranks the element's own for the whole run, so a
- * `scaleY()` underneath it would never be painted. Switch motion off and the
- * row is still a level meter reading five different levels, not five identical
- * sticks.
- */
 .grill-root .rig .eq {
   fill: var(--color-ember);
   transform-box: fill-box;
@@ -6485,9 +5086,6 @@ a.vs-label:hover {
   animation-delay: calc(var(--n) * -0.14s);
 }
 
-/* Relevance, depth, structure. The three fills carry different numbers, so the
-   scale is per-bar; the phase machine holds them at zero until the words have
-   actually been scored, which is what makes the fill read as the scoring. */
 .grill-root .rig .jt {
   fill: var(--track-unfilled);
 }
@@ -6507,7 +5105,6 @@ a.vs-label:hover {
   transform: scaleX(0.5);
 }
 
-/* The pitch trace, drawn by the same keyframe as the pulses at a slower pace. */
 .grill-root .rig .pl {
   fill: none;
   stroke: var(--color-ember);
@@ -6518,9 +5115,6 @@ a.vs-label:hover {
   animation: g-draw 2.8s linear infinite;
 }
 
-/* The stamp lands rather than fades: held oversized and invisible until the
-   verdict, then dropped onto the plate. The overshoot in the second curve is
-   the ink hitting paper. */
 .grill-root .rig .stampline {
   fill: none;
   stroke: var(--color-ember);
@@ -6541,12 +5135,6 @@ a.vs-label:hover {
     transform 0.42s cubic-bezier(0.2, 1.6, 0.35, 1);
 }
 
-/* ── the phase machine, as the eye sees it ──────────────────────────────────
-   `data-phase` is the one attribute React writes; everything below is the
-   diagram reacting to it. Each of these selectors carries the attribute, so
-   they out-specify the per-element defaults above without !important.
-   ────────────────────────────────────────────────────────────────────────── */
-
 .grill-root .rig .gp {
   transition: opacity 0.55s cubic-bezier(0.19, 1, 0.22, 1);
 }
@@ -6562,9 +5150,6 @@ a.vs-label:hover {
 .grill-root .rig[data-phase="judge"] .gv {
   opacity: var(--rig-dim-soft);
 }
-/* Never fully receded: the verdict has to keep citing the words it came from.
-   Not "never fully dark" — on the press sheet these dims run toward the stock
-   rather than toward black, which is why their light values go up, not down. */
 .grill-root .rig[data-phase="verdict"] .gyou {
   opacity: var(--rig-dim-cite);
 }
@@ -6589,37 +5174,15 @@ a.vs-label:hover {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  /*
-   * The shared block near the bottom of this file already collapses every
-   * duration to nothing; what it cannot do is decide what the resting frame
-   * should be. For the rig that frame is a finished session — SignalRig holds
-   * `data-phase="verdict"` and the final figures when it is not running, so the
-   * score, the three bars and the stamp are already where they belong, and the
-   * five mic bars rest at the five heights they are drawn at. Only the two
-   * dashed strokes need saying: the shared block shortens the animation but
-   * does not hold its end state, so they fall back to the start of a dash
-   * pattern — a stub of a line rather than a trace.
-   */
   .grill-root .rig .pl {
     stroke-dasharray: none;
     stroke-dashoffset: 0;
   }
-  /* The pulses have nothing to show when nothing is moving, and a 5-unit dash
-     parked on a wire is a speck rather than a diagram. The wires underneath
-     them stay. */
   .grill-root .rig .flow {
     display: none;
   }
 }
 
-/* ── the rig, narrowed ──────────────────────────────────────────────────── */
-
-/* 1024px is where the rest of the page already collapses, and it is also the
-   width below which the two columns stop working on their own terms: the
-   headline runs out of measure and the diagram, at a 0.94 share of it, is down
-   to ~330px. Stacked, the diagram gets a width close to the one it was drawn
-   at — and is capped there, because a 900px-wide rig is a poster: every label
-   in it was tuned at 9.5px and would land near 17px. */
 @media (max-width: 1024px) {
   .grill-root .hero-grid {
     grid-template-columns: 1fr;
@@ -6630,11 +5193,6 @@ a.vs-label:hover {
   }
 }
 
-/* At 390px the wrap's gutters are a tenth of everything the diagram has to work
-   with, and the SVG scales to whatever it is given — taking the gutters back is
-   worth about 8% on every label in it. The side rules go with them, so the
-   plate reads as a band across the page rather than a card with its edges cut
-   off. */
 @media (max-width: 640px) {
   .grill-root .rig {
     max-width: none;
@@ -6642,15 +5200,6 @@ a.vs-label:hover {
     border-inline: 0;
   }
 }
-/* ── the live session simulation ────────────────────────────────────────────
-   The centrepiece, and the only claim on the page a visitor can check for
-   themselves: the label says "not a video — real DOM, running live", so all of
-   this has to be real elements written to on a timer. Nothing here is an image,
-   a canvas or a sprite sheet.
-
-   `SimZone` in Landing.tsx owns *when* things move. This owns what moves and
-   what it looks like when it stops.
-   ────────────────────────────────────────────────────────────────────────── */
 
 .grill-root .sim-label {
   display: flex;
@@ -6681,8 +5230,6 @@ a.vs-label:hover {
   background: var(--color-paper-raised);
 }
 
-/* ── the frame's chrome ─────────────────────────────────────────────────── */
-
 .grill-root .sim-head {
   display: flex;
   flex-wrap: wrap;
@@ -6697,7 +5244,6 @@ a.vs-label:hover {
   text-transform: uppercase;
   color: var(--color-ink-soft);
 }
-/* Shared with the rig's header, which restates only the size. */
 .grill-root .rec {
   display: inline-flex;
   align-items: center;
@@ -6712,23 +5258,16 @@ a.vs-label:hover {
   animation: g-blinkrec 1.5s ease-in-out infinite;
 }
 
-/* 1.5fr/1fr: the transcript needs a measure to break on, the meters need only
-   enough room for four two-digit numbers and their units. */
 .grill-root .sim-body {
   display: grid;
   grid-template-columns: 1.5fr 1fr;
   min-height: 330px;
 }
-/* `min-width: 0` because a grid track's default `auto` minimum is the widest
-   word in it — without this the transcript refuses to wrap and pushes the page
-   sideways instead. */
 .grill-root .sim-main {
   min-width: 0;
   padding: 1.6rem 1.6rem 1.8rem;
   border-right: 1px solid var(--color-line);
 }
-
-/* ── the question, typed ────────────────────────────────────────────────── */
 
 .grill-root .sim-q .qk {
   font-family: var(--font-mono);
@@ -6737,9 +5276,6 @@ a.vs-label:hover {
   text-transform: uppercase;
   color: var(--color-ink-muted);
 }
-/* The `min-height` is the whole reason the frame does not jolt: it reserves the
-   two lines the finished question will need, so the answer below it does not
-   get shoved down a line at a time while the question types itself. */
 .grill-root .sim-q .qt {
   min-height: 2.4em;
   margin-top: 0.55rem;
@@ -6750,12 +5286,6 @@ a.vs-label:hover {
   letter-spacing: 0.01em;
   text-transform: uppercase;
 }
-/*
- * `step-end` so the caret snaps rather than eases — a text cursor that fades in
- * and out is a glow, not a cursor. `g-blinkrec` dips to a quarter rather than to
- * nothing, which is close enough to a blink to be worth reusing the app's
- * existing keyframe instead of shipping a near-duplicate of it.
- */
 .grill-root .caret {
   display: inline-block;
   width: 0.5em;
@@ -6765,8 +5295,6 @@ a.vs-label:hover {
   vertical-align: -0.12em;
   animation: g-blinkrec 0.9s step-end infinite;
 }
-
-/* ── the answer, transcribed ────────────────────────────────────────────── */
 
 .grill-root .sim-a {
   margin-top: 1.3rem;
@@ -6787,12 +5315,6 @@ a.vs-label:hover {
   gap: 2px;
   height: 12px;
 }
-/*
- * The same construction as `.wave`: each bar carries its own resting height and
- * the animation only scales about it. The app's `grill-eq` animates `height`
- * instead, and a stilled `grill-eq` collapses all five bars to one number — a
- * flat line under a label that says "transcribed live".
- */
 .grill-root .mic i {
   width: 2.5px;
   height: var(--h);
@@ -6801,21 +5323,11 @@ a.vs-label:hover {
   animation: g-wave 0.9s ease-in-out infinite alternate;
   animation-delay: calc(var(--n) * -0.14s);
 }
-/* Before the mic opens there is no level to show. Grey and low reads as a mic
-   that is on rather than one that is hearing something. `--mic-idle` rather
-   than `--color-ink-muted` itself, because the two part company on light: muted
-   gains contrast against the stock while ember loses it, so borrowing the
-   caption colour here would leave the idle bars louder than the live ones. */
 .grill-root .sim.idle .mic i {
   background: var(--mic-idle);
   transform: scaleY(0.3);
   animation: none;
 }
-/* `min-height` for the same reason as the question's, at the height the
-   finished answer occupies; the rule down the left is the transcript's, so it
-   has to be there before there is a transcript. It rides `--rule-quote`, not
-   `--color-line`: at 2px it is an accent beside a quotation rather than a
-   hairline separating two regions, and the divider is tuned for the other job. */
 .grill-root .sim-a .txt {
   max-width: 60ch;
   min-height: 6.5em;
@@ -6826,22 +5338,9 @@ a.vs-label:hover {
   line-height: 1.95;
   color: var(--color-ink-soft);
 }
-/*
- * `grill-rise` is the app's existing six-pixels-and-fade entrance, which is
- * exactly what the reference's own word-pop did. `both` rather than `forwards`
- * so the span is already at the from-state on the frame it mounts, instead of
- * flashing in at full opacity and then animating.
- */
 .grill-root .sim-a .txt .w {
   animation: grill-rise 0.18s ease-out both;
 }
-/* Boxed, not just coloured: a filler has to be findable in the middle of a
-   paragraph of the same ember-free grey. On dark the hairline alone does that;
-   over cream the same edge reads as an outline round a word rather than as a
-   marked word, so `--fmark-fill` lays a faint ember tint behind it instead of
-   thickening the border — transparent on dark, so nothing there is repainted.
-   The edge joins the shared `--ember-edge` at 40%; the 45% it used to carry was
-   never a distinction worth a value of its own. */
 .grill-root .fmark {
   margin: 0 0.18em;
   padding: 0.05em 0.38em;
@@ -6858,13 +5357,6 @@ a.vs-label:hover {
   color: var(--color-ink-muted);
 }
 
-/* ── the adaptive follow-up ─────────────────────────────────────────────── */
-
-/* Sunk below the raised frame, so the question the answer earned reads as cut
-   out of the transcript rather than stacked on it. On dark the recess is exactly
-   the page colour; on light the page is *lighter* than the frame it sits in, so
-   deriving the fill from `--color-paper` would turn this cut-out into a bump.
-   `--surface-recessed` names the recess instead of borrowing it. */
 .grill-root .sim-follow {
   margin-top: 1.3rem;
   padding: 1rem 1.1rem;
@@ -6875,12 +5367,6 @@ a.vs-label:hover {
     border-color 0.5s cubic-bezier(0.19, 1, 0.22, 1),
     border-left-color 0.5s cubic-bezier(0.19, 1, 0.22, 1);
 }
-/* Both of this box's unearned rules want to be the one token, so that the
-   outline and the bar stay weaker together than the ember `.on` earns. Light
-   takes `--rule-pending` on the outline too; dark cannot follow it there,
-   because the token's dark value is `--color-line-strong` and this outline has
-   always been the plain hairline. Three sides, not the shorthand: `.on` claims
-   the left edge for ember and this selector outranks it. */
 :root[data-theme="light"] .grill-root .sim-follow {
   border-top-color: var(--rule-pending);
   border-right-color: var(--rule-pending);
@@ -6928,14 +5414,10 @@ a.vs-label:hover {
   color: var(--color-ink);
 }
 
-/* ── the four delivery meters ───────────────────────────────────────────── */
-
 .grill-root .sim-side {
   display: flex;
   flex-direction: column;
 }
-/* `grid-auto-rows: 1fr` so the four cells split the column evenly however tall
-   the transcript beside them turns out to be. */
 .grill-root .sim-meters {
   flex: 1;
   display: grid;
@@ -6954,19 +5436,9 @@ a.vs-label:hover {
 .grill-root .smet:nth-child(odd) {
   border-right: 1px solid var(--color-line);
 }
-/* The flash is the only thing tying a number to the word that moved it — the
-   meter lights at the instant its filler or its stall lands in the transcript
-   two columns over. Seven percent, because ember at any real weight stops
-   reading as a highlight and starts reading as an error. */
 .grill-root .smet.hit {
   background: color-mix(in srgb, var(--color-ember) 7%, transparent);
 }
-/* Light joins `--wash-heat-on`, the shared "this one is lit" tint every other
-   surface flashes with, and it is laid at twelve percent rather than seven — a
-   tint block on cream has to be heavier than a wash on black to read at the same
-   strength. Scoped rather than swapped outright because the token's dark value
-   is 8% of `--ember-wash`, the pale glow, not 7% of the ember: adopting it here
-   would repaint dark, which is not the theme being changed. */
 :root[data-theme="light"] .grill-root .smet.hit {
   background: var(--wash-heat-on);
 }
@@ -6990,10 +5462,6 @@ a.vs-label:hover {
   color: var(--color-ink-soft);
 }
 
-/* ── the verdict line ───────────────────────────────────────────────────── */
-
-/* `min-height` holds the row while the status text changes length under it, so
-   the meters above do not breathe in and out as the run narrates itself. */
 .grill-root .sim-verdict {
   display: flex;
   flex-wrap: wrap;
@@ -7008,10 +5476,6 @@ a.vs-label:hover {
   text-transform: uppercase;
   color: var(--color-ink-muted);
 }
-/* The chip has no fill, so its hairline is not separating two regions — it is
-   the whole of the shape. `--edge-control`, which light draws a step stronger
-   than the divider, rather than `--color-line`, which light tunes for adjacency
-   and which would leave an empty chip barely there on the stock. */
 .grill-root .vchip {
   padding: 0.4rem 0.9rem;
   border: 1px solid var(--edge-control);
@@ -7026,13 +5490,6 @@ a.vs-label:hover {
   color: var(--color-ember);
 }
 
-/* ── the progress bar ───────────────────────────────────────────────────── */
-
-/* Three pixels, on the frame's own bottom rule. Any thicker and it competes
-   with the ember down the side of the follow-up. The unrun part of it is
-   `--sim-groove`, not the page colour it happens to equal on dark: paper inside
-   paper-raised is a legible groove at the black end of the scale and nothing at
-   all at the white end, so light has to cut it below the page to keep it. */
 .grill-root .sim-track {
   position: relative;
   height: 3px;
@@ -7047,20 +5504,7 @@ a.vs-label:hover {
   transition: width 0.3s linear;
 }
 
-/* ── the simulation, narrowed ───────────────────────────────────────────── */
-
 @media (max-width: 1024px) {
-  /*
-   * Collapses on the same line as every other grid on this page rather than at
-   * a breakpoint of its own — one reflow for the whole page, not two. It also
-   * happens to be where the split stops working: below this the transcript
-   * falls under about 45 characters and "Longest pause" starts wrapping in a
-   * cell too narrow to hold it.
-   *
-   * Stacked, the divider moves from the left edge to the top edge, same as the
-   * rest of the page, and the meters become a full-width 2×2 under the
-   * transcript — which reads better than a 280px sidebar did.
-   */
   .grill-root .sim-body {
     grid-template-columns: 1fr;
   }
@@ -7084,29 +5528,12 @@ a.vs-label:hover {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  /*
-   * The page-wide reduce block near the bottom of this file stills every
-   * animation here, but "stilled" only lands wherever the last frame happened
-   * to be — an `alternate` bar stops at whichever end it was heading for. Pin
-   * the equaliser to its resting heights outright, so the still frame is a
-   * waveform on purpose rather than by accident.
-   *
-   * Everything else the run drives is a class or an inline width, and the
-   * server already renders the finished session (see SIM_DONE): full question,
-   * full transcript with its fillers boxed, follow-up shown, four meters read
-   * and the bar at 100%.
-   */
   .grill-root .sim .mic i {
     transform: none;
     animation: none;
   }
 }
 
-
-/* ── the simulation's section box ─────────────────────────────────────────
-   No top padding: the hero closed with its own, and the sim reads as the hero's
-   second figure rather than as a new section — the strip's top rule is what ends
-   the run. This owns the box and nothing else. */
 .grill-root .simzone {
   padding: 0 0 4.6rem;
 }
@@ -7114,9 +5541,6 @@ a.vs-label:hover {
   .grill-root .simzone {
     padding-bottom: 3.6rem;
   }
-  /* Both rig rows are `space-between` over two labels, and once the plate goes
-     full-bleed the foot's pair measures nearly the whole 390px — the two ends
-     meet before either would wrap on its own. */
   .grill-root .rig-head,
   .grill-root .rig-foot {
     flex-wrap: wrap;

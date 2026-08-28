@@ -1,20 +1,8 @@
 import type { AnswerScores } from "@repo/types";
 
-/** The rubric, in the order `AnswerScores` declares it. */
 export const DIMENSIONS = ["relevance", "correctness", "structure", "depth", "filler"] as const;
 export type Dimension = (typeof DIMENSIONS)[number];
 
-/**
- * One honest sentence per rubric dimension — the dashboard's readout.
- *
- * Deliberately not an LLM call. The dashboard is force-dynamic and this runs on
- * every page view, and the project runs on free-tier quota; a template naming a
- * dimension we genuinely measured beats a generated sentence we can't afford.
- *
- * `filler` runs the same direction as every other dimension — 10 is crisp, 1 is
- * rambling — so it lands here for the same reason the others do: it is the
- * LOWEST average. It needs no inversion; flipping it would name the wrong habit.
- */
 export const PATTERN: Record<Dimension, string> = {
   relevance:
     "The thing costing you the most is relevance — you answer a near-miss of the question rather than the question itself.",

@@ -19,12 +19,7 @@ export async function POST(req: Request) {
     }
     await repo.setStatus(session_id, "cancelled");
 
-    // The recording stops when the tab navigates away, leaving an open upload
-    // holding real footage. Close it out so what was recorded is playable — a
-    // cancelled interview is still theirs to watch back.
-    await settleUnfinishedVideos(session_id).catch(() => {
-      /* best-effort: the exit must never fail on housekeeping */
-    });
+    await settleUnfinishedVideos(session_id).catch(() => {});
 
     return json({ session_id, status: "cancelled" } satisfies CancelResponse);
   } catch (err) {

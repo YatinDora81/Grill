@@ -1,8 +1,4 @@
 import "server-only";
-/**
- * Speech-to-text via Groq Whisper (Grill §rotation). Groq-only — no alternate
- * STT, so exhaustion surfaces. Returns transcript + word timestamps (§delivery).
- */
 import type { TranscriptWord } from "@repo/types";
 import { config } from "@/lib/env";
 import { serviceUnavailable } from "@/lib/errors";

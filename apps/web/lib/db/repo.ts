@@ -1,14 +1,4 @@
 import "server-only";
-/**
- * Data access. Thin wrappers over the shared Prisma client (@repo/db).
- * HARD RULE #11: every session/report query filters on the authenticated
- * user_id — a user can only ever touch their own data.
- *
- * Soft-delete: a session with `deletedAt` set must be treated as if it never
- * existed for the user — dashboard, reports, media, starring links, and especially
- * the do-not-reuse / weak_spots question lists. Retention sweeps may still see
- * deleted rows; every user-facing read uses `aliveSession` below.
- */
 import { createHash } from "node:crypto";
 import { prisma, Prisma } from "@repo/db";
 import type { Session } from "@repo/db";
@@ -24,10 +14,8 @@ import type {
 
 const json = (v: unknown) => v as Prisma.InputJsonValue;
 
-/** Nested under `session: { … }` or as a session `where` — not soft-deleted. */
 const aliveSession = { deletedAt: null } as const;
 
-// ── Users ─────────────────────────────────────────────────────────
 export function getUserByEmail(email: string) {
   return prisma.user.findUnique({ where: { email } });
 }
@@ -54,18 +42,14 @@ export function updateUserPassword(id: string, passwordHash: string) {
   return prisma.user.update({ where: { id }, data: { passwordHash } });
 }
 
-// ── Sessions (always user-scoped) ─────────────────────────────────
 export interface CreateSessionInput {
   userId: string;
   sourceType: SourceType;
   sourceText: string;
-  /** The user's own name for this interview. */
   name: string;
   role: string | null;
   config: InterviewConfig;
-  /** Set to re-run an earlier session on identical questions. */
   retryOfId?: string | null;
-  /** Set when this interview runs a question-bank set's questions verbatim. */
   questionSetId?: string | null;
 }
 
@@ -85,14 +69,6 @@ export function createSession(input: CreateSessionInput) {
   });
 }
 
-/**
- * Copy a session's questions into a new one, verbatim and in order.
- *
- * New rows (new ids, no answers) carrying the same text: a retry has to be a
- * separate interview with its own answers and its own report, or there's
- * nothing to compare against. Written in one transaction — a half-copied
- * interview would strand the user on a missing question.
- */
 export async function copyQuestionsInto(
   targetSessionId: string,
   sourceSessionId: string,
@@ -114,7 +90,6 @@ export async function copyQuestionsInto(
   return count;
 }
 
-/** The session this one re-runs, if any — user-scoped like everything else. */
 export function getRetryParent(session: { retryOfId: string | null }, userId: string) {
   if (!session.retryOfId) return Promise.resolve(null);
   return prisma.session.findFirst({
@@ -171,13 +146,6 @@ export function getSession(id: string, userId: string) {
   return prisma.session.findFirst({ where: { id, userId, ...aliveSession } });
 }
 
-/**
- * Soft-delete an interview. Rows stay (turns, report, media keys) so retention
- * sweeps can still run; every user-facing read filters `deletedAt: null`.
- *
- * Stars keep the question text but lose the link back — same as a hard delete's
- * SetNull on `turnId` — so the collection doesn't point at a ghost report.
- */
 export async function softDeleteSession(id: string, userId: string): Promise<boolean> {
   return prisma.$transaction(async (tx) => {
     const { count } = await tx.session.updateMany({
@@ -204,31 +172,11 @@ export function setStatus(id: string, status: SessionStatus, errorReason: string
   return prisma.session.update({ where: { id }, data: { status, errorReason } });
 }
 
-// ── Starred questions ─────────────────────────────────────────────
-
-/**
- * The dedupe key for a question.
- *
- * Normalised before hashing so trivial differences don't split one question into
- * two stars: case, surrounding space, and runs of whitespace (a question that
- * came back through a retry can differ by a line break alone).
- */
 export function questionHash(question: string): string {
   const normalized = question.trim().toLowerCase().replace(/\s+/g, " ");
   return createHash("sha256").update(normalized).digest("hex");
 }
 
-/**
- * Star a question, by turn.
- *
- * The text is copied onto the star rather than referenced: Turn cascades away
- * with its Session, and a star that vanished when you deleted the interview it
- * came from would defeat the point of a collection.
- *
- * Upsert, not create: the unique index on (userId, questionHash) does the
- * deduping, so starring the same question again — from a retry, or a double
- * click — is idempotent instead of a 500.
- */
 export function starQuestion(userId: string, turn: { id: string; question: string; questionType: QuestionType }) {
   const hash = questionHash(turn.question);
   return prisma.starredQuestion.upsert({
@@ -240,8 +188,6 @@ export function starQuestion(userId: string, turn: { id: string; question: strin
       questionType: turn.questionType,
       questionHash: hash,
     },
-    // Already starred: leave the original alone, including which turn it came
-    // from. The first time they liked it is the truthful answer.
     update: {},
   });
 }
@@ -255,8 +201,6 @@ export async function listStarredQuestions(userId: string) {
     where: { userId },
     orderBy: { createdAt: "desc" },
     include: {
-      // Soft-deleted sessions still have Turn rows; hide the link so the star
-      // behaves as if that interview never existed.
       turn: {
         select: {
           sessionId: true,
@@ -281,7 +225,6 @@ export async function listStarredQuestions(userId: string) {
   }));
 }
 
-/** Which of these questions are already starred, as a set of hashes. */
 export async function starredHashesFor(userId: string, questions: string[]): Promise<Set<string>> {
   const hashes = questions.map(questionHash);
   const rows = await prisma.starredQuestion.findMany({
@@ -291,7 +234,6 @@ export async function starredHashesFor(userId: string, questions: string[]): Pro
   return new Set(rows.map((r) => r.questionHash));
 }
 
-/** A turn, scoped to its owner (HARD RULE #11) — starring needs both. */
 export function getTurnForUser(turnId: string, userId: string) {
   return prisma.turn.findFirst({
     where: { id: turnId, session: { userId, ...aliveSession } },
@@ -299,9 +241,6 @@ export function getTurnForUser(turnId: string, userId: string) {
   });
 }
 
-// ── Question bank (always user-scoped) ────────────────────────────
-
-/** Same contract as `aliveSession`, for sets. */
 const aliveSet = { deletedAt: null } as const;
 
 export interface CreateQuestionSetInput {
@@ -314,12 +253,6 @@ export interface CreateQuestionSetInput {
   items: { question: string; questionType: QuestionType }[];
 }
 
-/**
- * Persist a fully generated set — the set row and every item, atomically.
- * One transaction because a set with half its questions is not a smaller set,
- * it's a broken one: `count` would disagree with the items, and the "run an
- * interview" path copies items by index and trusts them to be 0..n-1.
- */
 export function createQuestionSetWithItems(input: CreateQuestionSetInput) {
   return prisma.$transaction(async (tx) => {
     const set = await tx.questionSet.create({
@@ -345,11 +278,6 @@ export function createQuestionSetWithItems(input: CreateQuestionSetInput) {
   });
 }
 
-/**
- * The user's sets, newest first, each carrying its live item count and how
- * many interviews have been run on it (soft-deleted interviews excluded — a
- * deleted run should stop counting as practice, same as everywhere else).
- */
 export function listQuestionSets(userId: string) {
   return prisma.questionSet.findMany({
     where: { userId, ...aliveSet },
@@ -376,7 +304,6 @@ export function getQuestionSet(id: string, userId: string) {
   });
 }
 
-/** A set's questions, in reading order. */
 export function getQuestionSetItems(setId: string) {
   return prisma.questionSetItem.findMany({
     where: { setId },
@@ -384,11 +311,6 @@ export function getQuestionSetItems(setId: string) {
   });
 }
 
-/**
- * Soft-delete a set. Interviews already run from it are untouched — they hold
- * their own copies of the questions (see copySetQuestionsInto), so nothing
- * they replay or report on lives in these rows.
- */
 export async function softDeleteQuestionSet(id: string, userId: string): Promise<boolean> {
   const { count } = await prisma.questionSet.updateMany({
     where: { id, userId, ...aliveSet },
@@ -397,10 +319,6 @@ export async function softDeleteQuestionSet(id: string, userId: string): Promise
   return count === 1;
 }
 
-/**
- * Interviews run on this set, newest first — the set page's "your runs" list.
- * Report presence rides along so a completed run can link straight to it.
- */
 export function listSetSessions(setId: string, userId: string) {
   return prisma.session.findMany({
     where: { questionSetId: setId, userId, ...aliveSession },
@@ -415,12 +333,6 @@ export function listSetSessions(setId: string, userId: string) {
   });
 }
 
-/**
- * Copy a set's questions into a session's turns, verbatim and in order — the
- * exact mechanism a retry uses (`copyQuestionsInto`), pointed at the bank.
- * New Turn rows with new ids: the interview owns its copies, so the set can be
- * deleted, re-read or re-run without either side noticing the other.
- */
 export async function copySetQuestionsInto(
   targetSessionId: string,
   setId: string,
@@ -430,9 +342,6 @@ export async function copySetQuestionsInto(
   const { count } = await prisma.turn.createMany({
     data: items.map((q, i) => ({
       sessionId: targetSessionId,
-      // Re-numbered from 0 rather than trusting itemIndex: the room's
-      // "answered everything" check assumes 0-based contiguous turns, and this
-      // is the one place that invariant is cheap to guarantee.
       turnIndex: i,
       question: q.question,
       questionType: q.questionType,
@@ -441,10 +350,7 @@ export async function copySetQuestionsInto(
   return count;
 }
 
-// ── Session video ─────────────────────────────────────────────────
-
 export function createSessionVideo(input: {
-  /** Minted by the caller: the R2 object key embeds it, so it can't be defaulted. */
   id: string;
   sessionId: string;
   key: string;
@@ -454,14 +360,12 @@ export function createSessionVideo(input: {
   return prisma.sessionVideo.create({ data: input });
 }
 
-/** User-scoped (HARD RULE #11): another user's video id is simply not found. */
 export function getSessionVideo(id: string, userId: string) {
   return prisma.sessionVideo.findFirst({
     where: { id, session: { userId, ...aliveSession } },
   });
 }
 
-/** Recordings for a session that never got completed — an upload that died. */
 export function listUnfinishedVideos(sessionId: string) {
   return prisma.sessionVideo.findMany({
     where: { sessionId, completedAt: null, uploadId: { not: null } },
@@ -471,7 +375,6 @@ export function listUnfinishedVideos(sessionId: string) {
 export function completeSessionVideo(id: string) {
   return prisma.sessionVideo.update({
     where: { id },
-    // uploadId cleared: it's spent, and a null is what marks this row settled.
     data: { completedAt: new Date(), uploadId: null },
   });
 }
@@ -480,7 +383,6 @@ export function deleteSessionVideo(id: string) {
   return prisma.sessionVideo.delete({ where: { id } });
 }
 
-/** Playable recordings for a session, oldest first — the replay's timeline. */
 export function listSessionVideos(sessionId: string) {
   return prisma.sessionVideo.findMany({
     where: { sessionId, completedAt: { not: null } },
@@ -488,7 +390,6 @@ export function listSessionVideos(sessionId: string) {
   });
 }
 
-/** The retention sweep's queue: past expiry, object still in R2. */
 export function listExpiredVideos(take = 100) {
   return prisma.sessionVideo.findMany({
     where: { expiresAt: { lt: new Date() } },
@@ -497,14 +398,6 @@ export function listExpiredVideos(take = 100) {
   });
 }
 
-// ── Audio retention ───────────────────────────────────────────────
-
-/**
- * The audio sweep's queue: created before `cutoff` and not yet purged.
- *
- * Oldest first, so a backlog too big for one run drains in age order rather
- * than starving the oldest clips — the ones we most owe a deletion.
- */
 export function listSessionsWithExpiredAudio(cutoff: Date, take = 100) {
   return prisma.session.findMany({
     where: { createdAt: { lt: cutoff }, audioPurgedAt: null },
@@ -514,13 +407,6 @@ export function listSessionsWithExpiredAudio(cutoff: Date, take = 100) {
   });
 }
 
-/**
- * Record that a session's clips are gone, and drop the keys that named them.
- *
- * One transaction: a purge marked but keys left behind would leave the report
- * and replay pointing at objects that 404, and keys cleared without the marker
- * would re-list the session every night forever. Neither half stands alone.
- */
 export function markAudioPurged(sessionId: string) {
   return prisma.$transaction([
     prisma.turn.updateMany({
@@ -534,38 +420,10 @@ export function markAudioPurged(sessionId: string) {
   ]);
 }
 
-// ── Report queue ──────────────────────────────────────────────────
-
-/**
- * How long a claim holds. Must comfortably exceed the worst-case build (two LLM
- * passes, each up to 7 key-rotation attempts, plus a cold Render acoustics
- * service) — a lease that expires mid-build invites a second worker in.
- */
 export const REPORT_LEASE_MS = 6 * 60_000;
 
-/** Past this many claims a session is failed out rather than retried forever. */
 export const MAX_REPORT_ATTEMPTS = 5;
 
-/**
- * Try to take the build lease on one session. Returns the session on success,
- * null if someone else holds it, it's already built, or it's out of attempts.
- *
- * The whole no-double-processing guarantee lives in this one statement.
- * `updateMany` compiles to a single `UPDATE ... WHERE`, which Postgres executes
- * atomically: concurrent callers serialise on the row, and only the one whose
- * WHERE still matches gets count === 1. The loser sees 0 and walks away.
- *
- * Deliberately NOT raw SQL. Tables live in the `ai_interview` schema (packages/db
- * derives it from the URL) and @prisma/adapter-pg never sets search_path, so a
- * hand-written `UPDATE sessions` would fail with "relation does not exist" —
- * and there is no other raw SQL here to have taught us that. Going through the
- * query engine gets the schema qualification for free.
- *
- * Not user-scoped, and it's the one exception to HARD RULE #11 in this file:
- * the worker acts for the system, not a user, and the session id comes from the
- * queue rather than a request. Every caller that IS user-facing must have
- * checked ownership before getting here.
- */
 export async function claimReportLease(sessionId: string): Promise<Session | null> {
   const now = new Date();
   const { count } = await prisma.session.updateMany({
@@ -574,7 +432,6 @@ export async function claimReportLease(sessionId: string): Promise<Session | nul
       ...aliveSession,
       status: "generating_report",
       reportAttempts: { lt: MAX_REPORT_ATTEMPTS },
-      // Free, or the previous holder's lease has run out (it died).
       OR: [{ reportLeaseUntil: null }, { reportLeaseUntil: { lt: now } }],
     },
     data: {
@@ -586,7 +443,6 @@ export async function claimReportLease(sessionId: string): Promise<Session | nul
   return prisma.session.findUnique({ where: { id: sessionId } });
 }
 
-/** Hand the lease back without finishing — the next pass may pick it straight up. */
 export function releaseReportLease(sessionId: string) {
   return prisma.session.update({
     where: { id: sessionId },
@@ -594,20 +450,6 @@ export function releaseReportLease(sessionId: string) {
   });
 }
 
-/**
- * Sessions the queue has quietly given up on.
- *
- * `generating_report` with the attempts spent is a state nothing can leave on
- * its own: `claimReportLease` and `listPendingReportSessions` both require
- * `attempts < MAX`, so the row is invisible to every worker while its status
- * still promises a report is coming. The build's own catch normally fails such a
- * session out, but it only runs if the build *threw* — one killed mid-flight
- * (the function timing out is the common way) never reaches it, and a re-queue
- * of an already-failed session walks straight back in.
- *
- * These are those rows, and the sweep exists to give them the ending the build
- * never got to write.
- */
 export function listStrandedReportSessions(take = 25) {
   const now = new Date();
   return prisma.session.findMany({
@@ -624,12 +466,6 @@ export function listStrandedReportSessions(take = 25) {
   });
 }
 
-/**
- * Sessions waiting on a report, oldest first.
- *
- * Leased rows are excluded rather than skipped later: this is what stops a
- * sweep from handing out work another run is still holding.
- */
 export function listPendingReportSessions(take = 25) {
   const now = new Date();
   return prisma.session.findMany({
@@ -688,7 +524,6 @@ export function recordAnswer(
     transcript: string;
     transcriptWords?: TranscriptWord[] | null;
     answerScores: AnswerScores;
-    /** Where this answer sits in the session recording, if there was one. */
     videoId?: string | null;
     videoOffsetMs?: number | null;
   },
@@ -697,9 +532,6 @@ export function recordAnswer(
     where: { sessionId_turnIndex: { sessionId, turnIndex } },
     data: {
       audioKey: data.audioKey ?? undefined,
-      // `?? undefined` throughout: an absent value must leave the column alone,
-      // never null it out. A retry of a failed submit can arrive without the
-      // video fields, and it must not erase the offsets the first one wrote.
       videoId: data.videoId ?? undefined,
       videoOffsetMs: data.videoOffsetMs ?? undefined,
       transcript: data.transcript,
@@ -709,7 +541,6 @@ export function recordAnswer(
   });
 }
 
-// ── Reports ───────────────────────────────────────────────────────
 export interface CreateReportInput {
   sessionId: string;
   overallScore: number;
@@ -725,11 +556,6 @@ export interface CreateReportInput {
   raw: unknown;
 }
 
-/**
- * Upsert, not create: `Report.sessionId` is @unique, and /end can legitimately
- * re-run for a session (interrupted report build, stale-status retry). A plain
- * create would throw P2002 on the second pass and strand the session.
- */
 export function createReport(input: CreateReportInput) {
   const fields = {
     overallScore: input.overallScore,
@@ -755,26 +581,12 @@ export function getReportBySession(sessionId: string) {
   return prisma.report.findUnique({ where: { sessionId } });
 }
 
-/** Report for a session, only if the session belongs to this user. */
 export async function getReportForUser(sessionId: string, userId: string) {
   const session = await getSession(sessionId, userId);
   if (!session) return null;
   return getReportBySession(sessionId);
 }
 
-// ── Dashboard (user-scoped) ───────────────────────────────────────
-/**
- * Every question this user has already been asked, newest first. Feeds the
- * do-not-reuse list when "repeat questions" is off.
- *
- * Soft-deleted interviews are omitted entirely — deleting an interview means
- * those questions may be asked again (as if that session never happened).
- *
- * Capped: someone practising weekly racks up hundreds of questions, and the
- * whole list would be pasted into every prompt — that's real tokens on every
- * turn, for questions they last saw months ago. The recent ones are the ones
- * they'd actually notice repeating.
- */
 export async function listAskedQuestions(userId: string, take = 60): Promise<string[]> {
   const turns = await prisma.turn.findMany({
     where: { session: { userId, ...aliveSession } },
@@ -847,7 +659,6 @@ export function listUserSessions(userId: string, take = 10) {
   });
 }
 
-/** Scores and dates, oldest first — what a page needs to say "how you're doing". */
 export function listUserReports(userId: string) {
   return prisma.report.findMany({
     where: { session: { userId, ...aliveSession } },
@@ -856,22 +667,6 @@ export function listUserReports(userId: string) {
   });
 }
 
-/**
- * The same list plus what the dashboard's per-answer filler figure reads.
- *
- * Its own function rather than a wider `listUserReports`: delivery_metrics is a
- * whole JSON blob per report, and /profile reads nothing but the score — it
- * would be paying to transfer every session's metrics to render an average.
- *
- * Ordered by SESSION date, not report date. Report building is an async queue
- * with leases and retries, so a session sat on Monday whose first build failed
- * and was swept up on Wednesday gets a report row created after Tuesday's
- * session. Everything the dashboard says directionally reads this order —
- * "climbed from X to Y", "since your first session", the sparkline, and the
- * last-7-days count — so ordering by build time would tell a user they improved
- * backwards. `Session.createdAt` is also the only date the UI ever shows against
- * a session, so this keeps the prose and the list agreeing.
- */
 export function listUserReportsWithDelivery(userId: string) {
   return prisma.report.findMany({
     where: { session: { userId, ...aliveSession } },
@@ -885,18 +680,8 @@ export function listUserReportsWithDelivery(userId: string) {
   });
 }
 
-// An empty transcript is not an answer. deliveryService counts fillers
-// only for turns with text, so counting the empty ones here would inflate
-// the denominator alone and report fewer fillers per answer than there were.
 const answeredTurn = { transcript: { not: null }, NOT: { transcript: "" } };
 
-/**
- * How many turns in this session were actually answered — the denominator for
- * anything the report states as a session total.
- *
- * Filtered through the session rather than by `sessionId` alone so a stray id
- * can never count someone else's interview, or a soft-deleted one.
- */
 export function countAnsweredTurns(userId: string, sessionId: string) {
   return prisma.turn.count({
     where: {
@@ -907,8 +692,6 @@ export function countAnsweredTurns(userId: string, sessionId: string) {
   });
 }
 
-/** Where an unfinished interview was left: its config, its answered turns, and
- *  the newest turn's timestamp. */
 export function getSessionProgress(userId: string, sessionId: string) {
   return prisma.session.findFirst({
     where: { id: sessionId, userId, ...aliveSession },
@@ -938,10 +721,6 @@ export async function listRecentAnswerScores(userId: string, take = 120): Promis
     select: { answerScores: true },
   });
 
-  // answer_scores is an opaque JSON column, so nothing about its shape is
-  // guaranteed at this boundary — an unscored or half-written turn drops out
-  // rather than poisoning the average with NaN. Every key is checked, not just
-  // the first: the caller averages all five independently.
   return turns.flatMap((t) => {
     const s = t.answerScores as unknown as AnswerScores | null;
     if (!s || RUBRIC_KEYS.some((k) => typeof s[k] !== "number")) return [];
@@ -960,7 +739,6 @@ export async function listRecentAnswerScores(userId: string, take = 120): Promis
  * stored or looked up, tokens expire, and they are single-use.
  */
 
-/** Stores the digest only — the caller keeps the raw token for the email. */
 export function createPasswordResetToken(input: {
   userId: string;
   tokenHash: string;
@@ -972,15 +750,6 @@ export function createPasswordResetToken(input: {
   });
 }
 
-/**
- * Look up a reset token by its digest.
- *
- * Never by the raw token: nothing raw is in the table, so there is nothing to
- * match against — and that is the property a database leak relies on.
- *
- * Expiry and used-ness are returned rather than filtered so the caller decides;
- * every rejection reason ends in the same generic error either way.
- */
 export function findPasswordResetToken(
   tokenHash: string,
 ): Promise<{ id: string; userId: string; expiresAt: Date; usedAt: Date | null } | null> {
@@ -990,16 +759,6 @@ export function findPasswordResetToken(
   });
 }
 
-/**
- * Atomically marks the token used. Returns false if another caller already did.
- *
- * `updateMany` compiles to a single `UPDATE ... WHERE id = ? AND used_at IS NULL`,
- * which Postgres executes atomically: concurrent callers serialise on the row and
- * only one gets count === 1. A read-then-write is the bug this function exists to
- * prevent — two submissions of the same link (a double click, or an email
- * scanner following it first) would both see `usedAt: null`, both pass, and the
- * "single use" guarantee would be decoration.
- */
 export async function consumePasswordResetToken(id: string): Promise<boolean> {
   const { count } = await prisma.passwordResetToken.updateMany({
     where: { id, usedAt: null },
@@ -1008,20 +767,12 @@ export async function consumePasswordResetToken(id: string): Promise<boolean> {
   return count === 1;
 }
 
-/**
- * Belt-and-braces after a successful reset: kills every other outstanding token.
- *
- * Someone who asked for three links and used the newest must not be left with two
- * that still work — most reset abuse starts with an old link found in a mailbox.
- */
 export async function invalidateUserResetTokens(userId: string): Promise<void> {
   await prisma.passwordResetToken.updateMany({
     where: { userId, usedAt: null },
     data: { usedAt: new Date() },
   });
 }
-
-// ── Report shares ─────────────────────────────────────────────────
 
 export function upsertReportShare(sessionId: string, tokenHash: string): Promise<{ id: string }> {
   return prisma.reportShare.upsert({

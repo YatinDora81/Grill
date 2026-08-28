@@ -1,7 +1,6 @@
 import { config } from "@/lib/env";
 import { ProviderError } from "./keyPool";
 
-/** fetch with an AbortController timeout so a hung request rotates (§rotation). */
 export async function fetchWithTimeout(
   url: string,
   init: RequestInit = {},
@@ -24,14 +23,11 @@ function parseRetryAfterMs(res: Response): number | undefined {
   return undefined;
 }
 
-/** Throw a ProviderError (with status) for non-2xx so the pool can classify it. */
 export async function ensureOk(res: Response, provider: string): Promise<Response> {
   if (res.ok) return res;
   let detail = "";
   try {
     detail = (await res.text()).slice(0, 500);
-  } catch {
-    /* ignore */
-  }
+  } catch {}
   throw new ProviderError(res.status, `${provider} ${res.status}: ${detail}`, parseRetryAfterMs(res));
 }

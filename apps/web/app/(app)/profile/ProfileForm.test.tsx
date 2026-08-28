@@ -2,12 +2,6 @@ import { test, expect, mock, beforeEach } from "bun:test";
 import { render, fireEvent, waitFor } from "@testing-library/react";
 import type { User } from "@repo/types";
 
-/**
- * Queries come from `render()`, never `screen`: test/setup.ts imports
- * @testing-library/react before registering happy-dom, so `screen` is bound to a
- * document that doesn't exist yet and throws on every query.
- */
-
 const router = {
   refresh: mock(() => {}),
   push: mock(() => {}),

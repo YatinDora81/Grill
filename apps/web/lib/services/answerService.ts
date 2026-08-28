@@ -13,16 +13,10 @@ export interface AnswerInput {
   transcript: string;
   words?: TranscriptWord[] | null;
   audioKey?: string | null;
-  /** Which session recording this answer is in, and where. */
   videoId?: string | null;
   videoOffsetMs?: number | null;
 }
 
-/**
- * Shared per-answer logic (Grill §hot loop): score the answer, persist the
- * turn, and — unless the question count is reached — generate the next question.
- * Conversation memory is rebuilt from the DB each turn (restart-proof).
- */
 export async function processAnswer(input: AnswerInput): Promise<AnswerResponse> {
   const { session, turnIndex } = input;
 
@@ -50,20 +44,6 @@ export async function processAnswer(input: AnswerInput): Promise<AnswerResponse>
     videoOffsetMs: input.videoOffsetMs ?? null,
   });
 
-  /**
-   * The interview is over: queue the report and say so.
-   *
-   * Enqueueing HERE, not in /end, is what makes the report unloseable. Status
-   * `generating_report` with no report row IS the queue, so once this returns
-   * the sweep can always find the session — even if the client never calls
-   * /end, the tab dies on the way, or the enqueue request itself fails. /end
-   * only makes it *fast*; this makes it *certain*.
-   *
-   * There are two ways an interview can end (the count is reached, or a retry
-   * runs out of copied questions) and both come through here — keying the
-   * enqueue off `answered >= numQuestions` instead would strand every retry
-   * that took the second exit.
-   */
   const finish = async (): Promise<AnswerResponse> => {
     await repo.setStatus(session.id, "generating_report");
     return {
@@ -82,18 +62,9 @@ export async function processAnswer(input: AnswerInput): Promise<AnswerResponse>
   const turns = await repo.getTurns(session.id);
   const nextIndex = turnIndex + 1;
 
-  // A retry's questions were copied up front and must not change — the whole
-  // point is that both runs face identical material, so generating here would
-  // destroy the comparison. Just hand back the one already sitting there.
-  // A question-set interview is the same shape for the same reason: its turns
-  // ARE the set, copied verbatim at start, and the promise to the user is
-  // "an interview on exactly these questions" — generating one here would
-  // break it, so it takes the same fixed path.
   if (session.retryOfId || session.questionSetId) {
     const existing = turns.find((t) => t.turnIndex === nextIndex);
     if (!existing) {
-      // Fewer copied questions than num_questions says: trust the questions,
-      // not the count, and end the run rather than inventing one.
       return finish();
     }
     return {

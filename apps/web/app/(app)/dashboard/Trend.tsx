@@ -2,46 +2,17 @@
 
 import { useState } from "react";
 
-/**
- * Score over time. One series, so: one hue, no legend — the card title names it.
- * The line draws itself once on load, the latest point stays lit with its number
- * showing, because that is the one that says where you stand now.
- *
- * Every other point gives up its number on hover: a guide line, a lit dot and
- * the score. Hover, not always-on labels — eight numbers stacked along a
- * 640-unit line collide, and the shape of the line is the point of the chart.
- *
- * The y-domain is pinned to the full 0–100 score range, never the data's own
- * min/max: an auto-domain would turn a 71→73 wobble into a triumphant climb.
- *
- * Straight segments, not the smoothed béziers this used to draw. A session is a
- * discrete event; a curve implies the score was somewhere in between on days you
- * didn't sit one, and the overshoot-free spline was still inventing a shape
- * between two points that has no reading.
- */
 const W = 700;
 const H = 200;
-/** Plot box. The left gutter carries the score axis, the bottom strip the session labels. */
 const L = 44;
 const R = 686;
 const TOP = 18;
 const BASE = 168;
 
-/**
- * Gridlines at the verdict band edges — the same 40 / 60 / 80 `scoreBand` splits
- * on — rather than at round tenths. It makes a crossing mean something: the line
- * clearing 60 is the run where the verdict stopped being "shaky".
- */
 const GRID = [40, 60, 80];
 
 const yOf = (score: number) => BASE - (Math.max(0, Math.min(100, score)) / 100) * (BASE - TOP);
 
-/**
- * Keep a label inside the viewBox.
- *
- * Floored at 12 vertically so a perfect 100 — which sits at the top of the plot
- * — doesn't put its own ascenders outside the box and lose the top of the digits.
- */
 const labelY = (y: number) => Math.max(12, y - 12);
 const labelX = (x: number) => Math.max(L, Math.min(R, x));
 
@@ -53,8 +24,6 @@ export function Trend({ scores }: { scores: number[] }) {
     yOf(s),
   ]);
 
-  // Rendered only when there are at least two points — one score is not a
-  // trend. After the hooks, so the hook order never depends on the data.
   if (scores.length < 2) return null;
 
   const line = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${p[0]} ${p[1]}`).join(" ");
@@ -63,17 +32,6 @@ export function Trend({ scores }: { scores: number[] }) {
   const last = pts[lastIndex]!;
   const area = `${line} L ${last[0]} ${BASE} L ${first[0]} ${BASE} Z`;
 
-  /**
-   * Nearest point to the pointer, horizontally.
-   *
-   * The SVG scales to its container, so client pixels have to come back through
-   * the viewBox before they mean anything: `getBoundingClientRect` gives the
-   * rendered width, and W is what the coordinates below are drawn in.
-   *
-   * Bound to pointerdown as well as pointermove. A finger that taps without
-   * travelling fires no pointermove whatsoever — move-only is why this chart
-   * read as dead on a phone while working perfectly under a mouse.
-   */
   function onMove(e: React.PointerEvent<SVGSVGElement>) {
     const rect = e.currentTarget.getBoundingClientRect();
     if (!rect.width) return;
@@ -85,20 +43,10 @@ export function Trend({ scores }: { scores: number[] }) {
     setHover(nearest);
   }
 
-  // The guide line and the lit dot follow the pointer everywhere, the latest
-  // point included. Gating all three of them on one variable left the whole
-  // right-hand end of the chart inert — and that is exactly where the eye goes,
-  // because the brightest dot and the only standing number live there. With two
-  // scores on record it was half the card giving no answer at all.
-  //
-  // Only the *label* still steps back at the last point: it already carries a
-  // permanent one, and a second would print straight on top of it.
   const marked = hover !== null ? pts[hover]! : null;
   const active = hover !== null && hover !== lastIndex ? hover : null;
   const activePt = active !== null ? pts[active]! : null;
 
-  // The midpoint tick is dropped below five sessions: at three or four points
-  // it lands close enough to "Session 1" to read as a second label for it.
   const midLabel = scores.length >= 5 ? `Session ${Math.ceil(scores.length / 2)}` : null;
 
   return (
@@ -108,27 +56,12 @@ export function Trend({ scores }: { scores: number[] }) {
       onPointerDown={onMove}
       onPointerMove={onMove}
       onPointerLeave={(e) => {
-        // A finger fires pointerleave the moment it lifts, so honouring it on
-        // touch would flash the number and snatch it away again — the tap reads
-        // as a chart that ignored you. Only a pointer that can genuinely hover
-        // gets to clear; a tapped read-out stands until the next tap.
         if (e.pointerType !== "touch") setHover(null);
       }}
-      // `touch-action: pan-y pinch-zoom` means a vertical swipe that began on
-      // the chart cancels the pointer. Without this the read-out would survive
-      // a scroll and sit there pointing at nothing.
       onPointerCancel={() => setHover(null)}
       role="img"
       aria-label={`Score trend across ${scores.length} interviews, oldest to newest: ${scores.join(", ")}`}
     >
-      {/* Tinted toward the series hue rather than the border grey: a `line`
-          gridline over the card surface is about 1.3:1 and reads as nothing at
-          all, while it still sits well under the dots and the numbers.
-
-          A token rather than `stroke-ember/25`, because the hue the tint is cut
-          from is not the hue the series is drawn in once the ink ramp inverts —
-          `--chart-guide` follows `--ember-wash`, which is the top of the ramp on
-          dark and the spot plate on light. */}
       {GRID.map((score) => (
         <line
           key={score}
@@ -152,11 +85,7 @@ export function Trend({ scores }: { scores: number[] }) {
         </text>
       ))}
 
-      {/* The area wash needs MORE of the plate on the sheet than off it: a red
-          fading over cream has nowhere to fade to, so 10% that reads as heat on
-          black reads as a smudge unless the density comes up with it. */}
       <path d={area} className="fill-(--chart-area)" />
-      {/* pathLength="1" so one dash covers the line whatever its real length. */}
       <path
         d={line}
         className="trend-draw fill-none stroke-ember [stroke-linecap:round] [stroke-linejoin:round] [stroke-width:2]"
@@ -167,22 +96,12 @@ export function Trend({ scores }: { scores: number[] }) {
         <line x1={marked[0]} x2={marked[0]} y1={TOP} y2={BASE} className="trend-guide" />
       ) : null}
 
-      {/* `slice(0, -1)` already excludes the latest point, so keying these off
-          `hover` rather than `active` cannot double-draw it — the index simply
-          never matches. */}
       {pts.slice(0, -1).map((p, i) => (
         <circle
           key={i}
           cx={p[0]}
           cy={p[1]}
           r={hover === i ? 4 : 3.2}
-          /* The resting dot is knocked out of the CARD it is drawn on, not out
-             of the page. `fill-paper` only ever agreed with the card by
-             accident — five points of near-black apart on dark, the whole width
-             of the elevation step on the sheet. A token rather than swapping the
-             class to `fill-paper-raised`, because that would have been a change
-             to the DARK chart smuggled in with the light one; `--dot-rest` keeps
-             dark on the exact fill it has today. */
           className={
             hover === i
               ? "fill-ember stroke-ember [stroke-width:1.5]"
@@ -212,9 +131,6 @@ export function Trend({ scores }: { scores: number[] }) {
         </text>
       ) : null}
 
-      {/* The x axis is named in words, not in dates: "session 7" is how someone
-          counts their own practice, and the row below the chart already carries
-          the calendar. */}
       <text x={L} y={H - 10} className="fill-ink-muted font-mono text-[9px] tracking-[0.08em]">
         Session 1
       </text>

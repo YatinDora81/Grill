@@ -17,16 +17,12 @@ export interface ReplayTurn {
   transcript: string | null;
   transcript_words: TranscriptWord[] | null;
   has_audio: boolean;
-  /** The session recording this answer is in, if there was a camera. */
   video_id: string | null;
   video_offset_ms: number | null;
-  /** Days left on that recording, from SessionVideo.expiresAt. */
   video_expires_in_days: number | null;
-  /** Computed server-side so the star paints correctly on first render. */
   question_hash: string;
   starred: boolean;
   feedback: QuestionFeedback | null;
-  /** The per-answer rubric, absent on turns recorded before it existed. */
   scores: AnswerScores | null;
 }
 
@@ -34,7 +30,6 @@ const TYPE_LABEL: Record<QuestionType, string> = {
   technical: "Technical",
   cultural: "Cultural",
   followup: "Follow-up",
-  // Legacy turns: `behavioral` and `cultural` always meant the same thing.
   behavioral: "Cultural",
 };
 
@@ -48,14 +43,6 @@ const RUBRIC_LABEL: Record<keyof AnswerScores, string> = {
 
 const TONE_CLASS = { strong: "tone-strong", mixed: "tone-mixed", weak: "tone-weak" } as const;
 
-/**
- * The whole interview, in order: what was asked, what you actually said, how it
- * scored, what to do about it, and the tape.
- *
- * One accordion per turn, with the best answer open to start — the page is long
- * enough without eight transcripts unfurled, and the strongest answer is the one
- * worth landing on first.
- */
 export function Replay({
   sessionId,
   turns,
@@ -64,7 +51,6 @@ export function Replay({
 }: {
   sessionId: string;
   turns: ReplayTurn[];
-  /** Usually the report's best answer. Null when there isn't one. */
   defaultOpenIndex: number | null;
   readOnly?: boolean;
 }) {
@@ -72,17 +58,6 @@ export function Replay({
     () => new Set(defaultOpenIndex !== null ? [defaultOpenIndex] : []),
   );
 
-  /**
-   * The "watch" links on the best/worst cards are `#turn-N` anchors. Opening the
-   * turn they point at is what makes them do anything — the browser scrolls, we
-   * unfold.
-   *
-   * Two listeners, because `hashchange` alone is not enough: once the URL
-   * already ends in `#turn-3`, clicking that same link fires no event at all, so
-   * a turn the reader collapsed by hand could never be reopened from the card.
-   * The click listener catches the repeat; `hashchange` (and the initial read)
-   * catches arriving with the anchor already in the URL.
-   */
   useEffect(() => {
     const openTurn = (n: number) => setOpen((prev) => (prev.has(n) ? prev : new Set(prev).add(n)));
 
@@ -120,15 +95,7 @@ export function Replay({
       return next;
     });
 
-  // No `.rv`/`data-io` on the section, unlike most of the report: this is a
-  // ReportNav jump target. `Reveal` unobserves after the first intersection, so a
-  // jump into a section that has never been on screen would land on faded, offset
-  // content — and on a report this long its threshold never fires for an element
-  // this tall, which would leave the whole replay at opacity 0 for good.
   return (
-    // No `.section` margin: the section head above this in page.tsx opens the
-    // block, and a second gap between the head and its own accordion would read
-    // as the rows belonging to nothing.
     <section>
       <div style={{ marginTop: 8 }}>
         {turns.map((t) => (
@@ -176,9 +143,6 @@ function Turn({
         <span className={"turn-type" + (t.question_type === "followup" ? " followup" : "")}>
           {TYPE_LABEL[t.question_type]}
         </span>
-        {/* A square that says +/− rather than a rotating chevron: the
-            row is one of a stack of squares, and the glyph states open
-            or shut instead of implying a direction to travel in. */}
         <span
           className={
             "grid size-6 flex-none place-items-center border text-[0.8rem] leading-none transition-colors " +
@@ -214,9 +178,6 @@ function Turn({
           <Improvements items={t.feedback?.improvements ?? []} />
           <PossibleAnswers items={t.feedback?.possible_answers ?? []} />
 
-          {/* Only where a recording actually covers this answer. A denied
-              camera, or a session from before video existed, simply has
-              no player rather than a broken one. */}
           {t.video_id && t.video_offset_ms !== null ? (
             <VideoPlayer
               videoId={t.video_id}
@@ -254,8 +215,6 @@ function Turn({
   );
 }
 
-/** Five mini-meters, scored out of ten. Tone is on the same 0–100 scale as
-    everything else, so a 7/10 reads the same green a 70 does. */
 function Rubric({ scores }: { scores: AnswerScores }) {
   const entries = Object.entries(RUBRIC_LABEL) as [keyof AnswerScores, string][];
   return (
@@ -283,8 +242,6 @@ function Rubric({ scores }: { scores: AnswerScores }) {
           );
         })}
       </div>
-      {/* Sibling of `.rubric`, not a child: that's a 5-column grid, so a note
-          inside it would become a sixth cell and break the row. */}
       <Explain>
         These five judge <b>this answer alone</b>, out of ten — not the session score at the top of
         the page, which is out of a hundred. <b>Filler</b> runs the same way round as the rest: ten
@@ -295,10 +252,6 @@ function Rubric({ scores }: { scores: AnswerScores }) {
   );
 }
 
-/**
- * The coach's notes: numbered, scannable fixes rather than a bullet soup.
- * Numbering matters — "do 01 first" is a plan, a bullet list is a shrug.
- */
 function Improvements({ items }: { items: string[] }) {
   const list = items.filter(Boolean);
   if (!list.length) return null;
@@ -320,11 +273,6 @@ function Improvements({ items }: { items: string[] }) {
   );
 }
 
-/**
- * Model answers as cards you can lift: a labelled angle, the take itself under
- * an oversized quote mark, and a copy control — the whole point of a model
- * answer is taking it away to practise against.
- */
 function PossibleAnswers({ items }: { items: string[] }) {
   const list = items.filter(Boolean);
   if (!list.length) return null;
@@ -346,7 +294,6 @@ function PossibleAnswers({ items }: { items: string[] }) {
   );
 }
 
-/** Clipboard with a receipt. Failure stays quiet — there is nothing to fix. */
 function CopyTake({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   return (

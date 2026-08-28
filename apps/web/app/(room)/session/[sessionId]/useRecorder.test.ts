@@ -2,15 +2,8 @@ import { test, expect, mock, beforeEach } from "bun:test";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { useRecorder } from "./useRecorder";
 
-/**
- * The recorder enforces the answer time cap itself, which is the whole reason
- * these exist: it stops on its own schedule, with no user gesture behind it, and
- * everything that delivers the take has to already be in place when it does.
- */
-
 const CHUNK = new Blob(["audio-bytes"], { type: "audio/webm" });
 
-/** A MediaRecorder that records nothing and obeys start/stop, so the cap can drive it. */
 class FakeMediaRecorder {
   static isTypeSupported = () => true;
   state: "inactive" | "recording" = "inactive";
@@ -40,7 +33,6 @@ function installMediaStubs() {
     value: { getUserMedia: mock(async () => stream) },
   });
   (globalThis as any).MediaRecorder = FakeMediaRecorder;
-  // The level meter is decoration here; give it just enough not to throw.
   (globalThis as any).AudioContext = class {
     state = "running";
     createAnalyser = () => ({ fftSize: 0, frequencyBinCount: 4, getByteTimeDomainData: () => {} });
@@ -80,7 +72,6 @@ beforeEach(() => {
   installMediaStubs();
 });
 
-/** Drive the recorder's 1s tick without waiting in real time. */
 async function advanceSeconds(n: number) {
   for (let i = 0; i < n; i++) {
     await act(async () => {
@@ -96,12 +87,9 @@ test("the take survives the cap: stop() returns the recording, not null", async 
   });
   expect(result.current.state).toBe("recording");
 
-  // Nobody calls stop(); the cap does it from inside the tick.
   await advanceSeconds(2);
   await waitFor(() => expect(result.current.state).toBe("stopped"));
 
-  // This is the original bug: the blob existed but was resolved into a promise
-  // nobody held, so stop() handed back null and the answer vanished.
   const blob = await act(async () => result.current.stop());
   expect(blob).not.toBeNull();
   expect(blob!.size).toBeGreaterThan(0);
@@ -125,8 +113,6 @@ test("a manual stop is NOT reported as capped", async () => {
   });
   const blob = await act(async () => result.current.stop());
   expect(blob).not.toBeNull();
-  // `capped` is what HotSeat keys its auto-submit on. If a manual stop set it,
-  // every ordinary answer would be submitted twice.
   expect(result.current.capped).toBe(false);
 });
 
@@ -165,7 +151,6 @@ test("the mic is released when the cap stops the recording", async () => {
   });
   await advanceSeconds(2);
   await waitFor(() => expect(result.current.state).toBe("stopped"));
-  // A hot mic left open past the answer is a privacy problem, not a leak of tidiness.
   expect(track.stop).toHaveBeenCalled();
 });
 

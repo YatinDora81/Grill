@@ -12,12 +12,6 @@ import { processAnswer } from "@/lib/services/answerService";
 import { transcribe } from "@/lib/clients/sttClient";
 import { audioKey, putAudio } from "@/lib/storage/objectStore";
 
-/**
- * Slack for the multipart envelope — boundaries, part headers, the text fields —
- * so the Content-Length gate below never refuses a clip that is itself within
- * the cap. It only has to be generous enough to not fire early; file.size is
- * what actually decides.
- */
 const MULTIPART_OVERHEAD_BYTES = 16 * 1024;
 
 export async function POST(req: Request) {
@@ -28,12 +22,6 @@ export async function POST(req: Request) {
     // otherwise buffer the whole upload before we decide to refuse it.
     rateLimit(`answer:${userId}`, { limit: 30, windowMs: 60_000 });
 
-    // The file.size check further down is the real cap, but it can't run until
-    // formData() has already pulled the entire body into memory — which is the
-    // thing the cap exists to prevent. Refusing on the declared length first
-    // means an oversized upload costs us nothing. It's client-supplied and
-    // trivially omitted or lied about, so it narrows the window rather than
-    // closing it; the post-parse check stays authoritative.
     const declared = Number(req.headers.get("content-length"));
     if (Number.isFinite(declared) && declared > config.audio.maxBytes + MULTIPART_OVERHEAD_BYTES) {
       throw badRequest("Audio clip is too large.", "audio_too_large");
@@ -59,10 +47,6 @@ export async function POST(req: Request) {
     const session = await repo.getSession(session_id, userId);
     if (!session) throw notFound("Session not found.", "unknown_session");
 
-    // Reject before the upload + STT below: processAnswer re-checks all of this,
-    // but only after we've already paid for an R2 write and a Groq transcription.
-    // A completed/cancelled session or a double-submitted turn shouldn't cost us.
-    // (These mirror processAnswer's guards — keep the two in sync.)
     if (session.status !== "in_progress") {
       throw conflict(`Session is ${session.status}, not accepting answers.`, "session_not_active");
     }
@@ -76,15 +60,6 @@ export async function POST(req: Request) {
     const ext = extFromMime(file.type);
     const key = audioKey(session.id, turn_index, ext);
 
-    // Save audio FIRST so downstream failures stay retryable.
-    //
-    // If the STT or scoring below throws, this object outlives the request with
-    // no turn row naming it. That's deliberate — it is NOT cleaned up here. The
-    // key is deterministic, so a retry of this turn overwrites it rather than
-    // adding another, and deleting on failure would race a concurrent retry
-    // that just wrote the same key successfully. Orphans are reaped by prefix
-    // in purgeExpiredAudio, which is why that sweep lists R2 rather than
-    // walking audioKey columns.
     await putAudio(key, bytes, file.type);
     const { text, words } = await transcribe(bytes, `turn_${turn_index}.${ext}`, file.type);
 

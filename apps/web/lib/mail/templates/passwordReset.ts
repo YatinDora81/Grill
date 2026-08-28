@@ -1,16 +1,4 @@
 import "server-only";
-/**
- * The password reset email (Grill §Accounts & auth).
- *
- * The copy carries three facts the flow depends on, and every one of them stops
- * a support ticket: the link dies after `expiresInMinutes`, it works exactly
- * once, and a recipient who didn't ask for it has had nothing happen to their
- * account. A reset mail that omits the last one reads like a breach notice.
- *
- * It is written in the product's voice — the room, the heat, the numbered
- * sequence — but never at the expense of the security copy. Every joke is in the
- * framing; every sentence that states a fact states it plainly.
- */
 import {
   Button,
   Chip,
@@ -44,18 +32,11 @@ export function renderPasswordResetEmail(input: PasswordResetEmailInput): {
   text: string;
 } {
   const { name, resetUrl, expiresInMinutes } = input;
-  // The candidate's name is the ONE piece of user-controlled text in this
-  // document, so it is the one place `esc` is load-bearing rather than
-  // belt-and-braces. First name only: an email that greets you with the full
-  // name off your account reads like a bank, not like the thing you practise in.
   const first = name?.trim().split(/\s+/)[0];
   const greeting = first ? `Hi ${esc(first)},` : "Hi,";
   const validFor = minutes(expiresInMinutes);
 
   const html = renderDocument(greeting, resetUrl, validFor);
-  // The plain-text greeting takes the RAW name: `esc` produces HTML entities, and
-  // "Hi Sam &amp; Jo," in a terminal client is worse than the character it was
-  // protecting against.
   const textGreeting = first ? `Hi ${first},` : "Hi,";
   return { subject: SUBJECT, html, text: plainText(textGreeting, resetUrl, validFor) };
 }
@@ -103,15 +84,6 @@ function renderDocument(greeting: string, resetUrl: string, validFor: string): s
   });
 }
 
-/**
- * Written by hand, not stripped from the HTML above.
- *
- * This is what terminal clients, screen readers in plain-text mode and — most
- * consequentially — spam filters read; a de-tagged HTML body scores as
- * boilerplate and reads as debris. The URL sits alone on its own line so that
- * clients which auto-linkify plain text pick up the whole thing, including the
- * token, rather than stopping at a trailing full stop.
- */
 function plainText(greeting: string, resetUrl: string, validFor: string): string {
   return [
     "GRILL — practice under heat",

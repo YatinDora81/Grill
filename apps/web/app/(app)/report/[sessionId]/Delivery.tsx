@@ -2,22 +2,7 @@ import type { DeliveryMetrics } from "@repo/types";
 import { Explain } from "@/components/Explain";
 import { cx } from "@/components/ui";
 
-/**
- * Measured delivery — the thing this product does that a transcript can't.
- *
- * Acoustic fields are null when the audio service was unreachable, or when every
- * answer was typed. Those say "—" rather than 0: a zero would read as
- * "monotone", which is a finding, not a gap.
- *
- * The plain-English lines under each number are written here, not asked of the
- * model: none of this is LLM-authored, and the report prompt explicitly forbids
- * inferring tone from transcript text. A note that only exists when there is a
- * measurement behind it is the whole point.
- */
-
-/** The conversational band an interviewer reads as composed, in wpm. */
 export const COMPOSED = { lo: 110, hi: 160 } as const;
-/** The scale the band sits on. Wide enough that a real outlier still lands. */
 const SCALE = { lo: 80, hi: 200 } as const;
 
 const pct = (wpm: number) => ((wpm - SCALE.lo) / (SCALE.hi - SCALE.lo)) * 100;
@@ -45,11 +30,6 @@ export function Delivery({
   const v = VOICE[subject];
 
   return (
-    /* One hairline lattice, not a card: the container draws the top and left
-       edges and every cell the right and bottom, so the figures read as a
-       single instrument panel and the grid can reflow at any breakpoint without
-       a `:first-child` exception. The section heading lives in page.tsx with
-       the report's other three. */
     <div className="mt-4 border-t border-l border-line">
       <div className="grid grid-cols-2 md:grid-cols-3">
         <Metric
@@ -113,9 +93,6 @@ export function Delivery({
         />
       </div>
 
-      {/* Below the figures and inside the same box: the scale is what the pace
-          cell above means, and splitting them into two panels made the reader
-          carry a number across a gap. */}
       <div className="border-r border-b border-line p-5 sm:p-6">
         <PaceBand wpm={m.wpm} voice={v} />
 
@@ -138,19 +115,11 @@ export function Delivery({
   );
 }
 
-/**
- * Where this run's pace sits against the composed band. Zone and tick are both
- * derived from the same two constants the verdict above uses, so the picture and
- * the word can never disagree.
- */
 function PaceBand({ wpm, voice }: { wpm: number; voice: Voice }) {
   const zoneLeft = pct(COMPOSED.lo);
   const zoneWidth = pct(COMPOSED.hi) - zoneLeft;
 
   return (
-    /* No `.band` wrapper any more — it drew its own dashed rule and top margin
-       to separate itself from the metric grid, and the cell border above now
-       does that job. */
     <div>
       <p className="dk">Where {voice.their} pace sits</p>
       <div className="band-scale">
@@ -159,8 +128,6 @@ function PaceBand({ wpm, voice }: { wpm: number; voice: Voice }) {
             composed band · {COMPOSED.lo}–{COMPOSED.hi}
           </span>
         </div>
-        {/* No pace measured means no tick: a marker pinned at the low end would
-            claim this interview was slow, when it was silent. */}
         {wpm ? (
           <div className="band-tick" style={{ left: `${clamp(pct(wpm))}%` }}>
             <span className="band-tick-label">
@@ -192,7 +159,6 @@ function Metric({
   value: string;
   unit: string;
   children?: React.ReactNode;
-  /** Plain English, shown only in explain mode. Omit it where nothing was measured. */
   note?: React.ReactNode;
 }) {
   return (
@@ -202,17 +168,12 @@ function Metric({
         {value}
         <small className="ml-1 text-[0.5em] font-normal text-ink-muted">{unit}</small>
       </p>
-      {/* Outside the figure's paragraph, not inside it: `Explain` renders a <p>,
-          and a nested <p> is closed by the parser before React ever sees it. */}
       {note ? <Explain>{note}</Explain> : null}
-      {/* Last, so the plain-English line sits with the number it explains and
-          the judgement closes the cell. */}
       {children}
     </div>
   );
 }
 
-/** ~110–160 wpm is the conversational band interviewers read as composed. */
 export function paceNote(wpm: number): { text: string; tone: "strong" | "mixed" } | null {
   if (!wpm) return null;
   if (wpm > 175) return { text: "Rushed", tone: "mixed" };
@@ -220,10 +181,6 @@ export function paceNote(wpm: number): { text: string; tone: "strong" | "mixed" 
   return { text: "composed", tone: "strong" };
 }
 
-/**
- * The bands are stated from the same constants the verdict and the picture use,
- * so nobody can read three different numbers off one metric.
- */
 function paceExplain(wpm: number, voice: Voice): string | null {
   if (!wpm) return null;
   return `How fast ${voice.they} spoke. ${COMPOSED.lo}–${COMPOSED.hi} words a minute is the stretch an interviewer hears as composed: slower and ${voice.they} sound unsure of the answer, faster and the interviewer stops following it.`;

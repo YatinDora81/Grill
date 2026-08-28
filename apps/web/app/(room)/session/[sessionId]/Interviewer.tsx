@@ -5,14 +5,6 @@ import type { useSpeech } from "@/hooks/useSpeech";
 
 type Speech = ReturnType<typeof useSpeech>;
 
-/**
- * Voice controls for the interviewer: mute and replay, nothing else. The voice
- * itself is chosen automatically (see PRIORITY in useSpeech) — picking one is
- * a decision nobody sitting in an interview wants to make.
- *
- * Renders nothing when the browser has no speech synthesis; the interview reads
- * fine silently, so an inert control would just be noise.
- */
 export function Interviewer({
   speech,
   question,

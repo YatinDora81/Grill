@@ -4,7 +4,6 @@ import { generateJson } from "@/lib/clients/llmJson";
 import { EVALUATION_SYSTEM, evaluationPrompt } from "@/lib/prompts/evaluation";
 import { answerScoresSchema } from "@/lib/schemas";
 
-/** Score one answer against the fixed rubric (§scoring). */
 export async function scoreAnswer(
   question: string,
   questionType: QuestionType,

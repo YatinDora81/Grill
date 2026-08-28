@@ -1,12 +1,3 @@
-# Grill — local stack
-#
-#   cp apps/web/.env.example .env   # fill GEMINI / GROQ / R2 / JWT_SECRET / GITHUB_TOKEN
-#   docker compose up --build
-#
-# Web  → http://localhost:4000
-# Audio → http://localhost:8000/health
-# DB   → localhost:5432 (grill / grill / grill)
-
 services:
   db:
     image: postgres:16-alpine
@@ -34,8 +25,6 @@ services:
     ports:
       - "8000:8000"
     environment:
-      # Point the sweeper at the web container when you want report backstops.
-      # Leave CRON_SECRET empty / REPORT_CRON_ENABLED=false for plain /analyze.
       REPORT_CRON_URL: ${REPORT_CRON_URL:-http://web:4000/api/cron/reports}
       CRON_SECRET: ${CRON_SECRET:-}
       REPORT_CRON_ENABLED: ${REPORT_CRON_ENABLED:-false}
@@ -66,15 +55,9 @@ services:
       - path: apps/web/.env.local
         required: false
     environment:
-      # Compose network overrides — win over env_file values.
       DATABASE_URL: postgresql://grill:grill@db:5432/grill?schema=ai_interview
       AUDIO_SERVICE_URL: http://audio:8000
       PORT: "4000"
-      # Required/optional secrets still come from .env / apps/web/.env.local
-      # (loaded via env_file above — do NOT re-list them here as ${VAR}, since
-      # `environment` wins over env_file and Compose ${...} reads the shell/root
-      # .env, not apps/web/.env.local, so it would blank them):
-      # JWT_SECRET, GEMINI_API_KEYS, GROQ_API_KEYS, S3_*, GITHUB_TOKEN
     depends_on:
       db:
         condition: service_healthy

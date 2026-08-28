@@ -6,11 +6,6 @@ mock.module("server-only", () => ({}));
 process.env.GEMINI_API_KEYS ||= "TEST__SPLIT__not-a-real-key";
 process.env.JWT_SECRET ||= "test-secret";
 
-/**
- * The mock model: hands back whatever the current script says, one call at a
- * time. Each test sets the script; the service under test decides how many
- * calls it makes — which is exactly what these tests are measuring.
- */
 let script: { questions: { question: string; question_type: string }[] }[] = [];
 let calls = 0;
 let prompts: string[] = [];
@@ -21,9 +16,6 @@ mock.module("@/lib/clients/llmJson", () => ({
     const next = script[Math.min(calls, script.length - 1)];
     calls++;
     if (!next) throw new Error("script exhausted");
-    // The real generateJson Zod-validates; the service imports the schema and
-    // hands it over, so parse through it here rather than bypassing it —
-    // otherwise these tests would pass a shape the real pipeline rejects.
     const { questionBatchResponseSchema } = await import("@/lib/schemas");
     return { value: questionBatchResponseSchema.parse(next), raw: JSON.stringify(next) };
   },
@@ -64,14 +56,11 @@ test("large sets are chunked, and later chunks are told what came before", async
   const out = await generateQuestionSet(CTX, 12);
   expect(calls).toBe(2);
   expect(out).toHaveLength(12);
-  // The second prompt carries the first chunk as a do-not-repeat list.
   expect(prompts[1]).toContain("Q0?");
   expect(prompts[1]).toContain("must not contain");
 });
 
 test("near-duplicates are dropped and topped up rather than delivered twice", async () => {
-  // "b?" vs "  B?" is one question under questionHash's normalisation. The
-  // batch schema trims on the way in, so the survivor is stored trimmed.
   reset(qs("A?", "  b?", "B?"), qs("C?"));
   const out = await generateQuestionSet(CTX, 3);
   expect(out.map((q) => q.question)).toEqual(["A?", "b?", "C?"]);

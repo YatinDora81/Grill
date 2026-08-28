@@ -15,12 +15,6 @@ import {
   yOf,
 } from "./DeliverySpark";
 
-/**
- * Queries come from `render()`, never `screen`: test/setup.ts imports
- * @testing-library/react before registering happy-dom, so `screen` is bound to a
- * document that doesn't exist yet and throws on every query.
- */
-
 let seq = 0;
 function point(wpm: number | null, fillers: number | null): DeliveryPoint {
   seq += 1;
@@ -45,8 +39,6 @@ describe("pinned pace domain", () => {
   });
 
   test("a wobble stays a wobble", () => {
-    // The whole reason the domain is pinned: 148 → 152 must not read as a climb.
-    // An auto-fit domain would put those two at BASE and TOP — the full plot.
     const wobble = Math.abs(yOf(148, PACE) - yOf(152, PACE));
     expect(wobble).toBeLessThan((PLOT.BASE - PLOT.TOP) * 0.2);
   });
@@ -138,8 +130,6 @@ describe("null values are gaps, never zeroes", () => {
     const runs = toSegments([4, 3, null, 2, 1], domain);
     const plotted = runs.flat();
     expect(plotted.length).toBe(4);
-    // The gap's x slot is left empty — the line breaks across it rather than
-    // dipping to the baseline and back.
     const gapX = xOf(2, 5);
     expect(plotted.some(([x]) => x === gapX)).toBe(false);
     expect(plotted.some(([, y]) => y === yOf(0, domain))).toBe(false);
@@ -187,8 +177,6 @@ describe("null values are gaps, never zeroes", () => {
     );
     const label = container.querySelector("svg")!.getAttribute("aria-label")!;
     expect(label).toContain("One session carries no measurement");
-    // Three sessions, two readings — the unmeasured one is never spoken as a
-    // zero, and never inflates the count the sentence claims to describe.
     expect(label).toContain("2 measured sessions, oldest to newest: 150, 146.");
   });
 

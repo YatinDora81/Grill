@@ -22,36 +22,10 @@ export interface GeneratedQuestion {
   questionType: QuestionType;
 }
 
-/**
- * One model call generates at most this many. Past ~10 the tail of a batch
- * goes soft — the model starts padding with the stock questions the quality
- * bar bans — and a longer JSON array is likelier to arrive truncated. Larger
- * sets are built as consecutive chunks, each banning everything before it.
- */
 const CHUNK_SIZE = 10;
 
-/**
- * Extra calls allowed on top of the minimum, to replace duplicates and
- * malformed items. Chunks that come back short are common (the dedupe filter
- * eats near-rephrasings), a set that comes back short after this many is a
- * provider having a bad day — stop and say so rather than looping on it.
- */
 const MAX_EXTRA_CALLS = 3;
 
-/**
- * Generate exactly `count` distinct questions for a set.
- *
- * Distinct means distinct under `questionHash` — the same normalisation that
- * dedupes stars — so "What broke first?" and "what broke  first" are one
- * question. The whole batch is generated here, before anything is persisted:
- * a set is a document, and a document half-written by a failed provider call
- * is worse than no document, so the caller only ever stores a complete one.
- *
- * DELIBERATELY reads nothing per-user: the bank is independent of interview
- * history by design (a set is a syllabus, not a session), so unlike the
- * interview's questionInputs there is no asked-before list here. The only
- * repeats being fought are repeats *within the set*.
- */
 export async function generateQuestionSet(
   ctx: QuestionBankContext,
   count: number,
@@ -84,8 +58,6 @@ export async function generateQuestionSet(
   }
 
   if (out.length < count) {
-    // Not a 500: the app did its job, the provider kept returning rephrasings
-    // or short arrays. Same register as the key-pool exhaustion message.
     throw serviceUnavailable(
       `Could only generate ${out.length} of ${count} distinct questions right now — try again shortly, or ask for fewer.`,
       "generation_short",
@@ -94,12 +66,6 @@ export async function generateQuestionSet(
   return out;
 }
 
-// ── DTO mapping ───────────────────────────────────────────────────
-// The API speaks snake_case contracts; the DB rows are camelCase and store
-// difficulty as text. Mapped in one place so the list route, the detail route
-// and the generate route can never disagree about what a set looks like.
-
-/** The columns every mapper needs — structural, so any Prisma selection fits. */
 interface SetRow {
   id: string;
   name: string;
@@ -119,8 +85,6 @@ export function toSetSummary(
     source: row.source,
     role: row.role,
     difficulty: coerceDifficulty(row.difficulty),
-    // The items are the truth of how many questions exist; the stored `count`
-    // column is only what was asked for.
     count: counts.items,
     created_at: row.createdAt.toISOString(),
     times_practised: counts.sessions,

@@ -40,20 +40,6 @@ async function turnAcoustics(t: Turn): Promise<AcousticMetrics | null> {
   }
 }
 
-/**
- * Delivery metrics for a session (text math + bounded-concurrency acoustics).
- *
- * The clip loop is what makes the per-answer caps in `perAnswerCapSeconds`
- * honest: that model divides the build budget by `N / concurrency` batches, so
- * the concurrency here is imported rather than declared. Serialising this loop
- * again without dropping ANSWER_CAP_MODEL.concurrency to 1 would let every
- * report overrun its 300s budget.
- *
- * Workers pull from a shared cursor rather than running fixed batches: an
- * 8-second answer shouldn't hold a slot open waiting on a 4-minute one in the
- * same batch. Results are written back by index, so `acoustics[i]` is always
- * `turns[i]` — aggregateAcoustics and the report rely on that alignment.
- */
 export async function computeDelivery(turns: Turn[]): Promise<DeliveryMetrics> {
   const text = textDeliveryMetrics(
     turns.map((t) => ({ transcript: t.transcript, transcriptWords: words(t) })),
@@ -65,8 +51,6 @@ export async function computeDelivery(turns: Turn[]): Promise<DeliveryMetrics> {
     const worker = async () => {
       while (next < turns.length) {
         const i = next++;
-        // turnAcoustics never throws — a bad clip is one null slot, not a
-        // failed report, so one worker's bad luck can't reject the pool.
         acoustics[i] = await turnAcoustics(turns[i]!);
       }
     };
@@ -122,10 +106,6 @@ function queueReportReadyMail(session: Session, score: number, headline: string)
   }
 }
 
-/**
- * Build and persist the final report (Grill §end flow steps 1-5).
- * Caller owns the status guard + generating_report/completed/error transitions.
- */
 export async function buildAndSaveReport(session: Session) {
   const turns = await repo.getTurns(session.id);
   const delivery = await computeDelivery(turns);

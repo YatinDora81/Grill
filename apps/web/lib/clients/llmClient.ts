@@ -15,11 +15,6 @@ export interface GenerateOpts {
   prompt: string;
   temperature?: number;
   json?: boolean;
-  /**
-   * Per-call timeout override (ms). Defaults to config.rotation.providerTimeoutMs.
-   * A large one-shot call (e.g. a repo digest) needs longer than a normal
-   * question, or a slow completion aborts and reads as a network failure.
-   */
   timeoutMs?: number;
 }
 

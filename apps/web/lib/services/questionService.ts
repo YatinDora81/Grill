@@ -11,16 +11,6 @@ import {
 } from "@/lib/prompts/questionGen";
 import { questionResponseSchema, type QuestionResponse } from "@/lib/schemas";
 
-/**
- * Pull the per-user material a question needs from the DB.
- *
- * - Past questions, unless they opted into repeats. This is a repeat-practice
- *   tool: the same résumé must not produce the same interview twice.
- *   Soft-deleted interviews do not count — those questions are fair game again.
- * - Weak answers, only for `weak_spots` — that mode is entirely about them
- *   (also ignoring soft-deleted sessions).
- * - Saved questions, only for `starred` — the drill IS that list.
- */
 export async function questionInputs(
   ctx: SessionContext,
   userId: string,
@@ -40,12 +30,6 @@ export async function questionInputs(
     );
   }
 
-  // A weak spot is by definition a question already asked, so it lands in both
-  // lists — and the prompt then says "re-ask this" and "never ask this again"
-  // about the same text, with the ban reading last. Since repeats are off by
-  // default, that was the *default* weak_spots session: the one mode whose whole
-  // point is reopening old ground was banned from reaching it. Subtract rather
-  // than skip, so the repeat ban still holds for every other past question.
   const reopening = new Set([...weakSpots.map((w) => w.question), ...fixedQuestions]);
   return {
     askedBefore: askedBefore.filter((q) => !reopening.has(q)),

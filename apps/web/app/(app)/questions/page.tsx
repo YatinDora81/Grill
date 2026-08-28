@@ -11,20 +11,16 @@ export const metadata: Metadata = {
   title: "Question bank",
   description: "Generate batches of questions to read and rehearse — no interview attached.",
 };
-// Sets are created and deleted from sibling pages; never serve a stale list.
 export const dynamic = "force-dynamic";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-/** Same UTC day treatment the dashboard and /starred use, for the same reason. */
 function fmtDay(d: Date): string {
   const month = MONTHS[d.getUTCMonth()];
   return month ? `${month} ${d.getUTCDate()}` : d.toISOString().slice(0, 10);
 }
 
 export default async function QuestionBankPage() {
-  // proxy.ts gates this, but a Server Component reading the DB must never
-  // assume that — it re-checks rather than trusting the gate.
   const userId = await getUserId();
   if (!userId) redirect("/?auth=login&next=/questions");
 
@@ -38,8 +34,6 @@ export default async function QuestionBankPage() {
       <main className="wrap" style={{ paddingBottom: 56 }}>
         <div className="page-head">
           <div>
-            {/* The screen slug. Numbered 03 to match its rail row — this page
-                IS part of the practice group, unlike /starred. */}
             <p className="kicker">03 — Question bank</p>
             <h1 className="h1 mt-4 max-w-[16ch]">Questions first. Interview whenever.</h1>
             <p className="page-sub max-w-[54ch]">
@@ -56,15 +50,11 @@ export default async function QuestionBankPage() {
               )}
             </p>
           </div>
-          {/* This page's one hot action. Primary is earned here the way it is
-              on the dashboard: the whole screen exists to press this. */}
           <Link href="/questions/new" className="btn btn-primary">
             Generate questions
           </Link>
         </div>
 
-        {/* Bare, not wrapped: `display: none` when the mode is off, so a
-            spacing wrapper would leave a hole on every other view. */}
         <ExplainBanner />
 
         {sets.length === 0 ? (
@@ -124,10 +114,6 @@ export default async function QuestionBankPage() {
   );
 }
 
-/**
- * Nothing generated yet. Same contract as /starred's empty state: say where
- * sets come from, don't apologise for the blank screen.
- */
 function EmptyState() {
   return (
     <section

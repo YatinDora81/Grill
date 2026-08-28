@@ -13,7 +13,6 @@ export async function POST(req: Request) {
     const { email, password } = loginSchema.parse(await req.json());
 
     const user = await repo.getUserByEmail(email);
-    // Generic message — never reveal whether the email exists.
     if (!user || !(await verifyPassword(user.passwordHash, password))) {
       throw unauthorized("Email or password is incorrect.", "auth");
     }

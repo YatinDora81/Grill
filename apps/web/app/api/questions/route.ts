@@ -1,7 +1,4 @@
 export const runtime = "nodejs";
-// Generation is chunked LLM calls — up to ceil(30/10) + 3 top-ups, each with
-// generateJson's own retry inside it. Comfortably past a default timeout, well
-// inside the report build's 300s precedent.
 export const maxDuration = 120;
 
 import type { GenerateQuestionSetResponse, QuestionSetListResponse } from "@repo/types";
@@ -16,7 +13,6 @@ import {
   toSetSummary,
 } from "@/lib/services/questionBankService";
 
-/** The user's question sets, newest first. */
 export async function GET() {
   try {
     const userId = await requireUserId();
@@ -31,16 +27,6 @@ export async function GET() {
   }
 }
 
-/**
- * Generate a question set: N standalone questions, persisted as a set the
- * user can read — and, whenever they choose, run an interview on.
- *
- * The whole batch is generated BEFORE anything is written (see
- * questionBankService), so a provider failure costs a request, never a
- * half-empty set. Nothing here creates a session, a turn, or anything else
- * from the interview world — the bank only meets interviews in
- * /api/questions/[setId]/interview.
- */
 export async function POST(req: Request) {
   try {
     const userId = await requireUserId();
@@ -51,8 +37,6 @@ export async function POST(req: Request) {
 
     const body = createQuestionSetSchema.parse(await req.json());
 
-    // A cultural set brings no material; storing whatever the form happened to
-    // hold would leak a résumé into a set that never read it.
     const sourceText = body.source === "cultural" ? "" : body.source_text.trim();
     const role = body.role?.trim() || null;
 

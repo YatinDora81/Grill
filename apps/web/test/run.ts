@@ -1,18 +1,3 @@
-/**
- * Run each test file in its own `bun test` process.
- *
- * Bun shares one runtime across every file in a single `bun test` invocation,
- * and `mock.module` registrations are global and permanent within it — a mock a
- * file installs for `@/lib/db/repo` outlives that file and blanks the next one's
- * (`mock.restore()` does not undo a module mock, and a namespace import
- * enumerates the mock's keys at import time, so a proxy can't paper over it).
- * Two server suites that each mock the same module then pass alone and fail
- * together, purely on load order.
- *
- * One process per file is the only isolation Bun actually offers here. It costs
- * a fresh runtime per file — a few seconds across the suite — in exchange for a
- * result that doesn't depend on the order the files happen to load in.
- */
 import { Glob } from "bun";
 import { spawnSync } from "bun";
 

@@ -16,7 +16,6 @@ import { SelfView, CameraToggle } from "./SelfView";
 
 interface Props {
   sessionId: string;
-  /** Null only for sessions created before interviews were named. */
   name: string | null;
   role: string | null;
   numQuestions: number;
@@ -27,25 +26,15 @@ interface Props {
   maxSeconds: number;
   maxBytes: number;
   persona: Persona | null;
-  /**
-   * Threaded from the server page rather than imported: the config lives in
-   * lib/env.ts, which is `server-only`, and importing it from a client component
-   * pulls server secrets into the browser bundle.
-   */
   videoBitrate: number;
 }
 
 type Phase = "answering" | "sending" | "finishing";
 
-/** The question's entrance runs 0.55s; the voice comes in just behind it. */
 const SPEAK_DELAY_MS = 500;
 
 const LEAVE_CANCEL_WAIT_MS = 2_500;
 
-/**
- * Codes that mean "your view of this interview is behind the server's", not
- * "you did something wrong". Retrying is pointless; re-reading state is the fix.
- */
 const STALE_CODES = new Set(["turn_already_answered", "unknown_turn", "session_not_active"]);
 
 function isStale(err: unknown): boolean {
@@ -56,37 +45,17 @@ const TYPE_LABEL: Record<QuestionType, string> = {
   technical: "Technical",
   cultural: "Cultural",
   followup: "Follow-up",
-  // Legacy turns only — nothing writes `behavioral` any more, but old sessions
-  // still carry it and it always meant the same thing as cultural.
   behavioral: "Cultural",
 };
 
-/**
- * Past this, the per-question cells drop below legibility and the progress
- * strip degrades to a plain bar — an interview can run up to 100 questions.
- */
 const MAX_SEGMENTS = 24;
 
-/**
- * The state banner.
- *
- * The room is a dark screen with a question on it, and nothing on it says which
- * of several very different things is happening: the interviewer is still
- * reading the question, the mic is waiting on a permission prompt, the recorder
- * is live, or the answer is off being scored. Silence reads as "broken" — people
- * stop mid-answer to check. One line, above the question, in words.
- *
- * It lives outside `.room-main`, so it costs the scrolling area ~28px once and
- * never moves. Deliberately one line: the mic button has to stay above the fold
- * on a 640px-tall laptop.
- */
 const SEAT_BANNER = "flex-none border-b border-line bg-paper-raised/60";
 const SEAT_BANNER_IN =
   "mx-auto flex max-w-[880px] items-center gap-2.5 px-[18px] py-1.5 font-mono text-[10.5px] tracking-[0.16em] text-ink uppercase sm:gap-3 sm:px-6 sm:py-2";
 
 type SeatTone = "live" | "calm" | "warn";
 
-/** Ember is reserved for "actually recording"; nothing else may borrow it. */
 const SEAT_DOT: Record<SeatTone, string> = {
   live: "bg-ember animate-pulse-rec",
   calm: "bg-mixed",
@@ -99,15 +68,6 @@ interface SeatLine {
   tone: SeatTone;
 }
 
-/**
- * What the room is doing right now, in the order that outranks.
- *
- * Every branch has to be true for the state it renders in — a banner reading
- * "Listening" while the recorder is idle tells the candidate their answer is
- * being captured when nothing is being captured at all, which is the one lie
- * this must never tell. So the pre-tap state says it is waiting for the tap,
- * and only `state === "recording"` gets to say "listening".
- */
 function seatLine(s: {
   busy: boolean;
   mode: "voice" | "text";
@@ -135,8 +95,6 @@ function seatLine(s: {
         tone: "live",
       };
     case "stopped":
-      // Only the cap sets `capped`, and the cap is a full answer, not a lost
-      // one — say which of the two just happened.
       return s.rec.capped
         ? { text: "That's the time limit", sub: "sending what you recorded", tone: "calm" }
         : { text: "That take is in", sub: "sending it now", tone: "calm" };
@@ -149,8 +107,6 @@ function seatLine(s: {
 
 function SeatState({ line }: { line: SeatLine }) {
   return (
-    // Polite, never assertive: this narrates state, and it must not cut across
-    // a screen reader that is still reading the question out.
     <div className={SEAT_BANNER} aria-live="polite">
       <div className={SEAT_BANNER_IN}>
         <span aria-hidden="true" className={cx("size-2 flex-none rounded-full", SEAT_DOT[line.tone])} />
@@ -167,8 +123,6 @@ export function HotSeat(props: Props) {
   const router = useRouter();
   const rec = useRecorder(props.maxSeconds);
   const speech = useSpeech();
-  // Always recording — no switch. The camera prompt is still the browser's to
-  // ask, and a denial just means the replay has no picture.
   const video = useSessionVideo(props.sessionId, props.videoBitrate);
 
   const [turnIndex, setTurnIndex] = useState(props.turnIndex);
@@ -180,26 +134,17 @@ export function HotSeat(props: Props) {
   const [text, setText] = useState("");
   const [phase, setPhase] = useState<Phase>("answering");
   const [error, setError] = useState("");
-  // Whether the picture-in-picture is on SCREEN — not whether the camera is on.
-  // Recording is unconditional; this only hides the preview.
   const [pipOpen, setPipOpen] = useState(true);
 
   const busy = phase !== "answering";
 
-  /**
-   * When this question appeared, on the same monotonic clock the recording uses.
-   * Captured here rather than at submit time because the replay should open on
-   * the question being asked, not on the answer already finishing.
-   */
   const turnShownAt = useRef(performance.now());
   useEffect(() => {
     turnShownAt.current = performance.now();
   }, [turnIndex]);
 
-  /** The tail flush, handed to ThankYou so it can wait for it before leaving. */
   const finishVideo = useRef<Promise<void> | null>(null);
 
-  /** The video fields to stamp on this answer, or nothing if there's no camera. */
   const videoFields = () => {
     const offset = video.offsetAt(turnShownAt.current);
     return video.videoId && offset !== null
@@ -217,7 +162,6 @@ export function HotSeat(props: Props) {
     return () => clearTimeout(t);
   }, [question, speak]);
 
-  /** Never let the interviewer talk over the answer. */
   function startRecording() {
     stopSpeaking();
     rec.start();
@@ -235,14 +179,9 @@ export function HotSeat(props: Props) {
       setPhase("answering");
       return;
     }
-    // Last answer in. /end only queues the report now and returns at once, so
-    // this is a fast call — the build happens behind the thank-you screen.
     stopSpeaking();
     rec.reset();
     setPhase("finishing");
-    // Fire the flush now, but do NOT await it here: ThankYou waits on it before
-    // starting its countdown. Awaiting here would leave the candidate staring at
-    // a frozen room while the tail uploads.
     finishVideo.current = video.finish();
     try {
       await apiPost<EndResponse>("/api/interview/end", {
@@ -256,11 +195,6 @@ export function HotSeat(props: Props) {
     }
   }
 
-  /**
-   * Scoring an answer and writing the next question takes ten seconds or more.
-   * The toast is the only thing standing between the user and a screen that
-   * looks broken, so it stays up for the whole round trip.
-   */
   function track(work: Promise<void>, failure: string): Promise<void> {
     return toast.promise(work, {
       loading: "Sending your answer…",
@@ -274,13 +208,6 @@ export function HotSeat(props: Props) {
     });
   }
 
-  /**
-   * The server has moved on without us: the answer landed but its response
-   * never made it back, so this tab is showing a question that's already been
-   * answered. Re-submitting can only ever fail. Pull the real state instead —
-   * the page is `force-dynamic` and HotSeat is keyed on the server's turn
-   * index, so a refresh remounts us on the actual current question.
-   */
   function resync(): void {
     setError("");
     rec.reset();
@@ -311,21 +238,6 @@ export function HotSeat(props: Props) {
     }
   }
 
-  /**
-   * Submit the take the cap ended, because nothing else will.
-   *
-   * `useRecorder` stops itself at the ceiling, which flips its state out of
-   * "recording" — and the stop button is rendered on exactly that state, so the
-   * one control that submits an answer disappears at the instant the answer
-   * becomes complete. The candidate is left looking at a mic button that starts
-   * a new take over the finished one. Reaching the limit is a full answer, not a
-   * discarded one, so send it.
-   *
-   * `capped` is what makes this safe to key on: plain "stopped" is also what a
-   * manual submit looks like while `finishRecording` is awaiting the blob, and
-   * this would fire underneath it. Only the cap sets `capped`, and `start`/
-   * `reset` clear it, so it fires once per capped take.
-   */
   const capSubmit = useRef(finishRecording);
   capSubmit.current = finishRecording;
   useEffect(() => {
@@ -370,7 +282,6 @@ export function HotSeat(props: Props) {
     stopSpeaking();
     rec.reset();
     video.stream?.getTracks().forEach((t) => t.stop());
-    // Cancelling is a courtesy to the server; never block the exit on it.
     await Promise.race([
       apiPost("/api/interview/cancel", { session_id: props.sessionId }).catch(() => {}),
       new Promise((resolve) => setTimeout(resolve, LEAVE_CANCEL_WAIT_MS)),
@@ -385,31 +296,13 @@ export function HotSeat(props: Props) {
   const currentQ = Math.min(answered + 1, props.numQuestions);
 
   return (
-    // The room is a fixed pane, not a document: it is exactly the viewport and
-    // never scrolls as a page. Anything that doesn't fit scrolls inside
-    // `.room-main`, so the header and the mic button stay put — a control that
-    // slides away mid-answer is worse than a short scroll.
-    //
-    // The class name is also light mode's pin: this subtree keeps the dark
-    // tokens whichever theme the reader picked. A cream page reflected off the
-    // monitor lands on the candidate's face and drags the webcam's exposure and
-    // white balance, and the sheet the light theme prints on came out of a
-    // darkroom in the first place — the interview is the exposure, the report is
-    // the print. The pin block in globals.css selects on nothing but this name,
-    // so renaming or unwrapping it turns the hot seat cream. It restates the
-    // BASE tokens too (`text-ink`, `border-line`, `bg-paper-raised/60`), not
-    // just the `room-*` five, which is why nothing below had to be rewritten.
     <div className="room-root">
       <div className="grain" aria-hidden="true" />
       <GrillToaster />
 
-      {/* Room chrome: what this is, how far in you are, and a way out. */}
       <header className="room-top">
         <div className="room-top-in">
           <div className="room-id">
-            {/* The name the candidate gave this interview, with the role
-                demoted to the meta line — the role is what the questions aim
-                at, but the name is what they called it. */}
             <p className="room-name">{props.name?.trim() || props.role?.trim() || "Interview"}</p>
             <p className="room-meta">
               <b>Q{currentQ}</b> / {props.numQuestions}
@@ -436,16 +329,8 @@ export function HotSeat(props: Props) {
 
       <main className="room-main">
         <div className="room-in">
-          {/* Auto margins centre the block without making the top unreachable
-              when a long question overflows a short viewport. */}
           <div className="room-center">
             <div className="q-head">
-              {/* The eyebrow used to swap to "Writing the next question…" while
-                  busy. The banner above now says exactly that, in the same
-                  words, forty pixels higher — two lines saying one thing. The
-                  banner keeps it (it is on screen in every state, so it never
-                  jumps), and the eyebrow goes back to only ever naming the kind
-                  of question, which stays true while the stale one is dimmed. */}
               <span className="q-type" data-kind={questionType}>
                 {TYPE_LABEL[questionType]}
               </span>
@@ -458,11 +343,6 @@ export function HotSeat(props: Props) {
               )}
             </div>
 
-            {/* A follow-up is the one question type whose PROVENANCE matters:
-                it exists because of the answer just given, and people who don't
-                know that read it as the interviewer repeating itself. Amber,
-                not ember — ember means "recording" in this room and nothing
-                else may borrow it. */}
             {questionType === "followup" && (
               <p className="mt-3 inline-flex items-center gap-2 border border-mixed/35 px-3 py-1.5 font-mono text-[10px] tracking-[0.14em] text-mixed uppercase">
                 <span aria-hidden="true">↺</span>
@@ -470,18 +350,12 @@ export function HotSeat(props: Props) {
               </p>
             )}
 
-            {/* The question sits under the key-light — the one lit object in
-                the room. While sending, it dims and softens: the light is off
-                you until the next question turns it back on. */}
             <div className="q-wrap" data-busy={busy}>
               <div aria-hidden="true" className="q-light ember-glow" />
               <div className="q-card">
-                {/* The turn number, seared into the card behind the words. */}
                 <span className="q-n" aria-hidden="true">
                   {String(currentQ).padStart(2, "0")}
                 </span>
-                {/* `key` remounts on every new turn, which is what replays the
-                    stagger — without it React would patch the text in place. */}
                 <Question key={turnIndex} text={question} />
               </div>
             </div>
@@ -526,11 +400,6 @@ export function HotSeat(props: Props) {
               </div>
             </div>
 
-            {/* The self view can be dragged, resized and snapped, and every one
-                of those affordances is invisible until you happen to grab the
-                right pixel — SelfView's own comment says corner-dragging is
-                undiscoverable, which is why the S/M/L presets exist at all.
-                Only worth the lines while the box is actually on screen. */}
             {pipOpen && video.stream && (
               <p className="mt-6 max-w-[62ch] font-mono text-[10px] leading-[1.9] tracking-[0.14em] text-ink-muted uppercase">
                 Your camera floats free — <b className="font-medium text-ink-soft">drag the bar
@@ -545,9 +414,6 @@ export function HotSeat(props: Props) {
         </div>
       </main>
 
-      {/* Recording is always on and there is no way to turn it off, so saying
-          so is the minimum this screen owes the candidate. The REC dot in the
-          header says it's happening; this says what happens to it. */}
       <footer className="room-foot">
         <p>
           {mode === "voice"
@@ -562,20 +428,10 @@ export function HotSeat(props: Props) {
         )}
       </footer>
 
-      {/* Purely a preview. Unmounting it no longer touches the camera — the
-          stream belongs to useSessionVideo, and the recording outlives this.
-
-          Mounted LAST on purpose. It is `fixed z-50`, so DOM order costs it
-          nothing visually, and it carries six tab stops of its own (the group,
-          S/M/L, minimise, close). In front of the room that put all six between
-          the candidate and the button that submits their answer. */}
       {pipOpen && video.stream && (
         <SelfView
           stream={video.stream}
           onClose={() => setPipOpen(false)}
-          // The mic belongs to `useRecorder`, not to the camera stream — the
-          // self view has no way to know whether anything is being heard, so
-          // the level is handed down rather than measured there.
           micOn={rec.state === "recording"}
           level={rec.level}
           recording={video.state === "recording"}
@@ -585,7 +441,6 @@ export function HotSeat(props: Props) {
   );
 }
 
-/** A keycap, for the camera hint. Square, like every other border in the room. */
 function Key({ children }: { children: React.ReactNode }) {
   return (
     <kbd className="mx-0.5 border border-line px-1 py-px font-mono text-[9.5px] text-ink-soft">
@@ -615,10 +470,6 @@ function LiveDelivery({ rec, max }: { rec: ReturnType<typeof useRecorder>; max: 
     <details className="group mt-9 max-w-[560px] border-t border-line">
       <summary className="flex cursor-pointer list-none items-center justify-between gap-4 py-3.5 font-mono text-[10.5px] tracking-[0.16em] text-ink-muted uppercase transition-colors hover:text-ink [&::-webkit-details-marker]:hidden">
         Show how I&apos;m sounding right now
-        {/* Two glyphs toggled by the `open` state rather than one `::after`
-            with generated content: the disclosure sign is the only thing
-            saying which way this drawer moves, and utility-generated content
-            is one Tailwind-scanner quirk away from rendering as nothing. */}
         <span
           aria-hidden="true"
           className="grid size-5 flex-none place-items-center border border-line text-[12px] leading-none text-ink-soft group-open:border-ember/40 group-open:text-ember"
@@ -654,11 +505,6 @@ function Metric({ k, v, unit }: { k: string; v: string; unit?: string }) {
   );
 }
 
-/**
- * Progress as a burner strip: one cell per question, lighting left to right,
- * the current one warming. Past MAX_SEGMENTS the cells drop below legibility
- * (an interview can run to 100 questions), so it degrades to a plain bar.
- */
 function Progress({ answered, total }: { answered: number; total: number }) {
   if (total > MAX_SEGMENTS) {
     return (
@@ -680,14 +526,6 @@ function Progress({ answered, total }: { answered: number; total: number }) {
   );
 }
 
-/**
- * The recording indicator.
- *
- * There is no opt-out, so this is the only thing telling the candidate the
- * camera is running — which makes it the honest minimum, not decoration. It also
- * doubles as the answer to "is it actually working?", which is why a denied
- * camera says so plainly rather than showing nothing.
- */
 function RecDot({ state }: { state: ReturnType<typeof useSessionVideo>["state"] }) {
   if (state === "starting") {
     return <span className="rec-chip">CAM…</span>;
@@ -715,18 +553,9 @@ function RecDot({ state }: { state: ReturnType<typeof useSessionVideo>["state"] 
   );
 }
 
-/** Stagger between word entrances, and the point past which we stop stacking. */
 const WORD_STAGGER_MS = 38;
 const WORD_STAGGER_CAP_MS = 900;
 
-/**
- * The question, arriving a word at a time.
- *
- * `aria-label` carries the whole sentence and the words are hidden from the
- * accessibility tree: a screen reader walking a pile of one-word spans reads
- * them as separate items, which turns a question into a list. The delay is
- * capped so a long question doesn't take three seconds to finish landing.
- */
 function Question({ text }: { text: string }) {
   const words = text.split(" ");
   return (
@@ -742,8 +571,6 @@ function Question({ text }: { text: string }) {
           >
             {word}
           </span>
-          {/* A real space between the inline-blocks — without it there's no
-              break opportunity and the question stops wrapping. */}
           {i < words.length - 1 ? " " : null}
         </span>
       ))}
@@ -777,30 +604,11 @@ function VoicePanel({
 
   return (
     <div className="mic-col">
-      {/*
-       * Live input level — the real mic signal, so a dead mic is obvious.
-       *
-       * Green, never ember. This screen deliberately shows you nothing of what
-       * you are saying (see LiveDelivery), so the meter is the ONLY proof left
-       * that you are being heard — which makes it worth reading at a glance and
-       * worth not confusing with anything else. Ember means "this is being
-       * recorded" in every other part of the room (the REC chip, the take dot,
-       * the stop button); a red meter beside them reads as a second recording
-       * light rather than as "the mic can hear you".
-       *
-       * Painted inline rather than by class because `.lvl-bar[data-hot]` in
-       * globals.css carries an ember gradient, and that file is not this
-       * component's to change.
-       */}
       <div className="lvl" aria-hidden="true">
         {Array.from({ length: 28 }).map((_, i) => {
-          // Centre bars react most, so it reads as a voice, not a bar chart.
           const falloff = 1 - Math.abs(i - 13.5) / 15;
           const h = recording ? Math.max(3, rec.level * 46 * falloff) : 3;
           return (
-            // No height transition while live: the level updates every frame,
-            // so an ease never finishes and the bars crawl toward a level that
-            // has already moved on. The analyser's smoothing does the work.
             <span
               key={i}
               className="lvl-bar"
@@ -839,10 +647,6 @@ function VoicePanel({
           >
             <MicIcon />
           </button>
-          {/* This used to swap to "Sending…" and "Waiting for the mic…". The
-              banner says both of those already, in the same words and in the
-              same states — so this goes back to only ever naming what the
-              button does, which stays true while it sits there disabled. */}
           <p className="mic-note">Tap to answer</p>
         </>
       )}
@@ -865,9 +669,6 @@ function TextPanel({
 }) {
   return (
     <div>
-      {/* Says what the trade is BEFORE the answer is written, not after: a
-          typed answer is scored on content alone, and finding that out from
-          the report is finding it out too late. */}
       <label
         htmlFor="typed-answer"
         className="mb-2 block font-mono text-[10px] tracking-[0.16em] text-ink-muted uppercase"
@@ -882,7 +683,6 @@ function TextPanel({
         maxLength={20_000}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
-          // Enter alone must insert a newline — people write paragraphs here.
           if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) onSubmit();
         }}
         placeholder="Talk me through it…"
@@ -898,20 +698,10 @@ function TextPanel({
   );
 }
 
-/** How long the thank-you screen holds before it sends them to the dashboard. */
 const REDIRECT_MS = 5_000;
 
-/** r=30 circle. The arc sweep and the check draw are both dash tricks on it. */
 const MARK_C = 2 * Math.PI * 30;
 
-/**
- * The completion seal — the same ember-ringed disc as the profile page's
- * initials seal, holding a drawn check instead of a monogram.
- *
- * Static geometry, animated only by CSS dash offsets: the arc sweeps around the
- * ring and the check draws itself a beat later (`g-sweep` / `g-draw`). Nothing
- * random and nothing computed per-render, so server and client HTML match.
- */
 function DoneMark() {
   return (
     <svg
@@ -920,9 +710,7 @@ function DoneMark() {
       xmlns="http://www.w3.org/2000/svg"
       aria-hidden="true"
     >
-      {/* The disc — ember-soft fill on a resting hairline. */}
       <circle cx="36" cy="36" r="30" className="dmark-disc" />
-      {/* The sweep: one ember lap, ending as the check begins. */}
       <circle
         cx="36"
         cy="36"
@@ -936,33 +724,10 @@ function DoneMark() {
   );
 }
 
-/**
- * The end of the interview.
- *
- * The report is built behind this screen now, not in front of it, so this says
- * the interview is over and lets them leave rather than holding them hostage to
- * a spinner. Five seconds, then the dashboard — where the session shows as
- * scoring, and turns into a report when it's ready.
- *
- * The screen this replaced told them not to close the tab. That instruction is
- * now a lie worth deleting: the session was queued server-side before the client
- * was ever told the interview was over, so closing the tab costs nothing.
- */
 function ThankYou({ sessionId, saving }: { sessionId: string; saving: Promise<void> | null }) {
   const router = useRouter();
   const [flushing, setFlushing] = useState(Boolean(saving));
 
-  /**
-   * The countdown starts only once the recording's tail is in R2.
-   *
-   * These two requirements fight: the last part of the video can only upload
-   * after the final answer, and it used to have a 30-120s synchronous report
-   * build to hide behind. Against a 5s redirect it would lose — a buffered tail
-   * on a slow uplink takes longer than that, and navigating away kills the
-   * in-flight PUTs. So the five seconds are counted from when the upload lands,
-   * not from when the screen appears. In the normal case the flush is already
-   * done and this is indistinguishable from a plain 5s wait.
-   */
   useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
@@ -973,8 +738,6 @@ function ThankYou({ sessionId, saving }: { sessionId: string; saving: Promise<vo
       setFlushing(false);
       leave();
     } else {
-      // Never rejects — finish() swallows its own errors, leaving the parts in
-      // R2 for the salvage path rather than trapping the candidate here.
       void saving.then(() => {
         if (cancelled) return;
         setFlushing(false);
@@ -988,12 +751,6 @@ function ThankYou({ sessionId, saving }: { sessionId: string; saving: Promise<vo
   }, [saving, router]);
 
   return (
-    // Deliberately not `.room-root`: this is a full-page centred pane rather
-    // than the fixed viewport chrome, and the interview is over by the time it
-    // paints. The consequence worth knowing before touching the theme is that
-    // it therefore sits OUTSIDE light mode's room pin — unlike everything in the
-    // hot seat above, this screen follows the reader's theme, so anything
-    // decorative on it has to work on paper as well as in the dark.
     <div className="done">
       <div className="grain" aria-hidden="true" />
       <div className="done-glow" aria-hidden="true" />

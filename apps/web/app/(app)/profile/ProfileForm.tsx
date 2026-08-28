@@ -43,11 +43,8 @@ export function ProfileForm({ user, emailOnReport }: { user: User; emailOnReport
   const [savingPw, setSavingPw] = useState(false);
   const [pwError, setPwError] = useState("");
 
-  // A save button that's live when nothing changed promises work it can't do.
   const dirty = name.trim() !== (user.name ?? "");
 
-  // Same meter as the signup modal — the two must never disagree about what a
-  // good password looks like.
   const pwPct = Math.min((next.length / 12) * 100, 100);
   const pwOk = next.length >= 8;
   const confirmOk = confirm.length > 0 && next === confirm;
@@ -63,8 +60,6 @@ export function ProfileForm({ user, emailOnReport }: { user: User; emailOnReport
     try {
       await apiPatch<User>("/api/profile", { name: name.trim() });
       toast.success("Saved");
-      // The name is server-rendered in the plate, the greeting and the topbar
-      // seal — refresh so all three update.
       router.refresh();
     } catch (err) {
       setNameError(err instanceof ApiClientError ? err.message : "Couldn't save that.");
@@ -91,8 +86,6 @@ export function ProfileForm({ user, emailOnReport }: { user: User; emailOnReport
 
   async function savePassword(e: React.FormEvent) {
     e.preventDefault();
-    // Checked here as well as server-side: a typo in a field you can't read
-    // should not cost a round trip to find out about.
     if (next !== confirm) {
       setPwError("The new passwords don't match.");
       return;
@@ -121,10 +114,6 @@ export function ProfileForm({ user, emailOnReport }: { user: User; emailOnReport
     <div className="profile-grid rv" data-io>
       <GrillToaster />
 
-      {/* Plain `.card`, and a muted mono label instead of the ember `.kicker`.
-          `.card-hairline` paints a 2px ember gradient across the top edge, and
-          the redesign spends its one gradient on the resume bar; ember on a
-          form heading would rank "Details" alongside the live-recording dot. */}
       <section className="card" aria-label="Your details">
         <p className="font-mono text-[11px] tracking-[0.18em] uppercase text-ink-muted">Details</p>
         <form onSubmit={saveName} className="mform">
@@ -158,8 +147,6 @@ export function ProfileForm({ user, emailOnReport }: { user: User; emailOnReport
             <input id="email" className="input" value={user.email} disabled readOnly />
           </div>
 
-          {/* `key` so a repeated failure shakes again instead of sitting there
-              looking like nothing happened. */}
           {nameError && (
             <p className="error-note" role="alert" key={nameError}>
               {nameError}

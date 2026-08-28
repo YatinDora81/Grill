@@ -17,22 +17,6 @@ export interface ReportTurn {
   answer_scores: AnswerScores | null;
 }
 
-/**
- * Delivery, told apart from delivery-shaped absence.
- *
- * `wpm` and `avg_pause_ms` are `number`, not `number | null`, so "nobody spoke"
- * and "measured zero" are the same value — computeDelivery falls back to 0 when
- * there are no timed words at all. Delivery.tsx already refuses to print that 0
- * ("would read as 'monotone' instead of 'not measured'"), but the report LLM was
- * handed the raw object under a header calling it measured fact, while
- * REPORT_SYSTEM forbade it from noticing the answers were typed. A typed
- * interview was therefore graded for speaking at 0 wpm. Only wpm > 0 proves
- * anyone spoke, so it gates the pause figure too: no timed words means no gaps,
- * and a 0 there is the same absence wearing the same disguise.
- *
- * `filler_count` is counted from the transcript text, which exists either way,
- * so it is always measured.
- */
 function deliveryBlock(d: DeliveryMetrics): string {
   const spoke = d.wpm > 0;
   const measured: string[] = [];
