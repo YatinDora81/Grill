@@ -1,11 +1,52 @@
-import { test, expect, describe, mock } from "bun:test";
-import { render, fireEvent, within } from "@testing-library/react";
+import { test, expect, describe, mock, beforeEach } from "bun:test";
+import { render, fireEvent, waitFor, within } from "@testing-library/react";
 import { isValidElement, type ReactElement, type ReactNode } from "react";
-import type { ExclusiveMode } from "@repo/types";
+import type { ExclusiveMode, JobImportResponse } from "@repo/types";
 
 mock.module("server-only", () => ({}));
 process.env.GEMINI_API_KEYS ||= "TEST__SPLIT__not-a-real-key";
 process.env.JWT_SECRET ||= "test-secret";
+
+interface Call {
+  path: string;
+  body: unknown;
+}
+
+const JOB: JobImportResponse = {
+  title: "Senior Backend Engineer",
+  company: "Acme",
+  location: "Bengaluru",
+  description: "Own the billing pipeline. Go, Postgres, and the on-call pager.",
+  source: "bookmarklet",
+  url: "https://www.linkedin.com/jobs/view/1",
+};
+
+let calls: Call[] = [];
+let replies: Record<string, { status: number; body: unknown }> = {};
+
+beforeEach(() => {
+  calls = [];
+  replies = {
+    "/api/interview/jd/extract": { status: 200, body: JOB },
+    "/api/interview/resume/extract": { status: 200, body: { text: "Six years of Go.", chars: 16 } },
+    "/api/interview/start": { status: 200, body: { session_id: "sess_1", question: null } },
+  };
+  globalThis.fetch = mock(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = String(input);
+    const raw = init?.body;
+    calls.push({ path, body: typeof raw === "string" ? JSON.parse(raw) : raw });
+    const reply = replies[path] ?? {
+      status: 404,
+      body: { error: { code: "not_found", message: `no test route for ${path}` } },
+    };
+    return new Response(JSON.stringify(reply.body), {
+      status: reply.status,
+      headers: { "content-type": "application/json" },
+    });
+  }) as unknown as typeof fetch;
+  router.push.mockClear();
+  window.location.hash = "";
+});
 
 const router = {
   push: mock(() => {}),
@@ -96,5 +137,126 @@ describe("a form opened on a seeded mode", () => {
       .filter((el) => el.getAttribute("aria-checked") === "true");
     expect(chosen).toHaveLength(1);
     expect(chosen[0]?.textContent).toContain(MODE_META.weak_spots.label);
+  });
+});
+
+type View = ReturnType<typeof render>;
+
+function typeInto(field: HTMLElement, value: string): void {
+  fireEvent.focus(field);
+  fireEvent.change(field, { target: { value } });
+  fireEvent.keyUp(field, { key: "e" });
+  fireEvent.blur(field);
+}
+
+const hashFor = (payload: unknown) => `#import=${encodeURIComponent(JSON.stringify(payload))}`;
+
+async function uploadResume(view: View): Promise<void> {
+  const input = view.container.querySelector("#resume") as HTMLInputElement;
+  const file = new File(["Six years of Go."], "cv.pdf", { type: "application/pdf" });
+  fireEvent.change(input, { target: { files: [file] } });
+  await view.findByText(/Parsed from/);
+}
+
+async function startInterview(view: View, name?: string): Promise<Record<string, unknown>> {
+  fireEvent.click(view.getByRole("button", { name: /^Next/ }));
+  fireEvent.click(view.getByRole("button", { name: /^Next/ }));
+  if (name) typeInto(view.getByLabelText("Interview name"), name);
+  fireEvent.click(view.getByRole("button", { name: /Take the hot seat/ }));
+  await waitFor(() => expect(calls.some((c) => c.path === "/api/interview/start")).toBe(true));
+  const started = calls.find((c) => c.path === "/api/interview/start");
+  return (started?.body as { config: Record<string, unknown> }).config;
+}
+
+describe("the JD step", () => {
+  test("offers the importer, so a posting can arrive as a link", () => {
+    const { getByLabelText, getByRole } = render(<NewInterviewForm initialMode="jd" />);
+    expect(getByLabelText("Job posting URL")).toBeTruthy();
+    expect(getByRole("button", { name: "Import" })).toBeTruthy();
+  });
+
+  test("a company can be named by hand, not only imported", () => {
+    const { getByLabelText } = render(<NewInterviewForm initialMode="jd" />);
+    expect((getByLabelText("Company") as HTMLInputElement).value).toBe("");
+    expect((getByLabelText("Posting title") as HTMLInputElement).value).toBe("");
+  });
+
+  test("naming a company brings up the prep brief; nothing is fetched until it is asked for", () => {
+    const view = render(<NewInterviewForm initialMode="jd" />);
+    expect(view.queryByRole("button", { name: /Build my prep brief/ })).toBeNull();
+
+    typeInto(view.getByLabelText("Company"), "Acme");
+
+    expect(view.getByRole("button", { name: /Build my prep brief/ })).toBeTruthy();
+    expect(calls).toEqual([]);
+  });
+
+  test("the brief is only offered in JD mode, where the company field lives", () => {
+    const { queryByLabelText } = render(<NewInterviewForm initialMode="topic_only" />);
+    expect(queryByLabelText("Company")).toBeNull();
+  });
+});
+
+describe("the bookmarklet's handoff", () => {
+  test("imports the page the user's own browser read, and fills the JD block from it", async () => {
+    window.location.hash = hashFor({
+      u: JOB.url,
+      t: "Senior Backend Engineer | Acme",
+      x: "the posting text, scraped from the tab",
+    });
+    const view = render(<NewInterviewForm />);
+
+    await waitFor(() =>
+      expect(calls.some((c) => c.path === "/api/interview/jd/extract")).toBe(true),
+    );
+    const sent = calls.find((c) => c.path === "/api/interview/jd/extract");
+    expect(sent?.body).toEqual({
+      url: JOB.url,
+      page_title: "Senior Backend Engineer | Acme",
+      page_text: "the posting text, scraped from the tab",
+    });
+
+    expect(window.location.hash).toBe("");
+
+    await waitFor(() =>
+      expect((view.getByLabelText("Company") as HTMLInputElement).value).toBe("Acme"),
+    );
+    expect((view.getByLabelText("Job description") as HTMLTextAreaElement).value).toBe(
+      JOB.description,
+    );
+    expect((view.getByLabelText("Posting title") as HTMLInputElement).value).toBe(JOB.title);
+  });
+
+  test("what the posting named rides along in the config", async () => {
+    window.location.hash = hashFor({ u: JOB.url, x: "the posting text" });
+    const view = render(<NewInterviewForm />);
+    await waitFor(() =>
+      expect((view.getByLabelText("Company") as HTMLInputElement).value).toBe("Acme"),
+    );
+    await uploadResume(view);
+
+    const config = await startInterview(view);
+    expect(config).toMatchObject({
+      mode: "jd",
+      job_description: JOB.description,
+      job_url: JOB.url,
+      company: "Acme",
+      job_title: JOB.title,
+      job_location: "Bengaluru",
+    });
+    expect(router.push).toHaveBeenCalledWith("/session/sess_1");
+  });
+
+  test("a posting typed out by hand sends the company and no link", async () => {
+    const view = render(<NewInterviewForm initialMode="jd" />);
+    typeInto(view.getByLabelText("Job description"), "Own the billing pipeline.");
+    typeInto(view.getByLabelText("Company"), "  Acme  ");
+    await uploadResume(view);
+
+    const config = await startInterview(view, "Acme backend");
+    expect(config.company).toBe("Acme");
+    expect(config.job_url).toBeUndefined();
+    expect(config.job_title).toBeUndefined();
+    expect(config.job_location).toBeUndefined();
   });
 });

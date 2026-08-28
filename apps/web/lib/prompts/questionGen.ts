@@ -20,11 +20,16 @@ export interface SessionContext {
   config: InterviewConfig;
 }
 
-/** Extra material the services fetch from the DB per request. */
+export interface CompanyBriefContext {
+  values: string[];
+  style_notes: string[];
+}
+
 export interface QuestionInputs {
   askedBefore?: string[];
   weakSpots?: WeakSpot[];
   fixedQuestions?: string[];
+  companyBrief?: CompanyBriefContext;
 }
 
 export function questionSystem(c: InterviewConfig): string {
@@ -372,7 +377,29 @@ const SOURCE_LABEL: Record<SourceType, string> = {
   topic: "The requested topic (older session — no résumé on file)",
 };
 
-function contextBlock(s: SessionContext): string {
+function companyBlock(c: InterviewConfig, brief: CompanyBriefContext | undefined): string {
+  const company = c.company?.trim();
+  if (!company) return "";
+
+  const title = c.job_title?.trim();
+  const location = c.job_location?.trim();
+  const lines = [
+    `This posting is at ${company}${title ? ` — ${title}` : ""}${location ? `, ${location}` : ""}. Ask as an interviewer there would; do not claim facts about the company that the posting does not state.`,
+  ];
+
+  const values = brief?.values.filter((v) => v.trim()) ?? [];
+  const style = brief?.style_notes.filter((n) => n.trim()) ?? [];
+  if (values.length) lines.push(`Their stated values: ${values.join("; ")}.`);
+  if (style.length) lines.push(`Their interviews are known for: ${style.join("; ")}.`);
+  if (values.length || style.length) {
+    lines.push(
+      "Let this shape WHAT you probe, not how hard you probe — the difficulty and the rubric do not move.",
+    );
+  }
+  return lines.join("\n");
+}
+
+function contextBlock(s: SessionContext, inputs: QuestionInputs = {}): string {
   const c = s.config;
   const parts = [`Interview target role: ${s.role ?? "(unspecified)"}`];
 
@@ -396,6 +423,8 @@ function contextBlock(s: SessionContext): string {
     );
   }
   if (c.job_description) {
+    const company = companyBlock(c, inputs.companyBrief);
+    if (company) parts.push(company);
     parts.push("The job description they are targeting:", c.job_description.slice(0, 4000));
   }
   const diff = DIFFICULTY_META[c.difficulty];
@@ -470,7 +499,7 @@ Go straight at a culture-fit angle — working style, values, conflict, feedback
           : `Do not use a stock opener ("tell me about yourself", "walk me through your resume/background").
 Go straight at something concrete.`;
 
-  return `${contextBlock(s)}
+  return `${contextBlock(s, inputs)}
 
 ${brief(s.config, !!inputs.weakSpots?.length)}
 ${stage}${weakSpotBlock(inputs.weakSpots)}${fixedBlock(inputs.fixedQuestions)}${askedBlock(inputs.askedBefore)}
@@ -516,7 +545,7 @@ Never reword, soften or replace a fixed primary. Never re-ask anything else alre
 that digs into something the candidate actually said; otherwise move to a new area${areaHint}
 Never re-ask something already covered above, and don't rephrase a question they've answered.`;
 
-  return `${contextBlock(s)}
+  return `${contextBlock(s, inputs)}
 
 ${brief(s.config, !!inputs.weakSpots?.length)}
 ${stage}${weakSpotBlock(inputs.weakSpots)}${fixedBlock(owed)}${askedBlock(inputs.askedBefore)}

@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type {
   Difficulty,
   ExclusiveMode,
   InterviewSource,
+  JobImportResponse,
   Persona,
   QuestionType,
   StartResponse,
@@ -25,6 +26,8 @@ import {
 } from "@/lib/interviewMeta";
 import { Explain } from "@/components/Explain";
 import { cx } from "@/components/ui";
+import { JobUrlImport, readImportHandoff, type JobPageHandoff } from "./JobUrlImport";
+import { PrepBrief } from "./PrepBrief";
 
 const SOURCES: InterviewSource[] = ["resume", "topic", "cultural"];
 const MODES: ExclusiveMode[] = [
@@ -54,6 +57,8 @@ const QUESTION_PRESETS = [5, 8, 12, 20];
 
 const PENDING_JD_KEY = "grill.pendingJd";
 const JD_MAX_CHARS = 20_000;
+const COMPANY_MAX_CHARS = 120;
+const JOB_TITLE_MAX_CHARS = 200;
 
 const PERSONA_SAMPLE: Record<Persona, string> = {
   neutral: "Why that tradeoff?",
@@ -173,8 +178,11 @@ export function NewInterviewForm({
   const [starredReload, setStarredReload] = useState(0);
   const [topic, setTopic] = useState("");
   const [jobDescription, setJobDescription] = useState("");
-  // Project mode: the material the interview reads (pasted text or an edited
-  // repo digest), the URL it was imported from, and the repo chip to show.
+  const [jobUrl, setJobUrl] = useState("");
+  const [company, setCompany] = useState("");
+  const [jobTitle, setJobTitle] = useState("");
+  const [jobLocation, setJobLocation] = useState("");
+  const [handoff, setHandoff] = useState<JobPageHandoff | null>(null);
   const [projectContext, setProjectContext] = useState("");
   const [projectRepoUrl, setProjectRepoUrl] = useState("");
   const [repoUrl, setRepoUrl] = useState("");
@@ -194,6 +202,7 @@ export function NewInterviewForm({
   const [fileName, setFileName] = useState("");
   const [dragging, setDragging] = useState(false);
   const [carriedJd, setCarriedJd] = useState(false);
+  const handedOverJob = useRef(false);
 
   useEffect(() => {
     if (!initialStarredHashes.length) return;
@@ -208,7 +217,17 @@ export function NewInterviewForm({
   }, [initialStarredHashes.length, starredReload]);
 
   useEffect(() => {
-    if (fromDrillLink || initialMode) return;
+    const parsed = readImportHandoff(window.location.hash);
+    if (!parsed) return;
+    handedOverJob.current = true;
+    history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+    setMode("jd");
+    setSources([]);
+    setHandoff(parsed);
+  }, []);
+
+  useEffect(() => {
+    if (fromDrillLink || initialMode || handedOverJob.current) return;
     let handed = "";
     try {
       handed = sessionStorage.getItem(PENDING_JD_KEY) ?? "";
@@ -374,11 +393,18 @@ export function NewInterviewForm({
     setError("");
   }
 
-  /**
-   * Reads a GitHub repo once, server-side, into an editable digest — the same
-   * "extract once, edit anything the parser got wrong" flow as the résumé. The
-   * digest becomes the interview material; /start never touches GitHub.
-   */
+  const onJobImported = useCallback((job: JobImportResponse) => {
+    setJobDescription(job.description);
+    setJobUrl(job.url);
+    setCompany(job.company ?? "");
+    setJobTitle(job.title);
+    setJobLocation(job.location ?? "");
+    setHandoff(null);
+    setCarriedJd(false);
+    setRole((prev) => prev.trim() || job.title);
+    setName((prev) => prev.trim() || (job.company ? `${job.title} · ${job.company}` : job.title));
+  }, []);
+
   async function importRepo() {
     if (!repoUrl.trim()) return setError("Paste a GitHub repo URL to import.");
     setImporting(true);
@@ -432,7 +458,15 @@ export function NewInterviewForm({
           ...(persona !== "neutral" ? { persona } : {}),
           ...(drilling ? { starred_hashes: liveHashes } : {}),
           ...(needsTopic ? { topic: topic.trim() } : {}),
-          ...(needsJd ? { job_description: jobDescription.trim() } : {}),
+          ...(needsJd
+            ? {
+                job_description: jobDescription.trim(),
+                ...(jobUrl ? { job_url: jobUrl } : {}),
+                ...(company.trim() ? { company: company.trim() } : {}),
+                ...(jobTitle.trim() ? { job_title: jobTitle.trim() } : {}),
+                ...(jobLocation.trim() ? { job_location: jobLocation.trim() } : {}),
+              }
+            : {}),
           ...(needsProject
             ? {
                 project_context: projectContext.trim(),
@@ -633,25 +667,77 @@ export function NewInterviewForm({
             {needsJd && (
               <div className="mt-7">
                 <div className="field-row">
-                  <label className="label" htmlFor="jd">
-                    Job description
-                  </label>
-                  <span className="hint">the posting you&rsquo;re actually going for</span>
+                  <span className="label">The posting</span>
+                  <span className="hint">paste the link and we&rsquo;ll read it</span>
                 </div>
-                <textarea
-                  id="jd"
-                  className="input area"
-                  rows={6}
-                  maxLength={JD_MAX_CHARS}
-                  value={jobDescription}
-                  onChange={(e) => setJobDescription(e.target.value)}
-                  placeholder="Senior Backend Engineer — you'll own our billing pipeline, work in Go and Postgres…"
-                />
-                {carriedJd && (
-                  <p className="mono-note" style={{ marginTop: 8 }}>
-                    carried over from the résumé-vs-JD checker · edit anything you want asked about
-                  </p>
-                )}
+                <JobUrlImport onImported={onJobImported} handoff={handoff} disabled={working} />
+
+                <div className="mt-7">
+                  <div className="field-row">
+                    <label className="label" htmlFor="jd">
+                      Job description
+                    </label>
+                    <span className="hint">the posting you&rsquo;re actually going for</span>
+                  </div>
+                  <textarea
+                    id="jd"
+                    className="input area"
+                    rows={6}
+                    maxLength={JD_MAX_CHARS}
+                    value={jobDescription}
+                    onChange={(e) => setJobDescription(e.target.value)}
+                    placeholder="Senior Backend Engineer — you'll own our billing pipeline, work in Go and Postgres…"
+                  />
+                  {carriedJd && (
+                    <p className="mono-note" style={{ marginTop: 8 }}>
+                      carried over from the résumé-vs-JD checker · edit anything you want asked
+                      about
+                    </p>
+                  )}
+                </div>
+
+                <div className="mt-7 grid gap-5 sm:grid-cols-2">
+                  <div>
+                    <div className="field-row">
+                      <label className="label" htmlFor="company">
+                        Company
+                      </label>
+                      <span className="hint">who you&rsquo;re going for</span>
+                    </div>
+                    <input
+                      id="company"
+                      className="input"
+                      value={company}
+                      onChange={(e) => setCompany(e.target.value)}
+                      maxLength={COMPANY_MAX_CHARS}
+                      placeholder="Acme"
+                    />
+                  </div>
+                  <div>
+                    <div className="field-row">
+                      <label className="label" htmlFor="job_title">
+                        Posting title
+                      </label>
+                      <span className="hint">optional</span>
+                    </div>
+                    <input
+                      id="job_title"
+                      className="input"
+                      value={jobTitle}
+                      onChange={(e) => setJobTitle(e.target.value)}
+                      maxLength={JOB_TITLE_MAX_CHARS}
+                      placeholder="Senior Backend Engineer"
+                    />
+                  </div>
+                </div>
+
+                {company.trim() ? (
+                  <PrepBrief
+                    key={company.trim().toLowerCase()}
+                    company={company.trim()}
+                    role={role.trim() || jobTitle.trim()}
+                  />
+                ) : null}
               </div>
             )}
 
@@ -1077,13 +1163,7 @@ export function NewInterviewForm({
         )}
 
         {priorBlock && (
-          <div
-            /* `--wash-heat` rather than `bg-ember/5`: the strength of an ember
-               tint has to travel with the ember, which is a lamp on dark and a
-               spot plate on light. One token keeps this banner and the status
-               chips it echoes from drifting apart. */
-            className="mt-7 flex flex-wrap items-center gap-x-4 gap-y-3 border border-dashed border-ember/40 bg-(--wash-heat) px-4 py-3.5"
-          >
+          <div className="mt-7 flex flex-wrap items-center gap-x-4 gap-y-3 border border-dashed border-ember/40 bg-(--wash-heat) px-4 py-3.5">
             <p className="text-[12.5px] leading-relaxed text-ink-soft">{priorBlock.message}</p>
             <button
               type="button"

@@ -10,13 +10,22 @@ mock.module("@/lib/env", () => ({
   },
 }));
 
-// The real extractJson, captured before llmClient is replaced below. generateJson
-// parses through it, so stubbing it would leave the retry tests measuring a mock
-// instead of the code that decides whether a retry is needed at all.
-const { extractJson } = await import("./llmClient");
+const { extractJson, buildGeminiBody, readGroundingSources } = await import("./llmClient");
 
 const generateText = mock(async (_opts: { prompt: string; json?: boolean }) => "");
-mock.module("./llmClient", () => ({ generateText, extractJson }));
+const generateTextWithSources = mock(
+  async (_opts: { prompt: string; json?: boolean; tools?: unknown[] }) => ({
+    text: "",
+    sources: [] as { uri: string; title: string }[],
+  }),
+);
+mock.module("./llmClient", () => ({
+  generateText,
+  generateTextWithSources,
+  extractJson,
+  buildGeminiBody,
+  readGroundingSources,
+}));
 
 const { generateJson } = await import("./llmJson");
 
@@ -52,6 +61,7 @@ const schema = z.object({ score: z.number() });
 
 beforeEach(() => {
   generateText.mockClear();
+  generateTextWithSources.mockClear();
 });
 
 test("accepts the first response and does not spend a second call when it already fits the schema", async () => {
@@ -90,4 +100,130 @@ test("throws with the validation error after a failed retry, without a third att
   expect((err as Error).message).toContain("did not return schema-valid JSON after retry");
   expect((err as Error).message).toContain("number");
   expect(generateText).toHaveBeenCalledTimes(2);
+});
+
+test("a tool-less call still goes through generateText, unchanged", async () => {
+  generateText.mockResolvedValueOnce('{"score":7}');
+
+  const { value, sources } = await generateJson(schema, { prompt: "rate it" });
+
+  expect(value).toEqual({ score: 7 });
+  expect(generateTextWithSources).toHaveBeenCalledTimes(0);
+  expect(generateText).toHaveBeenCalledTimes(1);
+  expect(sources).toEqual([]);
+});
+
+test("a call with tools reads its sources back from the grounded path", async () => {
+  const found = [{ uri: "https://example.test/a", title: "A" }];
+  generateTextWithSources.mockResolvedValueOnce({ text: '{"score":7}', sources: found });
+
+  const { value, sources } = await generateJson(schema, {
+    prompt: "rate it",
+    tools: [{ google_search: {} }],
+  });
+
+  expect(value).toEqual({ score: 7 });
+  expect(sources).toEqual(found);
+  expect(generateText).toHaveBeenCalledTimes(0);
+  expect(generateTextWithSources.mock.calls[0]![0]!.tools).toEqual([{ google_search: {} }]);
+});
+
+test("the retry keeps the tools and reports the SECOND call's sources", async () => {
+  generateTextWithSources.mockResolvedValueOnce({ text: "not json", sources: [] });
+  generateTextWithSources.mockResolvedValueOnce({
+    text: '{"score":7}',
+    sources: [{ uri: "https://example.test/b", title: "B" }],
+  });
+
+  const { value, sources } = await generateJson(schema, {
+    prompt: "rate it",
+    tools: [{ google_search: {} }],
+  });
+
+  expect(value).toEqual({ score: 7 });
+  expect(sources).toEqual([{ uri: "https://example.test/b", title: "B" }]);
+  const retry = generateTextWithSources.mock.calls[1]![0]!;
+  expect(retry.tools).toEqual([{ google_search: {} }]);
+  expect(retry.json).toBe(true);
+  expect(retry.prompt).toContain("VALID JSON ONLY");
+});
+
+test("a tool-less JSON request is byte-identical to the one the app has always sent", () => {
+  expect(buildGeminiBody({ prompt: "hi", system: "be terse", json: true, temperature: 0.2 })).toEqual({
+    contents: [{ role: "user", parts: [{ text: "hi" }] }],
+    generationConfig: { temperature: 0.2, responseMimeType: "application/json" },
+    systemInstruction: { parts: [{ text: "be terse" }] },
+  });
+});
+
+test("temperature defaults to 0.7 and a missing system prompt adds no key", () => {
+  const body = buildGeminiBody({ prompt: "hi" });
+  expect(body).toEqual({
+    contents: [{ role: "user", parts: [{ text: "hi" }] }],
+    generationConfig: { temperature: 0.7 },
+  });
+  expect("systemInstruction" in body).toBe(false);
+});
+
+test("tools present ⇒ no responseMimeType, even in json mode", () => {
+  const body = buildGeminiBody({ prompt: "hi", json: true, tools: [{ google_search: {} }] });
+  expect(body.generationConfig).toEqual({ temperature: 0.7 });
+  expect(body.tools).toEqual([{ google_search: {} }]);
+});
+
+test("an empty tools array is not a grounded call and does not disturb json mode", () => {
+  const body = buildGeminiBody({ prompt: "hi", json: true, tools: [] });
+  expect(body.generationConfig).toEqual({
+    temperature: 0.7,
+    responseMimeType: "application/json",
+  });
+  expect("tools" in body).toBe(false);
+});
+
+const chunk = (uri: unknown, title: unknown) => ({ web: { uri, title } });
+
+test("grounding chunks become {uri,title} pairs, deduped", () => {
+  const sources = readGroundingSources({
+    candidates: [
+      {
+        groundingMetadata: {
+          groundingChunks: [
+            chunk("https://example.test/a", "A"),
+            chunk("https://example.test/a", "A again"),
+            chunk("https://example.test/b", "B"),
+          ],
+        },
+      },
+    ],
+  });
+  expect(sources).toEqual([
+    { uri: "https://example.test/a", title: "A" },
+    { uri: "https://example.test/b", title: "B" },
+  ]);
+});
+
+test("a chunk without a usable URI is dropped, and a missing title becomes empty", () => {
+  const sources = readGroundingSources({
+    candidates: [
+      {
+        groundingMetadata: {
+          groundingChunks: [
+            chunk(null, "no uri"),
+            chunk("", "empty uri"),
+            { retrievedContext: { uri: "https://example.test/x" } },
+            null,
+            chunk("https://example.test/c", undefined),
+          ],
+        },
+      },
+    ],
+  });
+  expect(sources).toEqual([{ uri: "https://example.test/c", title: "" }]);
+});
+
+test("an ungrounded response yields an empty list rather than throwing", () => {
+  expect(readGroundingSources({ candidates: [{ content: { parts: [{ text: "{}" }] } }] })).toEqual([]);
+  expect(readGroundingSources({})).toEqual([]);
+  expect(readGroundingSources(null)).toEqual([]);
+  expect(readGroundingSources({ candidates: [{ groundingMetadata: { groundingChunks: "nope" } }] })).toEqual([]);
 });

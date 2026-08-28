@@ -1,10 +1,5 @@
 import "server-only";
-/**
- * LLM client (Grill §rotation). Owns the Gemini keys and rotates them; on full
- * exhaustion, falls back to the Groq pool for the same text task. Services
- * never touch keys — they call generateText / generateJson. Uses the providers'
- * REST APIs directly so the rotation layer fully controls per-call keys/timeouts.
- */
+import type { GroundingSource } from "@repo/types";
 import { config } from "@/lib/env";
 import { AllKeysExhausted } from "@/lib/errors";
 import { fetchWithTimeout, ensureOk } from "./http";
@@ -16,21 +11,57 @@ export interface GenerateOpts {
   temperature?: number;
   json?: boolean;
   timeoutMs?: number;
+  tools?: unknown[];
+}
+
+export interface GenerateResult {
+  text: string;
+  sources: GroundingSource[];
 }
 
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
 const GROQ_CHAT = "https://api.groq.com/openai/v1/chat/completions";
 
-async function geminiGenerate(key: string, opts: GenerateOpts): Promise<string> {
-  const url = `${GEMINI_BASE}/models/${config.gemini.model}:generateContent?key=${key}`;
+const NO_SOURCES: GroundingSource[] = [];
+
+export function buildGeminiBody(opts: GenerateOpts): Record<string, unknown> {
+  const grounded = Boolean(opts.tools?.length);
   const body: Record<string, unknown> = {
     contents: [{ role: "user", parts: [{ text: opts.prompt }] }],
     generationConfig: {
       temperature: opts.temperature ?? 0.7,
-      ...(opts.json ? { responseMimeType: "application/json" } : {}),
+      ...(opts.json && !grounded ? { responseMimeType: "application/json" } : {}),
     },
   };
   if (opts.system) body.systemInstruction = { parts: [{ text: opts.system }] };
+  if (grounded) body.tools = opts.tools;
+  return body;
+}
+
+export function readGroundingSources(data: unknown): GroundingSource[] {
+  const chunks = (
+    data as
+      | { candidates?: { groundingMetadata?: { groundingChunks?: unknown } }[] }
+      | null
+      | undefined
+  )?.candidates?.[0]?.groundingMetadata?.groundingChunks;
+  if (!Array.isArray(chunks)) return [];
+
+  const out: GroundingSource[] = [];
+  const seen = new Set<string>();
+  for (const chunk of chunks) {
+    const web = (chunk as { web?: { uri?: unknown; title?: unknown } } | null)?.web;
+    const uri = typeof web?.uri === "string" ? web.uri.trim() : "";
+    if (!uri || seen.has(uri)) continue;
+    seen.add(uri);
+    out.push({ uri, title: typeof web?.title === "string" ? web.title.trim() : "" });
+  }
+  return out;
+}
+
+async function geminiGenerate(key: string, opts: GenerateOpts): Promise<GenerateResult> {
+  const url = `${GEMINI_BASE}/models/${config.gemini.model}:generateContent?key=${key}`;
+  const body = buildGeminiBody(opts);
 
   const res = await ensureOk(
     await fetchWithTimeout(
@@ -49,10 +80,10 @@ async function geminiGenerate(key: string, opts: GenerateOpts): Promise<string> 
   };
   const text = data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("");
   if (!text) throw new Error("gemini: empty completion");
-  return text;
+  return { text, sources: readGroundingSources(data) };
 }
 
-async function groqChat(key: string, opts: GenerateOpts): Promise<string> {
+async function groqChat(key: string, opts: GenerateOpts): Promise<GenerateResult> {
   const messages: { role: string; content: string }[] = [];
   if (opts.system) messages.push({ role: "system", content: opts.system });
   messages.push({ role: "user", content: opts.prompt });
@@ -76,22 +107,28 @@ async function groqChat(key: string, opts: GenerateOpts): Promise<string> {
   const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
   const text = data.choices?.[0]?.message?.content;
   if (!text) throw new Error("groq: empty completion");
-  return text;
+  return { text, sources: NO_SOURCES };
 }
 
-export async function generateText(opts: GenerateOpts): Promise<string> {
+export async function generateTextWithSources(opts: GenerateOpts): Promise<GenerateResult> {
   try {
     return await callWithRotation(geminiPool, (key) => geminiGenerate(key, opts));
   } catch (err) {
     if (err instanceof AllKeysExhausted && !groqPool.isEmpty) {
       console.warn("[llmClient] Gemini pool exhausted — falling back to Groq.");
+      if (opts.tools?.length) {
+        console.warn("[llmClient] Groq cannot search the web — this answer is ungrounded.");
+      }
       return await callWithRotation(groqPool, (key) => groqChat(key, opts));
     }
     throw err;
   }
 }
 
-/** Strip ```json fences and any prose around the first JSON value. */
+export async function generateText(opts: GenerateOpts): Promise<string> {
+  return (await generateTextWithSources(opts)).text;
+}
+
 export function extractJson(text: string): string {
   let t = text.trim();
   const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/i);

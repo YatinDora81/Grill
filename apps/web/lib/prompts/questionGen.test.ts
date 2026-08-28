@@ -324,3 +324,81 @@ test("no other interview shape sees a fixed list or a persona paragraph", () => 
     expect(questionSystem(ctx(config).config)).not.toContain("Voice:");
   }
 });
+
+const JD = {
+  mode: "jd" as const,
+  job_description: "Own the payments ledger. Ship weekly.",
+  company: "Stripe",
+  job_title: "Staff Engineer",
+  job_location: "Remote (EU)",
+};
+
+const BRIEF = {
+  values: ["Users first", "Move with urgency"],
+  style_notes: ["A long systems-design round", "They ask for numbers"],
+};
+
+test("a JD interview's company brief reaches the prompt as values and style notes", () => {
+  for (const prompt of [
+    firstQuestionPrompt(ctx(JD), { companyBrief: BRIEF }),
+    followUpPrompt(ctx(JD), [{ question: "Q1", answer: "A1" }], 3, { companyBrief: BRIEF }),
+  ]) {
+    expect(prompt).toContain("This posting is at Stripe — Staff Engineer, Remote (EU).");
+    expect(prompt).toContain("Their stated values: Users first; Move with urgency.");
+    expect(prompt).toContain(
+      "Their interviews are known for: A long systems-design round; They ask for numbers.",
+    );
+    expect(prompt).toContain(
+      "Let this shape WHAT you probe, not how hard you probe — the difficulty and the rubric do not move.",
+    );
+    expect(prompt.indexOf("This posting is at Stripe")).toBeLessThan(
+      prompt.indexOf("The job description they are targeting:"),
+    );
+  }
+});
+
+test("a posting with nobody researched yet still names the company, and nothing more", () => {
+  const prompt = firstQuestionPrompt(ctx(JD));
+  expect(prompt).toContain("This posting is at Stripe — Staff Engineer, Remote (EU).");
+  expect(prompt).not.toContain("Their stated values:");
+  expect(prompt).not.toContain("Their interviews are known for:");
+  expect(prompt).not.toContain("Let this shape WHAT you probe");
+});
+
+test("a brief whose lists came back blank is the same as no brief at all", () => {
+  const prompt = firstQuestionPrompt(ctx(JD), {
+    companyBrief: { values: ["  ", ""], style_notes: [] },
+  });
+  expect(prompt).not.toContain("Their stated values:");
+  expect(prompt).not.toContain("Their interviews are known for:");
+  expect(prompt).not.toContain("Let this shape WHAT you probe");
+});
+
+test("a hand-pasted posting that named nobody carries no company block", () => {
+  const prompt = firstQuestionPrompt(
+    ctx({ mode: "jd", job_description: "Own the payments ledger." }),
+    { companyBrief: BRIEF },
+  );
+  expect(prompt).toContain("The job description they are targeting:");
+  expect(prompt).not.toContain("This posting is at");
+  expect(prompt).not.toContain("Their stated values:");
+});
+
+test("no interview without a posting reaches a company brief, however it was handed one", () => {
+  for (const config of [
+    { sources: ["resume"] as const, company: "Stripe" },
+    { mode: "real" as const, company: "Stripe" },
+    { mode: "topic_only" as const, company: "Stripe" },
+    { mode: "cultural_only" as const, company: "Stripe" },
+  ]) {
+    const first = firstQuestionPrompt(ctx(config), { companyBrief: BRIEF });
+    const next = followUpPrompt(ctx(config), [{ question: "Q", answer: "A" }], 3, {
+      companyBrief: BRIEF,
+    });
+    for (const prompt of [first, next]) {
+      expect(prompt).not.toContain("This posting is at");
+      expect(prompt).not.toContain("Their stated values:");
+      expect(prompt).not.toContain("Their interviews are known for:");
+    }
+  }
+});
