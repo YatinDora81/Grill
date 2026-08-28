@@ -17,10 +17,7 @@ const MULTIPART_OVERHEAD_BYTES = 16 * 1024;
 export async function POST(req: Request) {
   try {
     const userId = await requireUserId();
-    // Shares one bucket with answer-text so a client can't double its budget by
-    // alternating routes. Checked before formData() below, which would
-    // otherwise buffer the whole upload before we decide to refuse it.
-    rateLimit(`answer:${userId}`, { limit: 30, windowMs: 60_000 });
+    await rateLimit(`answer:${userId}`, { limit: 30, windowMs: 60_000 });
 
     const declared = Number(req.headers.get("content-length"));
     if (Number.isFinite(declared) && declared > config.audio.maxBytes + MULTIPART_OVERHEAD_BYTES) {
@@ -28,12 +25,14 @@ export async function POST(req: Request) {
     }
 
     const form = await req.formData();
-    const { session_id, turn_index, video_id, video_offset_ms } = turnRefSchema.parse({
-      session_id: form.get("session_id"),
-      turn_index: form.get("turn_index"),
-      video_id: form.get("video_id"),
-      video_offset_ms: form.get("video_offset_ms"),
-    });
+    const { session_id, turn_index, video_id, video_offset_ms, camera_metrics } =
+      turnRefSchema.parse({
+        session_id: form.get("session_id"),
+        turn_index: form.get("turn_index"),
+        video_id: form.get("video_id"),
+        video_offset_ms: form.get("video_offset_ms"),
+        camera_metrics: form.get("camera_metrics"),
+      });
 
     const file = form.get("audio");
     if (!(file instanceof File)) throw badRequest("Missing 'audio' file.", "missing_audio");
@@ -71,6 +70,7 @@ export async function POST(req: Request) {
       audioKey: key,
       videoId: video_id ?? null,
       videoOffsetMs: video_offset_ms ?? null,
+      cameraMetrics: camera_metrics ?? null,
     });
     return json(result);
   } catch (err) {

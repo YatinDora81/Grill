@@ -1,6 +1,6 @@
 import "server-only";
 import type { Session } from "@repo/db";
-import type { AnswerResponse, TranscriptWord } from "@repo/types";
+import type { AnswerResponse, CameraTurnMetrics, TranscriptWord } from "@repo/types";
 import { badRequest, conflict } from "@/lib/errors";
 import * as repo from "@/lib/db/repo";
 import { scoreAnswer } from "./evaluationService";
@@ -15,6 +15,7 @@ export interface AnswerInput {
   audioKey?: string | null;
   videoId?: string | null;
   videoOffsetMs?: number | null;
+  cameraMetrics?: CameraTurnMetrics | null;
 }
 
 export async function processAnswer(input: AnswerInput): Promise<AnswerResponse> {
@@ -42,6 +43,7 @@ export async function processAnswer(input: AnswerInput): Promise<AnswerResponse>
     answerScores,
     videoId: input.videoId ?? null,
     videoOffsetMs: input.videoOffsetMs ?? null,
+    cameraMetrics: input.cameraMetrics ?? null,
   });
 
   const finish = async (): Promise<AnswerResponse> => {

@@ -12,10 +12,7 @@ import { processAnswer } from "@/lib/services/answerService";
 export async function POST(req: Request) {
   try {
     const userId = await requireUserId();
-    // Per user, not per IP: this route is authenticated, and every answer costs
-    // an LLM scoring call. A real candidate submits once per question and can't
-    // approach this; a script pointed at it would otherwise bill us per hit.
-    rateLimit(`answer:${userId}`, { limit: 30, windowMs: 60_000 });
+    await rateLimit(`answer:${userId}`, { limit: 30, windowMs: 60_000 });
 
     const body = answerTextSchema.parse(await req.json());
     const session = await repo.getSession(body.session_id, userId);
@@ -27,6 +24,7 @@ export async function POST(req: Request) {
       transcript: body.text,
       videoId: body.video_id ?? null,
       videoOffsetMs: body.video_offset_ms ?? null,
+      cameraMetrics: body.camera_metrics ?? null,
     });
     return json(result);
   } catch (err) {
