@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
+import math
 import os
 from collections.abc import AsyncIterator
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -36,8 +38,8 @@ MULTIPART_OVERHEAD_BYTES = 16 * 1024
 
 MAX_AUDIO_BYTES = _max_audio_bytes()
 
-#: The ceiling this middleware enforces. Bounds the REQUEST BODY, which is the
-#: clip plus its envelope — deliberately not the same number as the clip cap.
+MAX_SENTENCE_ENDS = 10_000
+
 MAX_UPLOAD_BYTES = MAX_AUDIO_BYTES + MULTIPART_OVERHEAD_BYTES
 
 
@@ -141,15 +143,56 @@ def health() -> JSONResponse:
     )
 
 
+def _parse_sentence_ends(raw: str | None) -> list[float] | None:
+    if raw is None:
+        return None
+    raw = raw.strip()
+    if not raw:
+        return None
+
+    try:
+        parsed = json.loads(raw)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400, detail=f"sentence_ends is not valid JSON: {exc}"
+        ) from exc
+
+    if not isinstance(parsed, list):
+        raise HTTPException(
+            status_code=400, detail="sentence_ends must be a JSON array of seconds"
+        )
+    if len(parsed) > MAX_SENTENCE_ENDS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"sentence_ends holds more than {MAX_SENTENCE_ENDS} entries",
+        )
+
+    ends: list[float] = []
+    for value in parsed:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise HTTPException(
+                status_code=400, detail="sentence_ends must contain only numbers"
+            )
+        seconds = float(value)
+        if not math.isfinite(seconds) or seconds < 0:
+            raise HTTPException(
+                status_code=400,
+                detail="sentence_ends must contain only finite, non-negative seconds",
+            )
+        ends.append(seconds)
+    return ends
+
+
 @app.post("/analyze")
-async def analyze_endpoint(file: UploadFile = File(...)) -> dict[str, float]:
+async def analyze_endpoint(
+    file: UploadFile = File(...),
+    sentence_ends: str | None = Form(None),
+) -> dict[str, float | int | None]:
     data = await file.read()
     if not data:
         raise HTTPException(status_code=400, detail="empty audio")
+    ends = _parse_sentence_ends(sentence_ends)
     try:
-        # ffmpeg and Parselmouth are synchronous C. Called inline they block the
-        # event loop, which now also stalls the sweeper and this service's own
-        # health check.
-        return await asyncio.to_thread(analyze, data)
-    except Exception as exc:  # noqa: BLE001 — surface a clean 500 to the caller
+        return await asyncio.to_thread(analyze, data, ends)
+    except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"analysis failed: {exc}") from exc

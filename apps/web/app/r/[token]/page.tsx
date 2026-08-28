@@ -3,12 +3,13 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { cache } from "react";
-import type { CategoryScores, DeliveryMetrics } from "@repo/types";
+import type { CategoryScores, DeliveryMetrics, StarBreakdown } from "@repo/types";
 import * as repo from "@/lib/db/repo";
-import { shareTokenSchema } from "@/lib/schemas";
+import { shareTokenSchema, starBreakdownsSchema } from "@/lib/schemas";
 import { BAND_LABEL, ButtonLink, cx, scoreBand, scoreTone } from "@/components/ui";
 import { ScoreBand } from "@/components/ScoreBand";
 import { Delivery } from "@/app/(app)/report/[sessionId]/Delivery";
+import { StarBar } from "@/app/(app)/report/[sessionId]/StarBar";
 
 export const dynamic = "force-dynamic";
 
@@ -74,6 +75,7 @@ export default async function SharedVerdictPage({
   const delivery = readDeliveryMetrics(shared.deliveryMetrics);
   const strengths = readPoints(shared.strengths);
   const weaknesses = readPoints(shared.weaknesses);
+  const stars: StarBreakdown[] = starBreakdownsSchema.parse(shared.starBreakdown);
 
   const title = shared.name?.trim() || shared.role?.trim() || "Interview";
   const meta = [
@@ -200,6 +202,33 @@ export default async function SharedVerdictPage({
           </section>
         ) : null}
 
+        {stars.length > 0 ? (
+          <section className="section" aria-label="How the story answers were built">
+            <SectionHead
+              title="How the stories were built"
+              note="story answers only · shape, not words"
+            />
+
+            <div className="mt-8 grid gap-9">
+              {stars.map((bar) => (
+                <div key={bar.turn_index}>
+                  <p className="font-mono text-[0.6rem] tracking-[0.2em] uppercase text-ink-muted">
+                    Question {String(bar.turn_index + 1).padStart(2, "0")}
+                  </p>
+                  <div className="mt-3">
+                    <StarBar breakdown={bar} showQuotes={false} />
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <p className="mono-note" style={{ marginTop: 20 }}>
+              Situation, Task, Action, Result — the four parts an interviewer listens for. The
+              sentences behind each block stay private; only how long each part ran is shared.
+            </p>
+          </section>
+        ) : null}
+
         {strengths.length > 0 || weaknesses.length > 0 ? (
           <section className="section" aria-label="What worked, what didn't">
             <SectionHead title="What worked, what didn't" note="the coach's read · no quotes" />
@@ -303,6 +332,7 @@ function readDeliveryMetrics(value: unknown): DeliveryMetrics | null {
     return null;
   }
   const optional = (v: unknown) => (Number.isFinite(v) ? (v as number) : null);
+  const count = (v: unknown) => (Number.isFinite(v) ? (v as number) : 0);
   return {
     wpm: m.wpm as number,
     avg_pause_ms: m.avg_pause_ms as number,
@@ -310,6 +340,16 @@ function readDeliveryMetrics(value: unknown): DeliveryMetrics | null {
     pitch_variation: optional(m.pitch_variation),
     energy: optional(m.energy),
     mean_pitch_hz: optional(m.mean_pitch_hz),
+    jitter_local: optional(m.jitter_local),
+    shimmer_local: optional(m.shimmer_local),
+    hnr_db: optional(m.hnr_db),
+    uptalk_pct: optional(m.uptalk_pct),
+    uptalk_statements: count(m.uptalk_statements),
+    uptalk_rising: count(m.uptalk_rising),
+    on_camera_pct: optional(m.on_camera_pct),
+    smile_pct: optional(m.smile_pct),
+    head_motion_dps: optional(m.head_motion_dps),
+    camera_turns: count(m.camera_turns),
   };
 }
 

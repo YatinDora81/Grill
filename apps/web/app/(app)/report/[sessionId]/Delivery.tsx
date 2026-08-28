@@ -26,6 +26,7 @@ export function Delivery({
 }) {
   const acousticsMissing =
     m.pitch_variation === null && m.energy === null && m.mean_pitch_hz === null;
+  const cameraMissing = m.camera_turns === 0;
   const note = paceNote(m.wpm);
   const v = VOICE[subject];
 
@@ -91,6 +92,74 @@ export function Delivery({
               : null
           }
         />
+
+        <Metric
+          label="Steadiness"
+          value={m.jitter_local !== null ? (m.jitter_local * 100).toFixed(2) : "—"}
+          unit="% jitter"
+          note={
+            m.jitter_local !== null
+              ? `Cycle-to-cycle wobble in pitch, measured off the waveform. Steady speaking voices sit around 1% or below; higher reads as a less steady voice — not a nervous one. It's a rough guide, so the useful comparison is against ${v.their} own other runs.`
+              : null
+          }
+        >
+          {m.shimmer_local !== null ? (
+            <span className="mt-2 block font-mono text-[0.58rem] tracking-[0.1em] uppercase text-ink-muted">
+              {(m.shimmer_local * 100).toFixed(2)}% shimmer
+            </span>
+          ) : null}
+        </Metric>
+        <Metric
+          label="Voice clarity"
+          value={m.hnr_db !== null ? m.hnr_db.toFixed(1) : "—"}
+          unit="dB"
+          note={
+            m.hnr_db !== null
+              ? "Harmonics-to-noise ratio: how much of the sound is clean tone versus breath and rasp. Higher is clearer, and roughly 20 dB and up is a clear speaking voice. A poor microphone drags it down too, so read it beside the recording."
+              : null
+          }
+        />
+        <Metric
+          label="Uptalk"
+          value={m.uptalk_pct !== null ? `${m.uptalk_rising}/${m.uptalk_statements}` : "—"}
+          unit="rose"
+          note={
+            m.uptalk_pct !== null
+              ? `Statements that ended on a rising pitch, the way a question does. A few is ordinary speech; a lot of them makes claims sound like they are asking for agreement. Questions ${v.they} actually asked are not counted.`
+              : null
+          }
+        />
+
+        <Metric
+          label="Looked at camera"
+          value={m.on_camera_pct !== null ? String(Math.round(m.on_camera_pct)) : "—"}
+          unit="%"
+          note={
+            m.on_camera_pct !== null
+              ? `How much of ${v.their} speaking time ${v.their} eyes and head were pointed at the lens. Measured on ${v.their} own device — no video was uploaded to work it out. An interviewer on a video call reads this as attention, but it is a camera, not a person: notes off to the side are a perfectly good reason to be looking away.`
+              : null
+          }
+        />
+        <Metric
+          label="Smiled"
+          value={m.smile_pct !== null ? String(Math.round(m.smile_pct)) : "—"}
+          unit="%"
+          note={
+            m.smile_pct !== null
+              ? "Share of the time a smile was visible on camera. There is no right number here and it moves no score — but a flat zero across a whole interview is worth knowing about."
+              : null
+          }
+        />
+        <Metric
+          label="Head movement"
+          value={m.head_motion_dps !== null ? m.head_motion_dps.toFixed(1) : "—"}
+          unit="°/s"
+          note={
+            m.head_motion_dps !== null
+              ? `How fast ${v.their} head turned while ${v.they} talked, in degrees a second. Very low reads as stiff and very high reads as restless, with a wide ordinary middle — compare it against ${v.their} own other runs rather than against anyone else's.`
+              : null
+          }
+        />
       </div>
 
       <div className="border-r border-b border-line p-5 sm:p-6">
@@ -103,12 +172,17 @@ export function Delivery({
           </p>
         ) : null}
 
-        {/* The explicit {" "} is load-bearing: JSX drops the leading space of a
-            text node that wraps onto the next line, and "energy← raw" is what
-            you get without it. */}
+        {cameraMissing ? (
+          <p className="mono-note" style={{ marginTop: 12 }}>
+            The camera was off or blocked for this session, so there is nothing on-camera to
+            measure.
+          </p>
+        ) : null}
+
         <p className="dfoot">
-          <b>pace &amp; pauses</b> ← word-level timings&ensp;·&ensp;<b>pitch &amp; energy</b> ← raw
-          audio&ensp;·&ensp;never the transcript
+          <b>pace &amp; pauses</b> ← word-level timings&ensp;·&ensp;<b>pitch, energy &amp; voice</b>{" "}
+          ← raw audio&ensp;·&ensp;<b>on camera</b> ← the webcam, in {v.their} own
+          browser&ensp;·&ensp;never the transcript
         </p>
       </div>
     </div>

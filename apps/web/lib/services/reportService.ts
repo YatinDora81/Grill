@@ -17,8 +17,12 @@ import {
   textDeliveryMetrics,
   analyzeAcoustics,
   aggregateAcoustics,
+  aggregateCamera,
   combineDelivery,
+  statementEnds,
 } from "./deliveryService";
+import { computeStarBreakdown } from "./starService";
+import { seedDrillCards } from "./drillService";
 import { toSessionContext } from "./sessionContext";
 
 function words(t: Turn): TranscriptWord[] | null {
@@ -33,7 +37,7 @@ async function turnAcoustics(t: Turn): Promise<AcousticMetrics | null> {
   try {
     const audio = await getAudio(t.audioKey);
     const ext = t.audioKey.split(".").pop() || "webm";
-    return await analyzeAcoustics(audio, `turn.${ext}`, `audio/${ext}`);
+    return await analyzeAcoustics(audio, `turn.${ext}`, `audio/${ext}`, statementEnds(words(t)));
   } catch (err) {
     console.warn(`[reportService] acoustics failed for ${t.audioKey}: ${(err as Error).message}`);
     return null;
@@ -59,7 +63,7 @@ export async function computeDelivery(turns: Turn[]): Promise<DeliveryMetrics> {
     );
   }
 
-  return combineDelivery(text, aggregateAcoustics(acoustics));
+  return combineDelivery(text, aggregateAcoustics(acoustics), aggregateCamera(turns));
 }
 
 function honestLine(turns: Turn[], report: ReportResponse): string {
@@ -108,7 +112,11 @@ function queueReportReadyMail(session: Session, score: number, headline: string)
 
 export async function buildAndSaveReport(session: Session) {
   const turns = await repo.getTurns(session.id);
-  const delivery = await computeDelivery(turns);
+
+  const [delivery, starBreakdown] = await Promise.all([
+    computeDelivery(turns),
+    computeStarBreakdown(turns),
+  ]);
 
   const reportTurns: ReportTurn[] = turns.map((t) => ({
     turn_index: t.turnIndex,
@@ -121,7 +129,7 @@ export async function buildAndSaveReport(session: Session) {
   const ctx = toSessionContext(session);
   const { value, raw } = await generateJson(reportResponseSchema, {
     system: REPORT_SYSTEM,
-    prompt: reportPrompt(ctx, reportTurns, delivery),
+    prompt: reportPrompt(ctx, reportTurns, delivery, starBreakdown),
     temperature: 0.4,
   });
 
@@ -137,8 +145,13 @@ export async function buildAndSaveReport(session: Session) {
     worstAnswer: value.worst_answer,
     nextSteps: value.next_steps,
     questionFeedback: value.question_feedback,
+    starBreakdown,
     raw: { report: value, raw_text: raw },
   });
+
+  await seedDrillCards(session.userId, turns).catch((err) =>
+    console.warn(`[reportService] drill seeding for ${session.id} skipped:`, err),
+  );
 
   queueReportReadyMail(session, report.overallScore, honestLine(turns, value));
 

@@ -156,6 +156,16 @@ export const SAMPLE_REPORT: Report = {
     pitch_variation: 21.6,
     energy: 0.038,
     mean_pitch_hz: 121,
+    jitter_local: 0.019,
+    shimmer_local: 0.071,
+    hnr_db: 16.8,
+    uptalk_pct: 26.47,
+    uptalk_statements: 34,
+    uptalk_rising: 9,
+    on_camera_pct: 71.4,
+    smile_pct: 12.8,
+    head_motion_dps: 8.6,
+    camera_turns: 7,
   },
   strengths: [
     {
@@ -291,6 +301,53 @@ export const SAMPLE_REPORT: Report = {
       ],
     },
   ],
+  star_breakdown: [
+    {
+      turn_index: 3,
+      basis: "time",
+      segments: [
+        {
+          label: "S",
+          start: 0.46,
+          end: 14.6,
+          text: "So we underestimated the migration, um, and the review cycle took longer because like coordination between the two teams needed a full sprint we never planned for. The estimate assumed the schemas already matched, and they didn't.",
+        },
+        {
+          label: "R",
+          start: 15.15,
+          end: 18.37,
+          text: "I mean we did ship it, it was about three weeks late.",
+        },
+      ],
+      share: { S: 81.5, T: 0, A: 0, R: 18.5, other: 0 },
+      missing: ["T", "A"],
+      note: "Four fifths of this answer sets the scene and the outcome is one clause; nothing in between says what you were on the hook for or what you did about it.",
+    },
+    {
+      turn_index: 6,
+      basis: "words",
+      segments: [
+        {
+          label: "S",
+          start: 0,
+          end: 39,
+          text: "We decided to drop the replay tool from the cutover plan to save a week, and I thought that was wrong — without replay, a bad deploy during the cutover isn't something you roll back, it's data you've lost.",
+        },
+        { label: "A", start: 39, end: 45, text: "I said so in the review." },
+        { label: "R", start: 45, end: 49, text: "It still got dropped." },
+        { label: "other", start: 49, end: 57, text: "I still think it was the wrong call," },
+        {
+          label: "A",
+          start: 57,
+          end: 76,
+          text: "and I ended up building a cut-down version of it anyway because we needed it in the second week.",
+        },
+      ],
+      share: { S: 51.3, T: 0, A: 32.9, R: 5.3, other: 10.5 },
+      missing: ["T"],
+      note: "Half the answer is the position you took and four words are the outcome; what the team actually asked of you once the decision stood is never stated.",
+    },
+  ],
   created_at: "2026-07-28T09:14:00.000Z",
 };
 
@@ -304,6 +361,12 @@ const RUBRIC = {
   q6: { relevance: 7, correctness: 6, structure: 6, depth: 6, filler: 7 },
 } as const;
 
+const Q4_AWAY = [
+  { start_ms: 3_120, end_ms: 4_460 },
+  { start_ms: 9_180, end_ms: 12_040 },
+  { start_ms: 16_700, end_ms: 17_520 },
+];
+
 function turn(
   index: number,
   question: string,
@@ -311,6 +374,8 @@ function turn(
   transcript: string,
   scores: ReplayTurn["scores"],
   transcriptWords: TranscriptWord[] | null = null,
+  awaySegments: ReplayTurn["away_segments"] = null,
+  takeMs: ReplayTurn["take_ms"] = null,
 ): ReplayTurn {
   return {
     turn_id: `sample-turn-${index}`,
@@ -327,6 +392,9 @@ function turn(
     starred: false,
     feedback: SAMPLE_REPORT.question_feedback[index] ?? null,
     scores,
+    star: SAMPLE_REPORT.star_breakdown.find((b) => b.turn_index === index) ?? null,
+    away_segments: awaySegments,
+    take_ms: takeMs,
   };
 }
 
@@ -359,6 +427,8 @@ export const SAMPLE_TURNS: ReplayTurn[] = [
     "So we underestimated the migration, um, and the review cycle took longer because like coordination between the two teams needed a full sprint we never planned for. The estimate assumed the schemas already matched, and they didn't. I mean we did ship it, it was about three weeks late.",
     RUBRIC.q3,
     Q4_WORDS,
+    Q4_AWAY,
+    18_370,
   ),
   turn(
     4,
