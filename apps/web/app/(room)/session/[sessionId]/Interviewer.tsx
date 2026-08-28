@@ -9,16 +9,19 @@ export function Interviewer({
   speech,
   question,
   micLive,
+  speaking,
+  replay,
 }: {
   speech: Speech;
   question: string;
   micLive: boolean;
+  speaking?: boolean;
+  replay?: () => void;
 }) {
   if (!speech.supported) return null;
 
-  // Square, like every other control in the redesign. No border: these sit
-  // beside the question eyebrow, and two outlined boxes up there compete with
-  // the follow-up chip directly below them.
+  const talking = speaking ?? speech.speaking;
+
   const btn =
     "flex size-8 items-center justify-center text-room-muted transition-colors hover:bg-room-raised hover:text-room-ink disabled:opacity-40 disabled:hover:bg-transparent";
 
@@ -30,11 +33,11 @@ export function Interviewer({
         aria-pressed={speech.muted}
         className={cx(btn, speech.muted && "text-room-ink")}
       >
-        {speech.muted ? <VolumeXIcon /> : <VolumeIcon active={speech.speaking} />}
+        {speech.muted ? <VolumeXIcon /> : <VolumeIcon active={talking} />}
       </button>
 
       <button
-        onClick={() => speech.speak(question)}
+        onClick={() => (replay ? replay() : speech.speak(question))}
         aria-label="Replay the question"
         title={micLive ? "Not while the mic is live — it would land in your answer" : undefined}
         disabled={speech.muted || micLive}
@@ -62,7 +65,12 @@ function VolumeIcon({ active }: { active: boolean }) {
         strokeWidth="2"
         strokeLinejoin="round"
       />
-      <path d="M15.5 8.5a5 5 0 0 1 0 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <path
+        d="M15.5 8.5a5 5 0 0 1 0 7"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
       {active && (
         <path
           d="M18.5 5.5a9 9 0 0 1 0 13"

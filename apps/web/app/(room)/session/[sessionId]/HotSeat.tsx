@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 import type { AnswerResponse, EndResponse, Persona, QuestionType } from "@repo/types";
@@ -9,8 +9,12 @@ import { personaLabel } from "@/lib/interviewMeta";
 import { cx } from "@/components/ui";
 import { GrillToaster } from "@/components/toast";
 import { useSpeech } from "@/hooks/useSpeech";
+import { useLiveTranscript, type LiveTranscript } from "@/hooks/useLiveTranscript";
 import { useRecorder } from "./useRecorder";
 import { useSessionVideo } from "./useSessionVideo";
+import { useCameraMetrics } from "./useCameraMetrics";
+import { prefetchQuestionAudio, useInterviewerVoice } from "./useInterviewerVoice";
+import { CameraCalibration } from "./CameraCalibration";
 import { Interviewer } from "./Interviewer";
 import { SelfView, CameraToggle } from "./SelfView";
 
@@ -78,16 +82,32 @@ function seatLine(s: {
     return { text: "Got it — scoring that answer", sub: "writing the next question", tone: "calm" };
   }
   if (s.mode === "text") {
-    return { text: "Typing this answer", sub: "typed answers are scored on content only", tone: "calm" };
+    return {
+      text: "Typing this answer",
+      sub: "typed answers are scored on content only",
+      tone: "calm",
+    };
   }
   if (!s.rec.supported) {
-    return { text: "This browser can't record audio", sub: "type your answer instead", tone: "warn" };
+    return {
+      text: "This browser can't record audio",
+      sub: "type your answer instead",
+      tone: "warn",
+    };
   }
   switch (s.rec.state) {
     case "denied":
-      return { text: "Microphone blocked", sub: "allow it in your browser, or type this one", tone: "warn" };
+      return {
+        text: "Microphone blocked",
+        sub: "allow it in your browser, or type this one",
+        tone: "warn",
+      };
     case "requesting":
-      return { text: "Waiting for the microphone", sub: "allow access when your browser asks", tone: "calm" };
+      return {
+        text: "Waiting for the microphone",
+        sub: "allow access when your browser asks",
+        tone: "calm",
+      };
     case "recording":
       return {
         text: "Listening — speak whenever you're ready",
@@ -100,7 +120,11 @@ function seatLine(s: {
         : { text: "That take is in", sub: "sending it now", tone: "calm" };
     default:
       return s.speaking
-        ? { text: "Reading the question out loud", sub: "tap the mic when you're ready", tone: "calm" }
+        ? {
+            text: "Reading the question out loud",
+            sub: "tap the mic when you're ready",
+            tone: "calm",
+          }
         : { text: "Ready when you are", sub: "tap the mic, then just talk", tone: "calm" };
   }
 }
@@ -109,7 +133,10 @@ function SeatState({ line }: { line: SeatLine }) {
   return (
     <div className={SEAT_BANNER} aria-live="polite">
       <div className={SEAT_BANNER_IN}>
-        <span aria-hidden="true" className={cx("size-2 flex-none rounded-full", SEAT_DOT[line.tone])} />
+        <span
+          aria-hidden="true"
+          className={cx("size-2 flex-none rounded-full", SEAT_DOT[line.tone])}
+        />
         <span className="min-w-0 truncate">{line.text}</span>
         <em className="truncate not-italic tracking-[0.1em] text-ink-muted max-sm:hidden">
           · {line.sub}
@@ -124,6 +151,8 @@ export function HotSeat(props: Props) {
   const rec = useRecorder(props.maxSeconds);
   const speech = useSpeech();
   const video = useSessionVideo(props.sessionId, props.videoBitrate);
+  const camera = useCameraMetrics(video.stream);
+  const live = useLiveTranscript(rec.state === "recording");
 
   const [turnIndex, setTurnIndex] = useState(props.turnIndex);
   const [question, setQuestion] = useState(props.question);
@@ -135,6 +164,8 @@ export function HotSeat(props: Props) {
   const [phase, setPhase] = useState<Phase>("answering");
   const [error, setError] = useState("");
   const [pipOpen, setPipOpen] = useState(true);
+  const [calibrationDone, setCalibrationDone] = useState(false);
+  const onCalibrated = useCallback(() => setCalibrationDone(true), []);
 
   const busy = phase !== "answering";
 
@@ -152,28 +183,39 @@ export function HotSeat(props: Props) {
       : {};
   };
 
-  // Read each new question aloud, a beat after it lands — speaking over the
-  // question's own entrance animation makes both feel rushed. `speak` is
-  // referentially stable, so this fires on the question text alone, not when
-  // the voice list arrives or mute toggles (either would restart it mid-word).
-  const { speak, stop: stopSpeaking } = speech;
+  const voice = useInterviewerVoice({
+    sessionId: props.sessionId,
+    turnIndex,
+    question,
+    speech,
+    delayMs: SPEAK_DELAY_MS,
+  });
+  const stopSpeaking = voice.stop;
+
   useEffect(() => {
-    const t = setTimeout(() => speak(question), SPEAK_DELAY_MS);
-    return () => clearTimeout(t);
-  }, [question, speak]);
+    if (speech.muted) stopSpeaking();
+  }, [speech.muted, stopSpeaking]);
 
   function startRecording() {
     stopSpeaking();
     rec.start();
+    camera.beginTake();
   }
 
-  /** Shared tail: advance to the next question, or wrap the interview up. */
+  const textTakeTurn = useRef<number | null>(null);
+  const beginTextTake = () => {
+    if (textTakeTurn.current === turnIndex) return;
+    textTakeTurn.current = turnIndex;
+    camera.beginTake();
+  };
+
   async function afterAnswer(res: AnswerResponse) {
     setAnswered((n) => n + 1);
     if (!res.done && res.next_question) {
       setTurnIndex(res.turn_index + 1);
       setQuestion(res.next_question);
       setQuestionType(res.next_question_type ?? "technical");
+      prefetchQuestionAudio(props.sessionId, res.turn_index + 1);
       setText("");
       rec.reset();
       setPhase("answering");
@@ -187,12 +229,7 @@ export function HotSeat(props: Props) {
       await apiPost<EndResponse>("/api/interview/end", {
         session_id: props.sessionId,
       });
-    } catch {
-      // Swallowed deliberately. `processAnswer` already queued this session
-      // before it told us `done`, so the report is safe whatever happens here —
-      // /end only makes it faster. Nothing the candidate could do with the error
-      // anyway, and the report page reports the real state when they open it.
-    }
+    } catch {}
   }
 
   function track(work: Promise<void>, failure: string): Promise<void> {
@@ -217,6 +254,7 @@ export function HotSeat(props: Props) {
 
   async function submitText() {
     if (!text.trim() || busy) return;
+    const cam = camera.endTake();
     stopSpeaking();
     setPhase("sending");
     setError("");
@@ -226,6 +264,7 @@ export function HotSeat(props: Props) {
         turn_index: turnIndex,
         text: text.trim(),
         ...videoFields(),
+        ...(cam ? { camera_metrics: cam } : {}),
       });
       await afterAnswer(res);
     };
@@ -233,6 +272,7 @@ export function HotSeat(props: Props) {
       await track(send(), "Couldn't send that answer.");
     } catch (err) {
       if (isStale(err)) return resync();
+      camera.beginTake();
       setError(err instanceof ApiClientError ? err.message : "Couldn't send that answer.");
       setPhase("answering");
     }
@@ -246,6 +286,7 @@ export function HotSeat(props: Props) {
 
   async function finishRecording() {
     const blob = await rec.stop();
+    const cam = camera.endTake();
     if (!blob) {
       setError("Nothing was recorded. Try again, or type your answer.");
       rec.reset();
@@ -263,6 +304,7 @@ export function HotSeat(props: Props) {
       form.append("session_id", props.sessionId);
       form.append("turn_index", String(turnIndex));
       form.append("audio", blob, `turn_${turnIndex}.webm`);
+      if (cam) form.append("camera_metrics", JSON.stringify(cam));
       for (const [k, v] of Object.entries(videoFields())) form.append(k, String(v));
       const res = await apiPostForm<AnswerResponse>("/api/interview/answer", form);
       await afterAnswer(res);
@@ -325,7 +367,7 @@ export function HotSeat(props: Props) {
         </div>
       </header>
 
-      <SeatState line={seatLine({ busy, mode, rec, speaking: speech.speaking })} />
+      <SeatState line={seatLine({ busy, mode, rec, speaking: voice.speaking })} />
 
       <main className="room-main">
         <div className="room-in">
@@ -339,6 +381,8 @@ export function HotSeat(props: Props) {
                   speech={speech}
                   question={question}
                   micLive={rec.state === "recording" || rec.state === "requesting"}
+                  speaking={voice.speaking}
+                  replay={voice.replay}
                 />
               )}
             </div>
@@ -368,12 +412,17 @@ export function HotSeat(props: Props) {
                   onStart={startRecording}
                   onStop={finishRecording}
                   max={props.maxSeconds}
+                  runningLong={
+                    (questionType === "cultural" || questionType === "behavioral") &&
+                    rec.seconds > 0.6 * props.maxSeconds
+                  }
                 />
               ) : (
                 <TextPanel
                   text={text}
                   setText={setText}
                   onSubmit={submitText}
+                  onFocus={beginTextTake}
                   busy={busy}
                   disabled={!text.trim()}
                 />
@@ -402,14 +451,17 @@ export function HotSeat(props: Props) {
 
             {pipOpen && video.stream && (
               <p className="mt-6 max-w-[62ch] font-mono text-[10px] leading-[1.9] tracking-[0.14em] text-ink-muted uppercase">
-                Your camera floats free — <b className="font-medium text-ink-soft">drag the bar
-                to move it</b>, drag its corner to resize, or use <Key>S</Key>
+                Your camera floats free —{" "}
+                <b className="font-medium text-ink-soft">drag the bar to move it</b>, drag its
+                corner to resize, or use <Key>S</Key>
                 <Key>M</Key>
                 <Key>L</Key>. Double-click the bar to snap it to a corner.
               </p>
             )}
 
-            {mode === "voice" && rec.supported && <LiveDelivery rec={rec} max={props.maxSeconds} />}
+            {mode === "voice" && rec.supported && (
+              <LiveDelivery rec={rec} max={props.maxSeconds} live={live} />
+            )}
           </div>
         </div>
       </main>
@@ -426,6 +478,9 @@ export function HotSeat(props: Props) {
             watch it back. Deleted after 100 days.
           </p>
         )}
+        {camera.state === "ready" ? (
+          <p>On-camera analysis runs on this device. Nothing is uploaded but the numbers.</p>
+        ) : null}
       </footer>
 
       {pipOpen && video.stream && (
@@ -437,6 +492,14 @@ export function HotSeat(props: Props) {
           recording={video.state === "recording"}
         />
       )}
+
+      {video.state === "recording" && camera.state === "ready" && !calibrationDone ? (
+        <CameraCalibration
+          sessionId={props.sessionId}
+          calibrate={camera.calibrate}
+          onDone={onCalibrated}
+        />
+      ) : null}
     </div>
   );
 }
@@ -449,21 +512,15 @@ function Key({ children }: { children: React.ReactNode }) {
   );
 }
 
-/**
- * Live delivery numbers — shut by default, and that is the whole point.
- *
- * Watching your own pace and volume while you talk makes people perform the
- * meter instead of answering the question, which is the same failure mode that
- * took the live transcript off this screen. The full delivery breakdown is in
- * the report, measured from the audio, and it is better there. This exists only
- * so that someone who suspects the mic is dead can check a number rather than
- * trust a bar.
- *
- * Only what is genuinely measured client-side is in here: pace, fillers and
- * tone all need the transcript, which is produced server-side after the take is
- * sent, so quoting them live would mean inventing them.
- */
-function LiveDelivery({ rec, max }: { rec: ReturnType<typeof useRecorder>; max: number }) {
+function LiveDelivery({
+  rec,
+  max,
+  live,
+}: {
+  rec: ReturnType<typeof useRecorder>;
+  max: number;
+  live: LiveTranscript;
+}) {
   const recording = rec.state === "recording";
   const dash = "—";
   return (
@@ -483,11 +540,34 @@ function LiveDelivery({ rec, max }: { rec: ReturnType<typeof useRecorder>; max: 
           Heads up — watching these while you talk usually makes people worse, not better.
           They&apos;re all in the report afterwards.
         </p>
-        <div className="grid grid-cols-3 border border-line">
-          <Metric k="Input level" v={recording ? String(Math.round(rec.level * 100)) : dash} unit="%" />
-          <Metric k="This answer" v={recording ? fmtTime(rec.seconds) : dash} />
-          <Metric k="Time left" v={recording ? fmtTime(Math.max(0, max - rec.seconds)) : dash} />
+        <div className="border border-line">
+          <div className="grid grid-cols-3">
+            <Metric
+              k="Input level"
+              v={recording ? String(Math.round(rec.level * 100)) : dash}
+              unit="%"
+            />
+            <Metric k="This answer" v={recording ? fmtTime(rec.seconds) : dash} />
+            <Metric k="Time left" v={recording ? fmtTime(Math.max(0, max - rec.seconds)) : dash} />
+          </div>
+          {live.supported && (
+            <div className="grid grid-cols-3 border-t border-line">
+              <Metric
+                k="Pace (rolling)"
+                v={recording && live.rollingWpm !== null ? String(live.rollingWpm) : dash}
+                unit="wpm"
+              />
+              <Metric k="Fillers so far" v={recording ? String(live.fillers) : dash} />
+              <Metric k="Words" v={recording ? String(live.words) : dash} />
+            </div>
+          )}
         </div>
+        {live.supported && (
+          <p className="mt-3 font-mono text-[10px] leading-relaxed tracking-[0.12em] text-ink-muted uppercase">
+            Live numbers come from your browser&apos;s speech engine and are never sent to Grill.
+            The report uses the recording.
+          </p>
+        )}
       </div>
     </details>
   );
@@ -499,7 +579,9 @@ function Metric({ k, v, unit }: { k: string; v: string; unit?: string }) {
       <span className="font-mono text-[9.5px] tracking-[0.16em] text-ink-muted uppercase">{k}</span>
       <p className="mt-1 font-mono text-[18px] font-semibold tabular-nums">
         {v}
-        {unit && v !== "—" && <i className="ml-0.5 text-[9.5px] not-italic text-ink-muted">{unit}</i>}
+        {unit && v !== "—" && (
+          <i className="ml-0.5 text-[9.5px] not-italic text-ink-muted">{unit}</i>
+        )}
       </p>
     </div>
   );
@@ -584,12 +666,14 @@ function VoicePanel({
   onStart,
   onStop,
   max,
+  runningLong,
 }: {
   rec: ReturnType<typeof useRecorder>;
   busy: boolean;
   onStart: () => void;
   onStop: () => void;
   max: number;
+  runningLong: boolean;
 }) {
   const recording = rec.state === "recording";
   const remaining = max - rec.seconds;
@@ -636,6 +720,11 @@ function VoicePanel({
             {remaining <= 30 && <span className="take-left">{remaining}s left</span>}
           </p>
           <p className="mic-note">Tap to finish</p>
+          {runningLong && (
+            <p className="mt-2 font-mono text-[10px] tracking-[0.14em] text-mixed uppercase">
+              Running long for a behavioral answer — land the result.
+            </p>
+          )}
         </>
       ) : (
         <>
@@ -658,12 +747,14 @@ function TextPanel({
   text,
   setText,
   onSubmit,
+  onFocus,
   busy,
   disabled,
 }: {
   text: string;
   setText: (v: string) => void;
   onSubmit: () => void;
+  onFocus: () => void;
   busy: boolean;
   disabled: boolean;
 }) {
@@ -681,6 +772,7 @@ function TextPanel({
         rows={7}
         value={text}
         maxLength={20_000}
+        onFocus={onFocus}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) onSubmit();

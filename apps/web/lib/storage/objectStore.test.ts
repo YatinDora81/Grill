@@ -16,7 +16,7 @@ mock.module("@/lib/env", () => ({
   },
 }));
 
-const { listParts } = await import("./objectStore");
+const { headObject, listParts, putAudio, putObject } = await import("./objectStore");
 
 const KEY = "video/sess_1/vid_1.webm";
 const UPLOAD_ID = "upload_1";
@@ -153,4 +153,84 @@ test("returns an empty list for an upload R2 genuinely holds no parts for", asyn
   serve(ok(pageXml([])));
 
   await expect(listParts(KEY, UPLOAD_ID)).resolves.toEqual([]);
+});
+
+interface Seen {
+  method: string;
+  url: string;
+  contentType: string | null;
+  body: Uint8Array | null;
+}
+
+function serveStatus(status: number): Seen[] {
+  const seen: Seen[] = [];
+  globalThis.fetch = mock(async (req: Request) => {
+    const body = req.body ? new Uint8Array(await req.arrayBuffer()) : null;
+    seen.push({
+      method: req.method,
+      url: req.url,
+      contentType: req.headers.get("content-type"),
+      body,
+    });
+    return new Response(null, { status });
+  }) as unknown as typeof fetch;
+  return seen;
+}
+
+const CLIP_KEY = "tts/orpheus/abc123.wav";
+
+test("headObject reports a cache hit for an object R2 answers 200 for", async () => {
+  const seen = serveStatus(200);
+
+  await expect(headObject(CLIP_KEY)).resolves.toBe(true);
+
+  expect(seen[0]?.method).toBe("HEAD");
+  expect(seen[0]?.url).toContain(CLIP_KEY);
+});
+
+test("headObject reports a miss rather than throwing when the object is absent", async () => {
+  serveStatus(404);
+
+  await expect(headObject(CLIP_KEY)).resolves.toBe(false);
+});
+
+test("headObject throws on any other status so a broken bucket is not read as a miss", async () => {
+  serveStatus(403);
+
+  const err = await headObject(CLIP_KEY).catch((e) => e);
+  expect(err).toBeInstanceOf(AppError);
+  expect((err as AppError).status).toBe(503);
+  expect((err as AppError).code).toBe("storage_head_failed");
+});
+
+test("putObject PUTs the exact bytes it was handed under the given content type", async () => {
+  const seen = serveStatus(200);
+  const bytes = new Uint8Array([82, 73, 70, 70, 0, 1, 2, 3]);
+
+  await putObject(CLIP_KEY, bytes, "audio/wav");
+
+  expect(seen[0]?.method).toBe("PUT");
+  expect(seen[0]?.url).toContain(CLIP_KEY);
+  expect(seen[0]?.contentType).toBe("audio/wav");
+  expect(Array.from(seen[0]?.body ?? [])).toEqual(Array.from(bytes));
+});
+
+test("putObject surfaces a refused upload instead of reporting success", async () => {
+  serveStatus(403);
+
+  const err = await putObject(CLIP_KEY, new Uint8Array([1]), "audio/wav").catch((e) => e);
+  expect(err).toBeInstanceOf(AppError);
+  expect((err as AppError).code).toBe("storage_put_failed");
+});
+
+test("putAudio still uploads exactly as it did before it was generalised", async () => {
+  const seen = serveStatus(200);
+  const bytes = new Uint8Array([1, 2, 3, 4, 5]);
+
+  await putAudio("audio/sess_1/turn_0.webm", bytes, "audio/webm");
+
+  expect(seen[0]?.method).toBe("PUT");
+  expect(seen[0]?.url).toContain("audio/sess_1/turn_0.webm");
+  expect(seen[0]?.contentType).toBe("audio/webm");
+  expect(Array.from(seen[0]?.body ?? [])).toEqual(Array.from(bytes));
 });

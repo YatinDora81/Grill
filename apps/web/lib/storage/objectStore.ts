@@ -34,7 +34,7 @@ export function audioKey(sessionId: string, turnIndex: number, ext = "webm"): st
   return `${audioPrefix(sessionId)}turn_${turnIndex}.${ext}`;
 }
 
-export async function putAudio(key: string, data: Uint8Array, contentType: string): Promise<void> {
+export async function putObject(key: string, data: Uint8Array, contentType: string): Promise<void> {
   const res = await client().fetch(objectUrl(key), {
     method: "PUT",
     body: data as unknown as BodyInit,
@@ -46,6 +46,17 @@ export async function putAudio(key: string, data: Uint8Array, contentType: strin
   if (!res.ok) {
     throw serviceUnavailable(`Storage PUT failed (${res.status}).`, "storage_put_failed");
   }
+}
+
+export function putAudio(key: string, data: Uint8Array, contentType: string): Promise<void> {
+  return putObject(key, data, contentType);
+}
+
+export async function headObject(key: string): Promise<boolean> {
+  const res = await client().fetch(objectUrl(key), { method: "HEAD" });
+  if (res.ok) return true;
+  if (res.status === 404) return false;
+  throw serviceUnavailable(`Storage HEAD failed (${res.status}).`, "storage_head_failed");
 }
 
 export async function getAudio(key: string): Promise<Uint8Array> {
