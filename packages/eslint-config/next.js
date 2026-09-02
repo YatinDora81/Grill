@@ -21,6 +21,7 @@ export const nextJsConfig = [
     "next-env.d.ts",
     "public/mediapipe/**",
     "public/models/**",
+    "public/vad/**",
   ]),
   {
     ...pluginReact.configs.flat.recommended,
