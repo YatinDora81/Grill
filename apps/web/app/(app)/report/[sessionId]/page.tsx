@@ -171,6 +171,7 @@ export default async function ReportPage({
 
   const config = session.config as unknown as Partial<InterviewConfig>;
   const company = typeof config.company === "string" ? config.company.trim() : "";
+  const wasLive = config.live === true;
 
   const sections: Section[] = [
     { id: "verdict", label: "The verdict" },
@@ -403,8 +404,17 @@ export default async function ReportPage({
         )}
 
         <section className="section nav-target" id="sounded" aria-label="How you sounded">
-          <SectionHead title="How you sounded" note="measured from the recording · never guessed" />
-          <Delivery metrics={report.delivery_metrics} />
+          <SectionHead
+            title="How you sounded"
+            note={wasLive ? "live conversation · nothing measured" : "measured from the recording · never guessed"}
+          />
+          {wasLive ? (
+            <p className="mono-note" style={{ marginTop: 16 }}>
+              This was a live conversation &mdash; pace, tone and camera were not measured.
+            </p>
+          ) : (
+            <Delivery metrics={report.delivery_metrics} />
+          )}
         </section>
 
         {hasEvidence && (

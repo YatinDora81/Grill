@@ -176,6 +176,8 @@ const NO_CAMERA: DeliveryMetrics = {
 
 const build = (d: DeliveryMetrics) => reportPrompt(ctx, turns, d);
 
+const liveCtx: SessionContext = { ...ctx, config: { ...ctx.config, live: true } };
+
 test("a typed interview is never handed a pace or a pitch to grade", () => {
   const p = build(TYPED);
 
@@ -198,6 +200,18 @@ test("a typed interview is never handed a pace or a pitch to grade", () => {
   expect(p).toContain("typed their answers rather than speaking");
   expect(p).toContain("The camera was off or blocked");
   expect(p).toContain("Treat these as absent, not as zero");
+});
+
+test("a live conversation is never described to the model as a typed one", () => {
+  const p = reportPrompt(liveCtx, turns, TYPED);
+
+  expect(p).toContain(
+    "This was a live spoken conversation: no audio was recorded, so pace, tone, latency and camera were not measured.",
+  );
+  expect(p).not.toContain("typed their answers");
+  expect(p).not.toContain("The camera was off or blocked");
+  expect(p).toContain("Treat these as absent, not as zero");
+  expect(readDelivery(p).absent[0]).toBe("pace");
 });
 
 test("filler words survive typed answers, because they are counted from the text", () => {

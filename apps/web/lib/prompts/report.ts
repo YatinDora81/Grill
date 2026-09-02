@@ -215,7 +215,7 @@ export function reportPrompt(
 Full interview:
 ${body}
 ${stars ? `\n${stars}\n` : ""}
-${deliveryBlock(delivery)}
+${deliveryBlock(delivery, s.config.live === true)}
 
 Write the final report. The verdict must be one honest sentence. For every answered
 turn, include coaching in question_feedback: 1–3 possible_answers (strong example

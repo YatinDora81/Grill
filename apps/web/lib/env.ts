@@ -162,6 +162,12 @@ export const config = {
   code: {
     runTimeoutMs: num("CODE_RUN_TIMEOUT_MS", 8_000),
   },
+  live: {
+    enabled: process.env.GEMINI_LIVE_ENABLED === "1",
+    model: process.env.GEMINI_LIVE_MODEL || "gemini-2.5-flash-native-audio-preview-12-2025",
+    maxConcurrent: num("LIVE_MAX_CONCURRENT", 2),
+    maxMinutes: num("LIVE_MAX_MINUTES", 12),
+  },
   interview: {
     defaultNumQuestions: num("DEFAULT_NUM_QUESTIONS", 8),
   },
@@ -201,6 +207,9 @@ export const config = {
   },
   get geminiTtsConfigured(): boolean {
     return Boolean(this.tts.geminiEnabled && storageReady);
+  },
+  get liveConfigured(): boolean {
+    return Boolean(this.live.enabled && geminiKeys.length > 0);
   },
   get redisConfigured(): boolean {
     return Boolean(this.upstash.redisUrl && this.upstash.redisToken);

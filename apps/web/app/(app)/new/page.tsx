@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Reveal } from "@/components/Reveal";
 import { ExplainBanner } from "@/components/Explain";
+import { config } from "@/lib/env";
 import { exclusiveModeSchema, roundSchema } from "@/lib/schemas";
 import { NewInterviewForm } from "./NewInterviewForm";
 
@@ -64,6 +65,7 @@ export default async function NewInterviewPage({
           initialStarredHashes={starredHashes}
           initialMode={initialMode}
           initialRound={initialRound}
+          liveEnabled={config.liveConfigured}
         />
       </main>
     </>

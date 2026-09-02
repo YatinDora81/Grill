@@ -199,6 +199,7 @@ const interviewConfigShape = z.object({
   max_answer_seconds: z.coerce.number().int().positive().optional(),
   round: roundSchema.default("spoken"),
   problems: z.coerce.number().int().min(1).max(3).default(2),
+  live: z.coerce.boolean().default(false),
 });
 
 export const interviewConfigSchema = interviewConfigShape.superRefine((v, ctx) => {
@@ -258,6 +259,13 @@ export const interviewConfigSchema = interviewConfigShape.superRefine((v, ctx) =
       path: ["round"],
       message:
         "Coding and design rounds draw on your résumé, a topic or a job description — not saved questions.",
+    });
+  }
+  if (v.live && v.round !== "spoken") {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["live"],
+      message: "Live mode is for spoken interviews.",
     });
   }
 });
@@ -453,6 +461,20 @@ export const turnRefSchema = z.object({
 });
 
 export const sessionIdSchema = z.object({ session_id: z.string().uuid() });
+
+export const LIVE_TURNS_MAX = 40;
+export const LIVE_QUESTION_MAX_CHARS = 2_000;
+export const LIVE_ANSWER_MAX_CHARS = 20_000;
+
+export const liveTurnSchema = z.object({
+  question: z.string().trim().min(1).max(LIVE_QUESTION_MAX_CHARS),
+  answer: z.string().trim().max(LIVE_ANSWER_MAX_CHARS),
+});
+
+export const liveCompleteSchema = z.object({
+  session_id: z.string().uuid(),
+  turns: z.array(liveTurnSchema).max(LIVE_TURNS_MAX),
+});
 
 export const voiceRequestSchema = z.object({
   session_id: z.string().uuid(),

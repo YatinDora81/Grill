@@ -43,6 +43,15 @@ export async function apiPost<T>(path: string, payload: unknown): Promise<T> {
   return unwrap<T>(res);
 }
 
+export async function apiPatch<T>(path: string, payload: unknown): Promise<T> {
+  const res = await fetch(path, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return unwrap<T>(res);
+}
+
 export async function apiPostForm<T>(path: string, form: FormData): Promise<T> {
   const res = await fetch(path, { method: "POST", body: form });
   return unwrap<T>(res);

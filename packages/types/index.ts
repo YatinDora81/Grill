@@ -61,6 +61,7 @@ export interface InterviewConfig {
   max_answer_seconds?: number;
   round?: InterviewRound;
   problems?: number;
+  live?: boolean;
 }
 
 export interface AnswerScores {

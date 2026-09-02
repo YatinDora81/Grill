@@ -43,6 +43,20 @@ export default async function SessionPage({
   const ctx = toSessionContext(session);
   const role = session.role;
   const name = session.name;
+
+  if (ctx.config.live) {
+    return (
+      <LiveSeat
+        sessionId={sessionId}
+        name={name}
+        role={role}
+        numQuestions={ctx.config.num_questions}
+        persona={ctx.config.persona ?? null}
+        maxMinutes={config.live.maxMinutes}
+      />
+    );
+  }
+
   const turns = await repo.getTurns(sessionId);
   const state: TurnState[] = turns.map((t) => ({
     turn_index: t.turnIndex,

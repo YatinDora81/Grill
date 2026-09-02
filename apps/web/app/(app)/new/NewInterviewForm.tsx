@@ -186,10 +186,12 @@ export function NewInterviewForm({
   initialStarredHashes = [],
   initialMode = null,
   initialRound = "spoken",
+  liveEnabled = false,
 }: {
   initialStarredHashes?: string[];
   initialMode?: ExclusiveMode | null;
   initialRound?: InterviewRound;
+  liveEnabled?: boolean;
 }) {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -228,6 +230,7 @@ export function NewInterviewForm({
   const [numQuestions, setNumQuestions] = useState(8);
   const [round, setRound] = useState<InterviewRound>(initialRound);
   const [problems, setProblems] = useState(2);
+  const [liveMode, setLiveMode] = useState(false);
   const [difficulty, setDifficulty] = useState<Difficulty>("medium");
   const [persona, setPersona] = useState<Persona>("neutral");
   const [allowRepeats, setAllowRepeats] = useState(false);
@@ -281,6 +284,8 @@ export function NewInterviewForm({
   }, [fromDrillLink, initialMode]);
 
   const roundish = round !== "spoken";
+  const liveOffered = liveEnabled && !roundish;
+  const live = liveMode && liveOffered;
 
   useEffect(() => {
     if (!roundish || !mode || !ROUND_LOCKED.includes(mode)) return;
@@ -508,6 +513,7 @@ export function NewInterviewForm({
           allow_repeats: allowRepeats,
           round,
           ...(roundish ? { problems } : {}),
+          ...(live ? { live: true } : {}),
           ...(persona !== "neutral" ? { persona } : {}),
           ...(drilling ? { starred_hashes: liveHashes } : {}),
           ...(needsTopic ? { topic: topic.trim() } : {}),
@@ -946,6 +952,26 @@ export function NewInterviewForm({
                   actually built. Saved questions, weak spots and the real-interview arc are spoken
                   formats, so they are off here.
                 </Explain>
+              )}
+
+              {liveOffered && (
+                <div className="switch-row">
+                  <div>
+                    <span className="switch-l">Live conversation &mdash; experimental</span>
+                    <p className="switch-d">
+                      Talks back in real time. No delivery metrics for this run, ~12 minutes max,
+                      free-tier seats are limited.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={liveMode}
+                    aria-label="Live conversation"
+                    onClick={() => setLiveMode((v) => !v)}
+                    className="switch"
+                  />
+                </div>
               )}
             </div>
 
