@@ -221,7 +221,10 @@ export function questionHash(question: string): string {
   return createHash("sha256").update(normalized).digest("hex");
 }
 
-export function starQuestion(userId: string, turn: { id: string; question: string; questionType: QuestionType }) {
+export function starQuestion(
+  userId: string,
+  turn: { id: string; question: string; questionType: QuestionType },
+) {
   const hash = questionHash(turn.question);
   return prisma.starredQuestion.upsert({
     where: { userId_questionHash: { userId, questionHash: hash } },
@@ -770,7 +773,9 @@ function dayKeyFormatter(timeZone: string): Intl.DateTimeFormat {
   try {
     return new Intl.DateTimeFormat("en-CA", { timeZone, ...parts });
   } catch {
-    console.warn(`[repo] unknown timezone ${JSON.stringify(timeZone)} — counting drill days in UTC`);
+    console.warn(
+      `[repo] unknown timezone ${JSON.stringify(timeZone)} — counting drill days in UTC`,
+    );
     return new Intl.DateTimeFormat("en-CA", { timeZone: "UTC", ...parts });
   }
 }
@@ -824,9 +829,7 @@ export async function upsertDrillCard(
     input.bestTranscript != null &&
     typeof input.bestMean === "number" &&
     (existing === null || existing.bestMean === null || input.bestMean > existing.bestMean);
-  const best = beatsBest
-    ? { bestTranscript: input.bestTranscript, bestMean: input.bestMean }
-    : {};
+  const best = beatsBest ? { bestTranscript: input.bestTranscript, bestMean: input.bestMean } : {};
 
   const card = await prisma.drillCard.upsert({
     where: key,

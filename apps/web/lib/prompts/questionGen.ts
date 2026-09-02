@@ -126,7 +126,7 @@ const CULTURAL_OPENERS = [
   "one thing from a prior job they'd want to keep wherever they go next",
   "a company policy they found unfair or inefficient — what it was and why",
   "their manager assigns a big task right before the end of the day — how they reply",
-  "how they'd change an institutional \"this is how we always do it\" attitude if they saw a better way",
+  'how they\'d change an institutional "this is how we always do it" attitude if they saw a better way',
   "a disagreement with someone they still had to work with the next day",
   "a call they got wrong, and what it cost the people around them",
   "feedback that stung at the time and turned out to be right",

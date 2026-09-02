@@ -18,7 +18,12 @@ export const forgotPasswordSchema = z.object({
 });
 
 export const resetPasswordSchema = z.object({
-  token: z.string().trim().min(32).max(200).regex(/^[A-Za-z0-9_-]+$/),
+  token: z
+    .string()
+    .trim()
+    .min(32)
+    .max(200)
+    .regex(/^[A-Za-z0-9_-]+$/),
   password: z.string().min(config.auth.passwordMinLength).max(200),
 });
 
@@ -182,7 +187,11 @@ const interviewConfigShape = z.object({
   job_location: optionalText(200),
   project_context: z.string().trim().max(24_000).optional(),
   project_repo_url: z.string().trim().url().max(500).optional(),
-  starred_hashes: z.array(z.string().regex(/^[0-9a-f]{64}$/)).min(1).max(12).optional(),
+  starred_hashes: z
+    .array(z.string().regex(/^[0-9a-f]{64}$/))
+    .min(1)
+    .max(12)
+    .optional(),
   allow_repeats: z.coerce.boolean().default(false),
   max_answer_seconds: z.coerce.number().int().positive().optional(),
 });
@@ -281,11 +290,7 @@ export const createQuestionSetSchema = z
     source_text: z.string().max(20_000).default(""),
     role: z.string().trim().max(200).optional(),
     difficulty: difficultySchema,
-    count: z.coerce
-      .number()
-      .int()
-      .min(QUESTION_SET_BOUNDS.min)
-      .max(QUESTION_SET_BOUNDS.max),
+    count: z.coerce.number().int().min(QUESTION_SET_BOUNDS.min).max(QUESTION_SET_BOUNDS.max),
   })
   .superRefine((v, ctx) => {
     if (v.source === "resume" && !v.source_text.trim()) {
@@ -417,7 +422,12 @@ export const voiceRequestSchema = z.object({
 
 export const shareSessionParamsSchema = z.object({ sessionId: z.string().uuid() });
 
-export const shareTokenSchema = z.string().trim().min(32).max(200).regex(/^[A-Za-z0-9_-]+$/);
+export const shareTokenSchema = z
+  .string()
+  .trim()
+  .min(32)
+  .max(200)
+  .regex(/^[A-Za-z0-9_-]+$/);
 
 export const jdExtractRequestSchema = z.object({
   url: httpsUrlSchema(JOB_URL_MAX_CHARS),
@@ -429,7 +439,11 @@ export const jdExtractRequestSchema = z.object({
 });
 
 export const companyBriefRequestSchema = z.object({
-  company: z.string().trim().min(1, "Name the company you're interviewing at.").max(COMPANY_MAX_CHARS),
+  company: z
+    .string()
+    .trim()
+    .min(1, "Name the company you're interviewing at.")
+    .max(COMPANY_MAX_CHARS),
   role: optionalText(COMPANY_MAX_CHARS),
   refresh: z.coerce.boolean().default(false),
 });
@@ -537,9 +551,7 @@ const gapItemSchema = z.object({
 });
 
 export const resumeGapResponseSchema = z.object({
-  match_percent: z.coerce
-    .number()
-    .transform((n) => Math.min(100, Math.max(0, Math.round(n)))),
+  match_percent: z.coerce.number().transform((n) => Math.min(100, Math.max(0, Math.round(n)))),
   summary: z
     .string()
     .trim()
@@ -692,10 +704,7 @@ export const starBreakdownSchema = z.object({
   note: z.string().catch(""),
 });
 
-export const starBreakdownsSchema = keepingOnlyWellFormed(
-  starBreakdownSchema,
-  QUESTION_BOUNDS.max,
-);
+export const starBreakdownsSchema = keepingOnlyWellFormed(starBreakdownSchema, QUESTION_BOUNDS.max);
 
 export type QuestionResponse = z.infer<typeof questionResponseSchema>;
 export type ReportResponse = z.infer<typeof reportResponseSchema>;
