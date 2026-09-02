@@ -1,4 +1,4 @@
-import type { AnswerScores, DeliveryMetrics, StarBreakdown } from "@repo/types";
+import type { AnswerScores, DeliveryMetrics, DesignReview, StarBreakdown } from "@repo/types";
 import { difficultyLabel, interviewLabel } from "@/lib/interviewMeta";
 import { starFactsBlock } from "./star";
 import type { SessionContext } from "./questionGen";
@@ -21,6 +21,10 @@ describe them as "spoke at N syllables a second", "faded on N statements", "was 
 transcriber to follow", "sat lower than the calibrated pose" — never as mood, nerves or confidence.
 Coding turns carry measured test results and editor timings; grade the code on what the tests
 measured and quote lines of it. Think-aloud percentage is measured talking time, not a judgement.
+Design turns carry a review of the whiteboard the candidate actually drew: components, what was
+missing, single points of failure and scale concerns. Judge the design on those listed facts and on
+what the candidate said — you have not seen the diagram, so never describe anything the review does
+not list, and never guess at layout or neatness.
 Respond with JSON only — no prose, no code fences.`;
 
 export interface ReportTurnCode {
@@ -34,6 +38,10 @@ export interface ReportTurnCode {
   runs: number;
 }
 
+export interface ReportTurnDesign {
+  review: DesignReview;
+  image_url: string | null;
+}
 
 export interface ReportTurn {
   turn_index: number;
@@ -42,9 +50,10 @@ export interface ReportTurn {
   transcript: string;
   answer_scores: AnswerScores | null;
   code?: ReportTurnCode | null;
+  design?: ReportTurnDesign | null;
 }
 
-function deliveryBlock(d: DeliveryMetrics): string {
+function deliveryBlock(d: DeliveryMetrics, live: boolean): string {
   const spoke = d.wpm > 0;
   const measured: string[] = [];
   const absent: string[] = [];
@@ -163,6 +172,24 @@ function codeBlock(code: ReportTurnCode | null | undefined): string {
   );
 }
 
+function designBlock(design: ReportTurnDesign | null | undefined): string {
+  if (!design) return "";
+  const r = design.review;
+  const list = (items: string[]) => (items.length ? items.join(", ") : "none listed");
+  const activity = r.activity
+    ? ` first_shape=${r.activity.first_edit_ms === null ? "never drew" : `${r.activity.first_edit_ms}ms`}` +
+      ` longest_idle=${r.activity.longest_idle_ms}ms shapes=${r.activity.final_elements}`
+    : "";
+  return (
+    `\n[design turn]${activity}\n` +
+    `Board review: ${r.summary}\n` +
+    `- components drawn: ${list(r.components)}\n` +
+    `- missing: ${list(r.missing)}\n` +
+    `- single points of failure: ${list(r.single_points_of_failure)}\n` +
+    `- scale concerns: ${list(r.scale_concerns)}\n` +
+    `- follow-up asked: ${r.follow_up_question}`
+  );
+}
 
 export function reportPrompt(
   s: SessionContext,
@@ -176,7 +203,8 @@ export function reportPrompt(
         `[Turn ${t.turn_index}] (${t.question_type}) Q: ${t.question}\n` +
         `A: ${t.transcript || "(no clear answer)"}\n` +
         `Scores: ${t.answer_scores ? JSON.stringify(t.answer_scores) : "n/a"}` +
-        codeBlock(t.code),
+        codeBlock(t.code) +
+        designBlock(t.design),
     )
     .join("\n\n");
 

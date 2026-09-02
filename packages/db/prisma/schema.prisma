@@ -262,6 +262,9 @@ model Turn {
   transcriptConfidence Float?  @map("transcript_confidence")
   questionPayload      Json?   @map("question_payload")
   codeSubmission       Json?   @map("code_submission")
+  designKey            String? @map("design_key")
+  designImageKey       String? @map("design_image_key")
+  designReview         Json?   @map("design_review")
 
   session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   video   SessionVideo? @relation(fields: [videoId], references: [id], onDelete: SetNull)

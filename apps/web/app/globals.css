@@ -3102,6 +3102,27 @@ a.vs-label:hover {
   font-size: 13.5px;
   color: var(--color-ink-soft);
 }
+.board-wrap {
+  height: min(70vh, 720px);
+  min-height: 420px;
+}
+.board-loading {
+  display: grid;
+  height: min(70vh, 720px);
+  min-height: 420px;
+  place-items: center;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-ink-muted);
+}
+.design-shot {
+  display: block;
+  width: 100%;
+  border: 1px solid var(--color-line);
+  background: var(--color-paper-sunken);
+}
 .code-src {
   overflow-x: auto;
   max-height: 460px;

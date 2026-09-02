@@ -1,7 +1,7 @@
 import "server-only";
 import * as repo from "@/lib/db/repo";
 import { config } from "@/lib/env";
-import { audioPrefix, deleteObject, listObjects } from "@/lib/storage/objectStore";
+import { audioPrefix, designPrefix, deleteObject, listObjects } from "@/lib/storage/objectStore";
 
 export async function purgeExpiredAudio(limit = 100): Promise<number> {
   if (!config.storageConfigured) return 0;
@@ -12,8 +12,10 @@ export async function purgeExpiredAudio(limit = 100): Promise<number> {
 
   for (const s of sessions) {
     try {
-      for (const key of await listObjects(audioPrefix(s.id))) {
-        await deleteObject(key);
+      for (const prefix of [audioPrefix(s.id), designPrefix(s.id)]) {
+        for (const key of await listObjects(prefix)) {
+          await deleteObject(key);
+        }
       }
       await repo.markAudioPurged(s.id);
       purged++;

@@ -614,6 +614,23 @@ export const codingTestsQuerySchema = z.object({
 
 export type CodeAnswerPayload = z.infer<typeof codeAnswerPayloadSchema>;
 
+const DESIGN_LIST_MAX_ITEMS = 12;
+
+export const designActivitySchema = z.object({
+  first_edit_ms: z.coerce.number().min(0).nullable().catch(null),
+  longest_idle_ms: z.coerce.number().min(0).catch(0),
+  final_elements: z.coerce.number().int().min(0).catch(0),
+});
+
+export const storedDesignReviewSchema = z.object({
+  summary: cappedLine(600).catch(""),
+  components: keepingOnlyWellFormed(cappedLine(240), DESIGN_LIST_MAX_ITEMS),
+  missing: keepingOnlyWellFormed(cappedLine(240), DESIGN_LIST_MAX_ITEMS),
+  single_points_of_failure: keepingOnlyWellFormed(cappedLine(240), DESIGN_LIST_MAX_ITEMS),
+  scale_concerns: keepingOnlyWellFormed(cappedLine(240), DESIGN_LIST_MAX_ITEMS),
+  follow_up_question: cappedLine(400).catch(""),
+  activity: designActivitySchema.nullable().catch(null),
+});
 
 export const questionResponseSchema = z.object({
   question: z.string().min(1),
@@ -649,6 +666,16 @@ export const answerScoresSchema = z.object({
   structure: z.coerce.number().min(0).max(10),
   depth: z.coerce.number().min(0).max(10),
   filler: z.coerce.number().min(0).max(10),
+});
+
+export const designReviewResponseSchema = z.object({
+  summary: cappedLine(600),
+  components: keepingOnlyWellFormed(cappedLine(240), DESIGN_LIST_MAX_ITEMS),
+  missing: keepingOnlyWellFormed(cappedLine(240), DESIGN_LIST_MAX_ITEMS),
+  single_points_of_failure: keepingOnlyWellFormed(cappedLine(240), DESIGN_LIST_MAX_ITEMS),
+  scale_concerns: keepingOnlyWellFormed(cappedLine(240), DESIGN_LIST_MAX_ITEMS),
+  follow_up_question: cappedLine(400),
+  scores: answerScoresSchema,
 });
 
 const highlightSchema = z.object({

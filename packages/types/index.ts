@@ -585,4 +585,31 @@ export interface DesignQuestionPayload {
   focus: string[];
 }
 
+export interface DesignReview {
+  summary: string;
+  components: string[];
+  missing: string[];
+  single_points_of_failure: string[];
+  scale_concerns: string[];
+  follow_up_question: string;
+  activity?: {
+    first_edit_ms: number | null;
+    longest_idle_ms: number;
+    final_elements: number;
+  };
+}
+
 export type TurnPayload = CodingQuestionPayload | DesignQuestionPayload;
+
+export interface LiveTokenResponse {
+  token: string;
+  model: string;
+  expires_at: string;
+  opener: string;
+  max_minutes: number;
+}
+
+export interface LiveTurnInput {
+  question: string;
+  answer: string;
+}

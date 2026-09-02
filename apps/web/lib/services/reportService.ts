@@ -6,6 +6,7 @@ import type {
   AnswerScores,
   CodeSubmission,
   DeliveryMetrics,
+  DesignReview,
   TranscriptWord,
 } from "@repo/types";
 import { generateJson } from "@/lib/clients/llmJson";
@@ -15,10 +16,11 @@ import {
   reportPrompt,
   type ReportTurn,
   type ReportTurnCode,
+  type ReportTurnDesign,
 } from "@/lib/prompts/report";
 import { reportResponseSchema, type ReportResponse } from "@/lib/schemas";
 import * as repo from "@/lib/db/repo";
-import { getAudio } from "@/lib/storage/objectStore";
+import { getAudio, presignGet } from "@/lib/storage/objectStore";
 import { config } from "@/lib/env";
 import { BAND_LABEL, scoreBand } from "@/components/ui";
 import { PATTERN, isAnswerScores, worstDimension } from "@/lib/rubricPattern";
@@ -38,6 +40,7 @@ import {
 import { computeStarBreakdown } from "./starService";
 import { seedDrillCards } from "./drillService";
 import { spokenPart as codeSpokenPart } from "./codingService";
+import { spokenPart as designSpokenPart } from "./designService";
 import { toSessionContext } from "./sessionContext";
 
 function words(t: Turn): TranscriptWord[] | null {
@@ -62,6 +65,25 @@ function codeFacts(t: Turn): ReportTurnCode | null {
     first_edit_ms: sub.keystrokes.first_edit_ms,
     runs: sub.keystrokes.runs,
   };
+}
+
+const DESIGN_IMAGE_TTL_S = 3_600;
+
+async function designFacts(t: Turn): Promise<ReportTurnDesign | null> {
+  const review = (t.designReview as DesignReview | null) ?? null;
+  if (!review) return null;
+
+  let imageUrl: string | null = null;
+  if (t.designImageKey && config.storageConfigured) {
+    try {
+      imageUrl = await presignGet(t.designImageKey, DESIGN_IMAGE_TTL_S);
+    } catch (err) {
+      console.warn(
+        `[reportService] could not sign ${t.designImageKey}: ${(err as Error).message}`,
+      );
+    }
+  }
+  return { review, image_url: imageUrl };
 }
 
 function spokenTranscript(t: Turn): string | null {

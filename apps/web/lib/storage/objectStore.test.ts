@@ -16,7 +16,8 @@ mock.module("@/lib/env", () => ({
   },
 }));
 
-const { headObject, listParts, putAudio, putObject } = await import("./objectStore");
+const { designImageKey, designKey, designPrefix, headObject, listParts, putAudio, putObject } =
+  await import("./objectStore");
 
 const KEY = "video/sess_1/vid_1.webm";
 const UPLOAD_ID = "upload_1";
@@ -233,4 +234,11 @@ test("putAudio still uploads exactly as it did before it was generalised", async
   expect(seen[0]?.url).toContain("audio/sess_1/turn_0.webm");
   expect(seen[0]?.contentType).toBe("audio/webm");
   expect(Array.from(seen[0]?.body ?? [])).toEqual(Array.from(bytes));
+});
+
+test("a session's boards live under one prefix, so retention can sweep them in one listing", () => {
+  expect(designKey("sess_1", 2)).toBe("design/sess_1/turn_2.excalidraw");
+  expect(designImageKey("sess_1", 2)).toBe("design/sess_1/turn_2.png");
+  expect(designKey("sess_1", 2).startsWith(designPrefix("sess_1"))).toBe(true);
+  expect(designImageKey("sess_1", 2).startsWith(designPrefix("sess_1"))).toBe(true);
 });

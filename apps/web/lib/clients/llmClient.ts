@@ -5,6 +5,11 @@ import { AllKeysExhausted } from "@/lib/errors";
 import { fetchWithTimeout, ensureOk } from "./http";
 import { callWithRotation, geminiPool, groqPool } from "./keyPool";
 
+export interface InlineImage {
+  mimeType: string;
+  data: string;
+}
+
 export interface GenerateOpts {
   system?: string;
   prompt: string;
@@ -12,6 +17,7 @@ export interface GenerateOpts {
   json?: boolean;
   timeoutMs?: number;
   tools?: unknown[];
+  images?: InlineImage[];
 }
 
 export interface GenerateResult {
@@ -26,8 +32,12 @@ const NO_SOURCES: GroundingSource[] = [];
 
 export function buildGeminiBody(opts: GenerateOpts): Record<string, unknown> {
   const grounded = Boolean(opts.tools?.length);
+  const parts: Record<string, unknown>[] = [
+    { text: opts.prompt },
+    ...(opts.images ?? []).map((i) => ({ inlineData: { mimeType: i.mimeType, data: i.data } })),
+  ];
   const body: Record<string, unknown> = {
-    contents: [{ role: "user", parts: [{ text: opts.prompt }] }],
+    contents: [{ role: "user", parts }],
     generationConfig: {
       temperature: opts.temperature ?? 0.7,
       ...(opts.json && !grounded ? { responseMimeType: "application/json" } : {}),
@@ -84,6 +94,9 @@ async function geminiGenerate(key: string, opts: GenerateOpts): Promise<Generate
 }
 
 async function groqChat(key: string, opts: GenerateOpts): Promise<GenerateResult> {
+  if (opts.images?.length) {
+    console.warn("[llmClient] Groq fallback cannot see images — reviewing the transcript only.");
+  }
   const messages: { role: string; content: string }[] = [];
   if (opts.system) messages.push({ role: "system", content: opts.system });
   messages.push({ role: "user", content: opts.prompt });

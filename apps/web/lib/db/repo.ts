@@ -6,6 +6,7 @@ import type {
   AnswerScores,
   CameraTurnMetrics,
   CodeSubmission,
+  DesignReview,
   InterviewConfig,
   QuestionSetSource,
   QuestionType,
@@ -463,8 +464,15 @@ export function listSessionsWithExpiredAudio(cutoff: Date, take = 100) {
 export function markAudioPurged(sessionId: string) {
   return prisma.$transaction([
     prisma.turn.updateMany({
-      where: { sessionId, audioKey: { not: null } },
-      data: { audioKey: null },
+      where: {
+        sessionId,
+        OR: [
+          { audioKey: { not: null } },
+          { designKey: { not: null } },
+          { designImageKey: { not: null } },
+        ],
+      },
+      data: { audioKey: null, designKey: null, designImageKey: null },
     }),
     prisma.session.update({
       where: { id: sessionId },
@@ -586,6 +594,9 @@ export function recordAnswer(
     responseLatencyMs?: number | null;
     interruptedAtS?: number | null;
     codeSubmission?: CodeSubmission | null;
+    designReview?: DesignReview | null;
+    designKey?: string | null;
+    designImageKey?: string | null;
   },
 ) {
   return prisma.turn.update({
@@ -602,6 +613,9 @@ export function recordAnswer(
       responseLatencyMs: data.responseLatencyMs ?? undefined,
       interruptedAtS: data.interruptedAtS ?? undefined,
       codeSubmission: data.codeSubmission ? json(data.codeSubmission) : undefined,
+      designReview: data.designReview ? json(data.designReview) : undefined,
+      designKey: data.designKey ?? undefined,
+      designImageKey: data.designImageKey ?? undefined,
     },
   });
 }
@@ -684,10 +698,18 @@ export async function listWeakTurns(userId: string, take = 8): Promise<WeakTurn[
     where: { session: { userId, ...aliveSession }, transcript: { not: null } },
     orderBy: { createdAt: "desc" },
     take: 120,
-    select: { question: true, questionType: true, transcript: true, answerScores: true },
+    select: {
+      question: true,
+      questionType: true,
+      transcript: true,
+      answerScores: true,
+      designReview: true,
+      codeSubmission: true,
+    },
   });
 
   const scored = turns.flatMap((t) => {
+    if (t.designReview || t.codeSubmission) return [];
     const mean = rubricMean(t.answerScores);
     if (mean === null) return [];
     return [{ turn: t, mean }];

@@ -34,6 +34,18 @@ export function audioKey(sessionId: string, turnIndex: number, ext = "webm"): st
   return `${audioPrefix(sessionId)}turn_${turnIndex}.${ext}`;
 }
 
+export function designPrefix(sessionId: string): string {
+  return `design/${sessionId}/`;
+}
+
+export function designKey(sessionId: string, turnIndex: number): string {
+  return `${designPrefix(sessionId)}turn_${turnIndex}.excalidraw`;
+}
+
+export function designImageKey(sessionId: string, turnIndex: number): string {
+  return `${designPrefix(sessionId)}turn_${turnIndex}.png`;
+}
+
 export async function putObject(key: string, data: Uint8Array, contentType: string): Promise<void> {
   const res = await client().fetch(objectUrl(key), {
     method: "PUT",

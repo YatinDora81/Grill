@@ -12,8 +12,11 @@ import {
   payloadOf,
   planNextCodingTurn,
 } from "@/lib/services/codingService";
+import { planNextDesignTurn } from "@/lib/services/designService";
 import { HotSeat } from "./HotSeat";
 import { CodeSeat } from "./CodeSeat";
+import { DesignSeat } from "./DesignSeat";
+import { LiveSeat } from "./LiveSeat";
 
 export const metadata: Metadata = {
   title: "Interview",
@@ -141,6 +144,24 @@ export default async function SessionPage({
       );
     }
 
+    if (payload?.kind === "design") {
+      return (
+        <DesignSeat
+          key={turnIndex}
+          sessionId={sessionId}
+          name={name}
+          role={role}
+          numQuestions={numQuestions}
+          answered={answered}
+          turnIndex={turnIndex}
+          payload={payload}
+          maxSeconds={DESIGN_ANSWER_CAP_S}
+          maxBytes={config.audio.maxBytes}
+          persona={ctx.config.persona ?? null}
+          videoBitrate={config.video.bitsPerSecond}
+        />
+      );
+    }
 
     return (
       <HotSeat

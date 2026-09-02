@@ -1,10 +1,5 @@
 import { describe, expect, mock, test } from "bun:test";
-import type {
-  CameraTurnMetrics,
-  CompanyBrief,
-  DeliveryMetrics,
-  StarBreakdown,
-} from "@repo/types";
+import type { CameraTurnMetrics, CompanyBrief, DeliveryMetrics, StarBreakdown } from "@repo/types";
 
 mock.module("server-only", () => ({}));
 
@@ -24,6 +19,8 @@ const {
   companyBriefRequestSchema,
   companyBriefSchema,
   deliveryMetricsSchema,
+  designQuestionSchema,
+  designReviewResponseSchema,
   drillReviewSchema,
   drillTextAnswerSchema,
   interviewConfigSchema,
@@ -48,7 +45,12 @@ function cfg(over: Record<string, unknown> = {}) {
 }
 
 function start(over: Record<string, unknown> = {}) {
-  return { source_text: "Staff engineer. Shipped a billing ledger.", name: "Backend screen", config: cfg(), ...over };
+  return {
+    source_text: "Staff engineer. Shipped a billing ledger.",
+    name: "Backend screen",
+    config: cfg(),
+    ...over,
+  };
 }
 
 function issuePaths(result: { success: boolean; error?: { issues: { path: PropertyKey[] }[] } }) {
@@ -57,7 +59,9 @@ function issuePaths(result: { success: boolean; error?: { issues: { path: Proper
 
 describe("the mode XOR sources invariant", () => {
   test("rejects an exclusive mode carrying sources as well", () => {
-    const r = interviewConfigSchema.safeParse(cfg({ mode: "jd", job_description: "Senior Go role", sources: ["resume"] }));
+    const r = interviewConfigSchema.safeParse(
+      cfg({ mode: "jd", job_description: "Senior Go role", sources: ["resume"] }),
+    );
     expect(r.success).toBe(false);
     expect(issuePaths(r)).toContain("sources");
   });
@@ -82,7 +86,9 @@ describe("the mode XOR sources invariant", () => {
   });
 
   test("accepts blended sources with a null mode", () => {
-    const r = interviewConfigSchema.safeParse(cfg({ mode: null, sources: ["resume", "topic", "cultural"], topic: "Kafka" }));
+    const r = interviewConfigSchema.safeParse(
+      cfg({ mode: null, sources: ["resume", "topic", "cultural"], topic: "Kafka" }),
+    );
     expect(r.success).toBe(true);
     expect(r.data!.sources).toEqual(["resume", "topic", "cultural"]);
     expect(r.data!.mode).toBeNull();
@@ -103,7 +109,9 @@ describe("material a mode or source cannot run without", () => {
   });
 
   test("does not accept whitespace as a topic", () => {
-    const r = interviewConfigSchema.safeParse(cfg({ mode: "topic_only", sources: [], topic: "   " }));
+    const r = interviewConfigSchema.safeParse(
+      cfg({ mode: "topic_only", sources: [], topic: "   " }),
+    );
     expect(r.success).toBe(false);
     expect(issuePaths(r)).toContain("topic");
   });
@@ -130,14 +138,20 @@ describe("material a mode or source cannot run without", () => {
 
   test("accepts a project interview once it carries its material", () => {
     const r = interviewConfigSchema.safeParse(
-      cfg({ mode: "project", sources: [], project_context: "A rate limiter built on Redis sorted sets." }),
+      cfg({
+        mode: "project",
+        sources: [],
+        project_context: "A rate limiter built on Redis sorted sets.",
+      }),
     );
     expect(r.success).toBe(true);
     expect(r.data!.mode).toBe("project");
   });
 
   test("asks for no topic when neither the source nor the mode wants one", () => {
-    expect(interviewConfigSchema.safeParse(cfg({ sources: ["resume", "cultural"] })).success).toBe(true);
+    expect(interviewConfigSchema.safeParse(cfg({ sources: ["resume", "cultural"] })).success).toBe(
+      true,
+    );
   });
 });
 
@@ -148,16 +162,26 @@ describe("bounds", () => {
   });
 
   test("accepts a new interview at both question bounds", () => {
-    expect(startRequestSchema.safeParse(start({ config: cfg({ num_questions: QUESTION_BOUNDS.min }) })).success).toBe(true);
-    expect(startRequestSchema.safeParse(start({ config: cfg({ num_questions: QUESTION_BOUNDS.max }) })).success).toBe(true);
+    expect(
+      startRequestSchema.safeParse(start({ config: cfg({ num_questions: QUESTION_BOUNDS.min }) }))
+        .success,
+    ).toBe(true);
+    expect(
+      startRequestSchema.safeParse(start({ config: cfg({ num_questions: QUESTION_BOUNDS.max }) }))
+        .success,
+    ).toBe(true);
   });
 
   test("rejects a new interview one question either side of the bounds", () => {
-    const under = startRequestSchema.safeParse(start({ config: cfg({ num_questions: QUESTION_BOUNDS.min - 1 }) }));
+    const under = startRequestSchema.safeParse(
+      start({ config: cfg({ num_questions: QUESTION_BOUNDS.min - 1 }) }),
+    );
     expect(under.success).toBe(false);
     expect(issuePaths(under)).toContain("config.num_questions");
 
-    const over = startRequestSchema.safeParse(start({ config: cfg({ num_questions: QUESTION_BOUNDS.max + 1 }) }));
+    const over = startRequestSchema.safeParse(
+      start({ config: cfg({ num_questions: QUESTION_BOUNDS.max + 1 }) }),
+    );
     expect(over.success).toBe(false);
     expect(issuePaths(over)).toContain("config.num_questions");
   });
@@ -184,7 +208,9 @@ describe("bounds", () => {
   });
 
   test("caps the résumé at 20k characters, one character past being the failure", () => {
-    expect(startRequestSchema.safeParse(start({ source_text: "a".repeat(20_000) })).success).toBe(true);
+    expect(startRequestSchema.safeParse(start({ source_text: "a".repeat(20_000) })).success).toBe(
+      true,
+    );
 
     const over = startRequestSchema.safeParse(start({ source_text: "a".repeat(20_001) }));
     expect(over.success).toBe(false);
@@ -202,7 +228,8 @@ describe("the résumé is optional only for a project interview", () => {
     return cfg({
       mode: "project",
       sources: [],
-      project_context: "A URL shortener: Postgres, a base62 encoder, and a Redis read-through cache.",
+      project_context:
+        "A URL shortener: Postgres, a base62 encoder, and a Redis read-through cache.",
       ...over,
     });
   }
@@ -214,7 +241,9 @@ describe("the résumé is optional only for a project interview", () => {
   });
 
   test("still requires the résumé for every non-project mode", () => {
-    const r = startRequestSchema.safeParse(start({ source_text: "", config: cfg({ mode: "real", sources: [] }) }));
+    const r = startRequestSchema.safeParse(
+      start({ source_text: "", config: cfg({ mode: "real", sources: [] }) }),
+    );
     expect(r.success).toBe(false);
     expect(issuePaths(r)).toContain("source_text");
   });
@@ -228,7 +257,10 @@ describe("the résumé is optional only for a project interview", () => {
 
   test("carries the repo URL through, and rejects a non-URL", () => {
     const ok = startRequestSchema.safeParse(
-      start({ source_text: "", config: projectCfg({ project_repo_url: "https://github.com/YatinDora81/Grill" }) }),
+      start({
+        source_text: "",
+        config: projectCfg({ project_repo_url: "https://github.com/YatinDora81/Grill" }),
+      }),
     );
     expect(ok.success).toBe(true);
     expect(ok.data!.config.project_repo_url).toBe("https://github.com/YatinDora81/Grill");
@@ -243,7 +275,9 @@ describe("the résumé is optional only for a project interview", () => {
 describe("defaults", () => {
   test("leaves repeats off unless they are asked for", () => {
     expect(interviewConfigSchema.safeParse(cfg()).data!.allow_repeats).toBe(false);
-    expect(interviewConfigSchema.safeParse(cfg({ allow_repeats: true })).data!.allow_repeats).toBe(true);
+    expect(interviewConfigSchema.safeParse(cfg({ allow_repeats: true })).data!.allow_repeats).toBe(
+      true,
+    );
   });
 
   test("pitches a config with no stated difficulty at medium, not at easy", () => {
@@ -252,7 +286,9 @@ describe("defaults", () => {
   });
 
   test("carries a stored per-answer cap through, and treats its absence as 'use the default'", () => {
-    expect(storedConfigSchema.safeParse({ ...cfg(), max_answer_seconds: 180 }).data!.max_answer_seconds).toBe(180);
+    expect(
+      storedConfigSchema.safeParse({ ...cfg(), max_answer_seconds: 180 }).data!.max_answer_seconds,
+    ).toBe(180);
     expect(storedConfigSchema.safeParse(cfg()).data!.max_answer_seconds).toBeUndefined();
   });
 });
@@ -312,11 +348,17 @@ describe("configs written under older shapes", () => {
   });
 
   test("falls back to medium rather than failing on an unrecognised difficulty", () => {
-    expect(storedConfigSchema.safeParse({ ...cfg(), difficulty: "staff" }).data!.difficulty).toBe("medium");
+    expect(storedConfigSchema.safeParse({ ...cfg(), difficulty: "staff" }).data!.difficulty).toBe(
+      "medium",
+    );
   });
 
   test("lets an explicit year count win over a legacy difficulty left on the row", () => {
-    const r = storedConfigSchema.safeParse({ ...cfg(), difficulty: "junior", years_experience: 15 });
+    const r = storedConfigSchema.safeParse({
+      ...cfg(),
+      difficulty: "junior",
+      years_experience: 15,
+    });
     expect(r.data!.difficulty).toBe("extreme");
   });
 
@@ -330,18 +372,30 @@ describe("configs written under older shapes", () => {
   );
 
   test("does not fold the legacy focus into an exclusive mode, which would break the XOR", () => {
-    const r = storedConfigSchema.safeParse({ mode: "jd", job_description: "Senior Go role", interview_type: "cultural" });
+    const r = storedConfigSchema.safeParse({
+      mode: "jd",
+      job_description: "Senior Go role",
+      interview_type: "cultural",
+    });
     expect(r.success).toBe(true);
     expect(r.data!.sources).toEqual([]);
   });
 
   test("does not duplicate the cultural source when the row already names it", () => {
-    const r = storedConfigSchema.safeParse({ sources: ["resume", "cultural"], mode: null, interview_type: "cultural" });
+    const r = storedConfigSchema.safeParse({
+      sources: ["resume", "cultural"],
+      mode: null,
+      interview_type: "cultural",
+    });
     expect(r.data!.sources).toEqual(["resume", "cultural"]);
   });
 
   test("drops a legacy technical focus without touching the sources", () => {
-    const r = storedConfigSchema.safeParse({ sources: ["resume"], mode: null, interview_type: "technical" });
+    const r = storedConfigSchema.safeParse({
+      sources: ["resume"],
+      mode: null,
+      interview_type: "technical",
+    });
     expect(r.success).toBe(true);
     expect(r.data!.sources).toEqual(["resume"]);
   });
@@ -384,7 +438,9 @@ describe("configs written under older shapes", () => {
   });
 
   test("still rejects a stored row that migration cannot rescue", () => {
-    expect(storedConfigSchema.safeParse({ sources: ["astrology"], mode: null }).success).toBe(false);
+    expect(storedConfigSchema.safeParse({ sources: ["astrology"], mode: null }).success).toBe(
+      false,
+    );
     expect(storedConfigSchema.safeParse("not a config").success).toBe(false);
     expect(storedConfigSchema.safeParse(null).success).toBe(false);
   });
@@ -593,9 +649,12 @@ describe("the gap comparison the model returns", () => {
     ["missing", { ...OK, match_percent: undefined }],
     ["misnamed", { summary: OK.summary, covered: OK.covered, gaps: OK.gaps, matchPercent: 61 }],
     ["unreadable", { ...OK, match_percent: "not a number" }],
-  ])("refuses a comparison whose match percent is %s, rather than inventing 0%%", (_label, body) => {
-    expect(resumeGapResponseSchema.safeParse(body).success).toBe(false);
-  });
+  ])(
+    "refuses a comparison whose match percent is %s, rather than inventing 0%%",
+    (_label, body) => {
+      expect(resumeGapResponseSchema.safeParse(body).success).toBe(false);
+    },
+  );
 
   test("drops a malformed entry rather than throwing the whole comparison away", () => {
     const r = parse({
@@ -637,18 +696,27 @@ describe("the gap comparison the model returns", () => {
 
 describe("questionResponseSchema", () => {
   test("folds a behavioral question type into cultural rather than spending a retry", () => {
-    const r = questionResponseSchema.safeParse({ question: "Tell me about a conflict.", question_type: "behavioral" });
+    const r = questionResponseSchema.safeParse({
+      question: "Tell me about a conflict.",
+      question_type: "behavioral",
+    });
     expect(r.success).toBe(true);
     expect(r.data!.question_type).toBe("cultural");
   });
 
   test.each(["technical", "cultural", "followup"])("passes %s through untouched", (t) => {
-    expect(questionResponseSchema.safeParse({ question: "q", question_type: t }).data!.question_type).toBe(t);
+    expect(
+      questionResponseSchema.safeParse({ question: "q", question_type: t }).data!.question_type,
+    ).toBe(t);
   });
 
   test("rejects an empty question and an invented question type", () => {
-    expect(questionResponseSchema.safeParse({ question: "", question_type: "technical" }).success).toBe(false);
-    expect(questionResponseSchema.safeParse({ question: "q", question_type: "philosophical" }).success).toBe(false);
+    expect(
+      questionResponseSchema.safeParse({ question: "", question_type: "technical" }).success,
+    ).toBe(false);
+    expect(
+      questionResponseSchema.safeParse({ question: "q", question_type: "philosophical" }).success,
+    ).toBe(false);
   });
 });
 
@@ -835,7 +903,9 @@ describe("the JSON-in-a-form-field wrapper", () => {
       turn_index: 0,
       text: "I'd shard by tenant.",
     };
-    expect(answerTextSchema.safeParse({ ...body, camera_metrics: CAM }).data!.camera_metrics).toEqual(CAM);
+    expect(
+      answerTextSchema.safeParse({ ...body, camera_metrics: CAM }).data!.camera_metrics,
+    ).toEqual(CAM);
     expect(answerTextSchema.safeParse({ ...body, camera_metrics: null }).success).toBe(true);
     expect(answerTextSchema.safeParse(body).success).toBe(true);
   });
@@ -860,7 +930,11 @@ describe("the interviewer voice request", () => {
 });
 
 describe("the STAR labels the model returns", () => {
-  const OK = { labels: ["S", "S", "T", "A", "R"], missing: [], note: "Mostly action, thin result." };
+  const OK = {
+    labels: ["S", "S", "T", "A", "R"],
+    missing: [],
+    note: "Mostly action, thin result.",
+  };
 
   test("passes a well-formed labelling through", () => {
     const r = starResponseSchema.safeParse(OK);
@@ -932,7 +1006,10 @@ describe("the job posting import request", () => {
   });
 
   test("caps the scraped page, since the bookmarklet slices at 60k of its own", () => {
-    const at = jdExtractRequestSchema.safeParse({ url: URL, page_text: "a".repeat(JOB_PAGE_TEXT_MAX_CHARS) });
+    const at = jdExtractRequestSchema.safeParse({
+      url: URL,
+      page_text: "a".repeat(JOB_PAGE_TEXT_MAX_CHARS),
+    });
     expect(at.success).toBe(true);
 
     const over = jdExtractRequestSchema.safeParse({
@@ -953,7 +1030,12 @@ describe("the job posting import request", () => {
 
 describe("the posting the model reads off a page", () => {
   test("lets an empty description through, so the service can say 'not a posting'", () => {
-    const r = jobExtractSchema.safeParse({ title: "", company: null, location: null, description: "" });
+    const r = jobExtractSchema.safeParse({
+      title: "",
+      company: null,
+      location: null,
+      description: "",
+    });
     expect(r.success).toBe(true);
     expect(r.data!.description).toBe("");
   });
@@ -971,7 +1053,10 @@ describe("the posting the model reads off a page", () => {
   });
 
   test("trims a long title or description instead of dropping the import", () => {
-    const r = jobExtractSchema.safeParse({ title: "t".repeat(500), description: "d".repeat(25_000) });
+    const r = jobExtractSchema.safeParse({
+      title: "t".repeat(500),
+      description: "d".repeat(25_000),
+    });
     expect(r.success).toBe(true);
     expect(r.data!.title).toHaveLength(200);
     expect(r.data!.description).toHaveLength(20_000);
@@ -991,7 +1076,9 @@ describe("the company brief request", () => {
   });
 
   test("takes a company at the key's ceiling and refuses one past it", () => {
-    expect(companyBriefRequestSchema.safeParse({ company: "a".repeat(COMPANY_MAX_CHARS) }).success).toBe(true);
+    expect(
+      companyBriefRequestSchema.safeParse({ company: "a".repeat(COMPANY_MAX_CHARS) }).success,
+    ).toBe(true);
     expect(
       companyBriefRequestSchema.safeParse({ company: "a".repeat(COMPANY_MAX_CHARS + 1) }).success,
     ).toBe(false);
@@ -1005,12 +1092,18 @@ describe("the company brief request", () => {
 
   test("leaves the cache in place unless a refresh was asked for", () => {
     expect(companyBriefRequestSchema.safeParse({ company: "Acme" }).data!.refresh).toBe(false);
-    expect(companyBriefRequestSchema.safeParse({ company: "Acme", refresh: true }).data!.refresh).toBe(true);
+    expect(
+      companyBriefRequestSchema.safeParse({ company: "Acme", refresh: true }).data!.refresh,
+    ).toBe(true);
   });
 });
 
 describe("the company brief the model returns", () => {
-  const NEWS = { headline: "Acme raises a Series C", date: "2026-03", why_it_matters: "They are hiring fast." };
+  const NEWS = {
+    headline: "Acme raises a Series C",
+    date: "2026-03",
+    why_it_matters: "They are hiring fast.",
+  };
   const OK = {
     what_they_do: "Payments infrastructure for marketplaces.",
     recent_news: [NEWS],
@@ -1067,9 +1160,14 @@ describe("the daily drill's requests", () => {
   const SCORES = { relevance: 7, correctness: 6, structure: 5, depth: 4, filler: 8 };
 
   test("takes a typed drill answer and refuses an empty one", () => {
-    expect(drillTextAnswerSchema.safeParse({ card_id: CARD, text: "Because the index was unused." }).success).toBe(true);
+    expect(
+      drillTextAnswerSchema.safeParse({ card_id: CARD, text: "Because the index was unused." })
+        .success,
+    ).toBe(true);
     expect(drillTextAnswerSchema.safeParse({ card_id: CARD, text: "   " }).success).toBe(false);
-    expect(drillTextAnswerSchema.safeParse({ card_id: "not-a-uuid", text: "x" }).success).toBe(false);
+    expect(drillTextAnswerSchema.safeParse({ card_id: "not-a-uuid", text: "x" }).success).toBe(
+      false,
+    );
   });
 
   test("grades a card inside SM-2's own 0–5 range", () => {
@@ -1093,7 +1191,8 @@ describe("the daily drill's requests", () => {
 
   test("refuses a rubric that is not one, rather than storing it as a best answer", () => {
     expect(
-      drillReviewSchema.safeParse({ card_id: CARD, grade: 3, answer_scores: { relevance: 7 } }).success,
+      drillReviewSchema.safeParse({ card_id: CARD, grade: 3, answer_scores: { relevance: 7 } })
+        .success,
     ).toBe(false);
   });
 });
@@ -1146,7 +1245,9 @@ describe("an imported posting on the interview config", () => {
   });
 
   test("reads the nulls an importer returns for what a posting never named", () => {
-    const r = interviewConfigSchema.safeParse(jd({ company: null, job_location: "", job_url: null }));
+    const r = interviewConfigSchema.safeParse(
+      jd({ company: null, job_location: "", job_url: null }),
+    );
     expect(r.success).toBe(true);
     expect(r.data!.company).toBeUndefined();
     expect(r.data!.job_location).toBeUndefined();
@@ -1154,8 +1255,12 @@ describe("an imported posting on the interview config", () => {
   });
 
   test("refuses a job link that is not an https URL", () => {
-    expect(interviewConfigSchema.safeParse(jd({ job_url: "javascript:alert(1)" })).success).toBe(false);
-    expect(interviewConfigSchema.safeParse(jd({ job_url: "http://jobs.example.com/1" })).success).toBe(false);
+    expect(interviewConfigSchema.safeParse(jd({ job_url: "javascript:alert(1)" })).success).toBe(
+      false,
+    );
+    expect(
+      interviewConfigSchema.safeParse(jd({ job_url: "http://jobs.example.com/1" })).success,
+    ).toBe(false);
   });
 
   test("still reads a JD session recorded before the importer existed", () => {
@@ -1391,6 +1496,78 @@ describe("a coding problem the model wrote", () => {
     expect(readTurnPayload({ kind: "interpretive_dance" })).toBeNull();
     expect(readTurnPayload("a question")).toBeNull();
     expect(readTurnPayload(null)).toBeNull();
+  });
+});
+
+describe("a design prompt the model wrote", () => {
+  const BRIEF = {
+    title: "A ledger for the till",
+    prompt_markdown:
+      "Design the write path for a point-of-sale ledger that every store reads back within a second.",
+    requirements: ["every sale is durable", "reads within one second"],
+    scale: "2M daily users, 8k writes/s",
+    focus: ["partitioning", "failure handling"],
+  };
+
+  test("comes back tagged with its kind, so a turn payload can be told apart", () => {
+    const r = designQuestionSchema.safeParse(BRIEF);
+    expect(r.success).toBe(true);
+    expect(r.data!.kind).toBe("design");
+    expect(r.data!.title).toBe("A ledger for the till");
+  });
+
+  test("a missing scale is an empty line, not a failed prompt", () => {
+    const r = designQuestionSchema.safeParse({ ...BRIEF, scale: undefined });
+    expect(r.success).toBe(true);
+    expect(r.data!.scale).toBe("");
+  });
+
+  test("a stored design payload reads back off a turn row", () => {
+    expect(readTurnPayload({ kind: "design", ...BRIEF })?.kind).toBe("design");
+    expect(readTurnPayload({ kind: "design" })).toBeNull();
+  });
+});
+
+describe("the review of a whiteboard", () => {
+  const REVIEW = {
+    summary: "A gateway in front of Kafka and one Postgres primary.",
+    components: ["api gateway", "kafka", "postgres"],
+    missing: ["no read replica"],
+    single_points_of_failure: ["the single postgres primary"],
+    scale_concerns: ["8k writes/s on one primary"],
+    follow_up_question: "What happens when that Postgres primary fails?",
+    scores: { relevance: 8, correctness: 6, structure: 7, depth: 5, filler: 8 },
+  };
+
+  test("keeps the lists and the rubric side by side", () => {
+    const r = designReviewResponseSchema.safeParse(REVIEW);
+    expect(r.success).toBe(true);
+    expect(r.data!.components).toEqual(["api gateway", "kafka", "postgres"]);
+    expect(r.data!.scores.relevance).toBe(8);
+  });
+
+  test("a runaway list is trimmed to twelve rather than refused", () => {
+    const r = designReviewResponseSchema.safeParse({
+      ...REVIEW,
+      components: Array.from({ length: 30 }, (_, i) => `box ${i}`),
+    });
+    expect(r.success).toBe(true);
+    expect(r.data!.components).toHaveLength(12);
+  });
+
+  test("junk entries are dropped, the well-formed ones survive", () => {
+    const r = designReviewResponseSchema.safeParse({
+      ...REVIEW,
+      missing: ["no read replica", 42, null, "no idempotency key"],
+    });
+    expect(r.success).toBe(true);
+    expect(r.data!.missing).toEqual(["no read replica", "no idempotency key"]);
+  });
+
+  test("a review with no follow-up question is not a review", () => {
+    expect(
+      designReviewResponseSchema.safeParse({ ...REVIEW, follow_up_question: "" }).success,
+    ).toBe(false);
   });
 });
 

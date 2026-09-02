@@ -16,8 +16,10 @@ import {
   deliveryMetricsSchema,
   starBreakdownsSchema,
   storedCodeSubmissionSchema,
+  storedDesignReviewSchema,
 } from "@/lib/schemas";
 import * as repo from "@/lib/db/repo";
+import { presignGet } from "@/lib/storage/objectStore";
 import { takeMs } from "@/lib/camera/summarize";
 import { DIFFICULTY_META } from "@/lib/interviewMeta";
 import { compareSessions } from "@/lib/services/compareService";
@@ -29,6 +31,7 @@ import { ScoreBand } from "@/components/ScoreBand";
 import { PrepBrief } from "../../new/PrepBrief";
 import { CodeReplay, type CodeReplayTurn } from "./CodeReplay";
 import { DeleteInterviewButton } from "./DeleteInterviewButton";
+import { DesignReplay, type DesignReplayTurn } from "./DesignReplay";
 import { Delivery } from "./Delivery";
 import { FinishReport } from "./FinishReport";
 import { PlayAnswer } from "./PlayAnswer";
@@ -52,6 +55,8 @@ const DAY_MS = 86_400_000;
 const FIX_LIMIT = 3;
 
 const FIX_TITLE_MAX = 64;
+
+const DESIGN_IMAGE_TTL_S = 3_600;
 
 export default async function ReportPage({
   params,
@@ -141,6 +146,19 @@ export default async function ReportPage({
     ];
   });
 
+  const designTurns: DesignReplayTurn[] = [];
+  for (const t of turns) {
+    const parsed = storedDesignReviewSchema.safeParse(t.designReview);
+    if (!parsed.success) continue;
+    designTurns.push({
+      turn_index: t.turnIndex,
+      title: t.question.split("\n")[0]?.trim() || `Design ${t.turnIndex + 1}`,
+      review: parsed.data,
+      image_url: t.designImageKey
+        ? await presignGet(t.designImageKey, DESIGN_IMAGE_TTL_S).catch(() => null)
+        : null,
+    });
+  }
 
   const cats = report.category_scores;
   const fixes = report.next_steps.slice(0, FIX_LIMIT);
@@ -509,6 +527,7 @@ export default async function ReportPage({
             hear what you were saying then.
           </Explain>
           <CodeReplay turns={codeTurns} />
+          <DesignReplay turns={designTurns} />
         </div>
 
         {company ? (

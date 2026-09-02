@@ -72,6 +72,9 @@ export async function processAnswer(input: AnswerInput): Promise<AnswerResponse>
     responseLatencyMs,
     interruptedAtS: input.interruptedAtS ?? null,
     codeSubmission: input.codeSubmission ?? null,
+    designReview: input.designReview ?? null,
+    designKey: input.designKey ?? null,
+    designImageKey: input.designImageKey ?? null,
   });
 
   const finish = async (): Promise<AnswerResponse> => {

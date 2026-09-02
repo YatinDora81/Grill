@@ -230,6 +230,17 @@ const db: Record<string, unknown> = {
       if (take !== undefined) rows = rows.slice(0, take);
       return rows.map((s) => project(s, select));
     },
+    update: async ({
+      where,
+      data,
+    }: {
+      where: Record<string, unknown>;
+      data: Record<string, unknown>;
+    }) => {
+      const row = sessions.get(String(where.id));
+      if (row) Object.assign(row, data);
+      return row ?? null;
+    },
   },
   reportShare: {
     findFirst: async ({ where, select }: { where: Record<string, unknown>; select?: Select }) => {
@@ -308,6 +319,17 @@ const db: Record<string, unknown> = {
     update: async ({ data }: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
       turnUpdates.push(data);
       return data;
+    },
+    updateMany: async ({
+      where,
+      data,
+    }: {
+      where?: Record<string, unknown>;
+      data: Record<string, unknown>;
+    }) => {
+      const hits = turns.filter((t) => whereMatches(t, where));
+      for (const row of hits) Object.assign(row, data);
+      return { count: hits.length };
     },
   },
 
@@ -905,6 +927,43 @@ test("listWeakTurns ignores a soft-deleted interview's answers", async () => {
   turn({ id: "ok" });
 
   expect(await repo.listWeakTurns(OWNER)).toEqual([]);
+});
+
+test("listWeakTurns keeps boards and editors out of the pool a spoken interview draws from", async () => {
+  sessions.set("s1", makeSession({ id: "s1" }));
+  turn({ id: "spoken", answerScores: { ...RUBRIC, relevance: 3 } });
+  turn({
+    id: "board",
+    answerScores: { ...RUBRIC, relevance: 1 },
+    designReview: { summary: "one primary, no replica" },
+  });
+  turn({
+    id: "editor",
+    answerScores: { ...RUBRIC, relevance: 2 },
+    codeSubmission: { language: "python" },
+  });
+
+  const weak = await repo.listWeakTurns(OWNER);
+
+  expect(weak.map((w) => w.question)).toEqual(["Question spoken"]);
+});
+
+test("purging a session's media clears the design keys too, so nothing signs a deleted board", async () => {
+  sessions.set("s1", makeSession({ id: "s1" }));
+  const spoken = turn({ id: "spoken", audioKey: "audio/s1/turn_0.webm" });
+  const board = turn({
+    id: "board",
+    audioKey: null,
+    designKey: "design/s1/turn_1.excalidraw",
+    designImageKey: "design/s1/turn_1.png",
+  });
+
+  await repo.markAudioPurged("s1");
+
+  expect(spoken.audioKey).toBeNull();
+  expect(board.designKey).toBeNull();
+  expect(board.designImageKey).toBeNull();
+  expect(sessions.get("s1")!.audioPurgedAt).toBeInstanceOf(Date);
 });
 
 const DAY_MS = 86_400_000;
