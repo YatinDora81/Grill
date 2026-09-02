@@ -10,6 +10,7 @@ import { rateLimit } from "@/lib/rateLimit";
 import * as repo from "@/lib/db/repo";
 import { processAnswer } from "@/lib/services/answerService";
 import { transcribe } from "@/lib/clients/sttClient";
+import { extFromMime } from "@/lib/audio/mime";
 import { audioKey, putAudio } from "@/lib/storage/objectStore";
 
 const MULTIPART_OVERHEAD_BYTES = 16 * 1024;
@@ -25,14 +26,23 @@ export async function POST(req: Request) {
     }
 
     const form = await req.formData();
-    const { session_id, turn_index, video_id, video_offset_ms, camera_metrics } =
-      turnRefSchema.parse({
-        session_id: form.get("session_id"),
-        turn_index: form.get("turn_index"),
-        video_id: form.get("video_id"),
-        video_offset_ms: form.get("video_offset_ms"),
-        camera_metrics: form.get("camera_metrics"),
-      });
+    const {
+      session_id,
+      turn_index,
+      video_id,
+      video_offset_ms,
+      camera_metrics,
+      answer_offset_ms,
+      interrupted_at_s,
+    } = turnRefSchema.parse({
+      session_id: form.get("session_id"),
+      turn_index: form.get("turn_index"),
+      video_id: form.get("video_id"),
+      video_offset_ms: form.get("video_offset_ms"),
+      camera_metrics: form.get("camera_metrics"),
+      answer_offset_ms: form.get("answer_offset_ms"),
+      interrupted_at_s: form.get("interrupted_at_s"),
+    });
 
     const file = form.get("audio");
     if (!(file instanceof File)) throw badRequest("Missing 'audio' file.", "missing_audio");
@@ -60,29 +70,27 @@ export async function POST(req: Request) {
     const key = audioKey(session.id, turn_index, ext);
 
     await putAudio(key, bytes, file.type);
-    const { text, words } = await transcribe(bytes, `turn_${turn_index}.${ext}`, file.type);
+    const { text, words, confidence } = await transcribe(
+      bytes,
+      `turn_${turn_index}.${ext}`,
+      file.type,
+    );
 
     const result: AnswerResponse = await processAnswer({
       session,
       turnIndex: turn_index,
       transcript: text,
       words,
+      transcriptConfidence: confidence ?? null,
       audioKey: key,
       videoId: video_id ?? null,
       videoOffsetMs: video_offset_ms ?? null,
       cameraMetrics: camera_metrics ?? null,
+      answerOffsetMs: answer_offset_ms ?? null,
+      interruptedAtS: interrupted_at_s ?? null,
     });
     return json(result);
   } catch (err) {
     return errorResponse(err);
   }
-}
-
-function extFromMime(mime: string): string {
-  if (mime.includes("webm")) return "webm";
-  if (mime.includes("ogg")) return "ogg";
-  if (mime.includes("mp4") || mime.includes("m4a")) return "m4a";
-  if (mime.includes("mpeg") || mime.includes("mp3")) return "mp3";
-  if (mime.includes("wav")) return "wav";
-  return "webm";
 }

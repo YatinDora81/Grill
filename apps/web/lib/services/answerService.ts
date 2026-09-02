@@ -1,8 +1,16 @@
 import "server-only";
 import type { Session } from "@repo/db";
-import type { AnswerResponse, CameraTurnMetrics, TranscriptWord } from "@repo/types";
+import type {
+  AnswerResponse,
+  AnswerScores,
+  CameraTurnMetrics,
+  CodeSubmission,
+  DesignReview,
+  TranscriptWord,
+} from "@repo/types";
 import { badRequest, conflict } from "@/lib/errors";
 import * as repo from "@/lib/db/repo";
+import { responseLatencyMs as latencyFor } from "@/lib/live/turnTaking";
 import { scoreAnswer } from "./evaluationService";
 import { followUp, questionInputs } from "./questionService";
 import { toSessionContext } from "./sessionContext";
@@ -12,10 +20,18 @@ export interface AnswerInput {
   turnIndex: number;
   transcript: string;
   words?: TranscriptWord[] | null;
+  transcriptConfidence?: number | null;
   audioKey?: string | null;
   videoId?: string | null;
   videoOffsetMs?: number | null;
   cameraMetrics?: CameraTurnMetrics | null;
+  answerOffsetMs?: number | null;
+  interruptedAtS?: number | null;
+  answerScores?: AnswerScores;
+  codeSubmission?: CodeSubmission | null;
+  designReview?: DesignReview | null;
+  designKey?: string | null;
+  designImageKey?: string | null;
 }
 
 export async function processAnswer(input: AnswerInput): Promise<AnswerResponse> {
@@ -36,14 +52,22 @@ export async function processAnswer(input: AnswerInput): Promise<AnswerResponse>
 
   const answerScores = await scoreAnswer(turn.question, turn.questionType, input.transcript);
 
+  const spokenTurn = !input.codeSubmission && !input.designReview;
+  const responseLatencyMs = spokenTurn
+    ? latencyFor(input.answerOffsetMs, input.words?.[0]?.start)
+    : null;
+
   await repo.recordAnswer(session.id, turnIndex, {
     transcript: input.transcript,
     transcriptWords: input.words ?? null,
+    transcriptConfidence: input.transcriptConfidence ?? null,
     audioKey: input.audioKey ?? null,
     answerScores,
     videoId: input.videoId ?? null,
     videoOffsetMs: input.videoOffsetMs ?? null,
     cameraMetrics: input.cameraMetrics ?? null,
+    responseLatencyMs,
+    interruptedAtS: input.interruptedAtS ?? null,
   });
 
   const finish = async (): Promise<AnswerResponse> => {

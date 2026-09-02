@@ -143,6 +143,21 @@ test("reset() drops the take so a consumed one is never handed out twice", async
   expect(blob).toBeNull();
 });
 
+test("the stream is handed out only while a take is live", async () => {
+  const { result } = renderHook(() => useRecorder(60));
+  expect(result.current.stream).toBeNull();
+
+  await act(async () => {
+    await result.current.start();
+  });
+  expect(result.current.stream).not.toBeNull();
+
+  await act(async () => {
+    result.current.reset();
+  });
+  expect(result.current.stream).toBeNull();
+});
+
 test("the mic is released when the cap stops the recording", async () => {
   const track = installMediaStubs();
   const { result } = renderHook(() => useRecorder(2));

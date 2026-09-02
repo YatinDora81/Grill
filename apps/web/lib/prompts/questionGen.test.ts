@@ -44,10 +44,7 @@ const LEAN_TOWARD = /lean toward: (.+)/;
 const openers = (c: Partial<InterviewConfig>) => sample(() => firstQuestionPrompt(ctx(c)), OPEN_ON);
 
 const nextAreas = (c: Partial<InterviewConfig>) =>
-  sample(
-    () => followUpPrompt(ctx(c), [{ question: "Q1", answer: "A1" }], 3),
-    LEAN_TOWARD,
-  );
+  sample(() => followUpPrompt(ctx(c), [{ question: "Q1", answer: "A1" }], 3), LEAN_TOWARD);
 
 const disjoint = (a: Set<string>, b: Set<string>) => [...a].every((x) => !b.has(x));
 
@@ -72,8 +69,12 @@ test("a résumé + cultural blend draws openers from both pools", () => {
 });
 
 test("the interviewer is only stripped of 'technical' when the interview is cultural-only", () => {
-  expect(questionSystem(ctx({ sources: ["cultural"] }).config)).not.toContain("technical interviewer");
-  expect(questionSystem(ctx({ mode: "cultural_only" }).config)).not.toContain("technical interviewer");
+  expect(questionSystem(ctx({ sources: ["cultural"] }).config)).not.toContain(
+    "technical interviewer",
+  );
+  expect(questionSystem(ctx({ mode: "cultural_only" }).config)).not.toContain(
+    "technical interviewer",
+  );
   expect(questionSystem(ctx({ sources: ["resume"] }).config)).toContain("technical interviewer");
   expect(questionSystem(ctx({ sources: ["cultural", "resume"] }).config)).toContain(
     "technical interviewer",
@@ -99,19 +100,24 @@ test("a cultural-only interview never receives the résumé text", () => {
 test("a cultural-only follow-up is told to follow the person, not the technology", () => {
   const cultural = followUpPrompt(
     ctx({ sources: ["cultural"] }),
-    [{ question: "Tell me about a call you got wrong", answer: "The ledger drifted so I re-ran the job" }],
+    [
+      {
+        question: "Tell me about a call you got wrong",
+        answer: "The ledger drifted so I re-ran the job",
+      },
+    ],
     3,
   );
   expect(cultural).toContain("do not follow the\ntechnology — follow the person in it");
   expect(cultural).toContain("Never ask how a system works");
 
-  expect(followUpPrompt(ctx({ mode: "cultural_only" }), [{ question: "Q", answer: "A" }], 3)).toContain(
-    "follow the person in it",
-  );
+  expect(
+    followUpPrompt(ctx({ mode: "cultural_only" }), [{ question: "Q", answer: "A" }], 3),
+  ).toContain("follow the person in it");
 
-  expect(followUpPrompt(ctx({ sources: ["resume"] }), [{ question: "Q", answer: "A" }], 3)).not.toContain(
-    "follow the person in it",
-  );
+  expect(
+    followUpPrompt(ctx({ sources: ["resume"] }), [{ question: "Q", answer: "A" }], 3),
+  ).not.toContain("follow the person in it");
 });
 
 test("a pure subject drill never leans toward the résumé or how they work with people", () => {
@@ -147,8 +153,13 @@ test("a real interview is steered by its stage brief alone, and still reaches it
 });
 
 test("a project interview is briefed on the project and carries its material", () => {
-  const project = "A distributed rate limiter on Redis sorted sets, with a lease-based leader election.";
-  const c = ctx({ mode: "project", project_context: project, project_repo_url: "https://github.com/YatinDora81/Grill" });
+  const project =
+    "A distributed rate limiter on Redis sorted sets, with a lease-based leader election.";
+  const c = ctx({
+    mode: "project",
+    project_context: project,
+    project_repo_url: "https://github.com/YatinDora81/Grill",
+  });
 
   const first = firstQuestionPrompt(c);
   expect(first).toContain("Interview them on THE PROJECT");
@@ -182,7 +193,9 @@ test("weak_spots with no scored history does not point at questions that aren't 
   expect(empty).not.toContain("questions below");
   expect(empty).not.toContain("retry session");
   expect(empty).toContain("Interview them on their own history");
-  expect(followUpPrompt(c, [{ question: "Q", answer: "A" }], 3, {})).not.toContain("questions below");
+  expect(followUpPrompt(c, [{ question: "Q", answer: "A" }], 3, {})).not.toContain(
+    "questions below",
+  );
 
   const withWeak = firstQuestionPrompt(c, {
     weakSpots: [{ question: "How did you shard the ledger?", transcript: "um, I don't recall" }],
@@ -401,4 +414,15 @@ test("no interview without a posting reaches a company brief, however it was han
       expect(prompt).not.toContain("Their interviews are known for:");
     }
   }
+});
+
+test("a cut-off answer tells the next question to make them land the point", () => {
+  const c = ctx({ sources: ["resume"], persona: "terse_staff" });
+  const history = [{ question: "Q one?", answer: "A long one." }];
+
+  const cut = followUpPrompt(c, history, 3, { lastAnswerInterruptedAtS: 76 });
+  expect(cut).toContain("The interviewer cut the candidate off at 76s because the answer ran");
+  expect(cut).toContain("land the point in one or two sentences");
+
+  expect(followUpPrompt(c, history, 3, {})).not.toContain("cut the candidate off");
 });

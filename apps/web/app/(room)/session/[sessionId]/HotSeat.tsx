@@ -3,18 +3,38 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
-import type { AnswerResponse, EndResponse, Persona, QuestionType } from "@repo/types";
+import type {
+  AnswerResponse,
+  CameraTurnMetrics,
+  EndResponse,
+  Persona,
+  QuestionType,
+} from "@repo/types";
 import { apiPost, apiPostForm, ApiClientError } from "@/lib/apiClient";
-import { personaLabel } from "@/lib/interviewMeta";
+import { PERSONA_KOKORO_VOICE, personaLabel } from "@/lib/interviewMeta";
 import { cx } from "@/components/ui";
 import { GrillToaster } from "@/components/toast";
 import { useSpeech } from "@/hooks/useSpeech";
+import { useKokoro, readLocalVoicePref, type LocalVoice } from "@/hooks/useKokoro";
 import { useLiveTranscript, type LiveTranscript } from "@/hooks/useLiveTranscript";
+import { useVoiceActivity, type VoiceActivity } from "@/hooks/useVoiceActivity";
+import {
+  HANDS_FREE,
+  INTERRUPT_LINES,
+  MAX_ANSWER_OFFSET_MS,
+  readHandsFreePref,
+  shouldAutoStop,
+  shouldInterrupt,
+  writeHandsFreePref,
+} from "@/lib/live/turnTaking";
 import { useRecorder } from "./useRecorder";
 import { useSessionVideo } from "./useSessionVideo";
+import { Key, Progress, RecDot, ThankYou, fmtTime, useQuit } from "./RoomChrome";
 import { useCameraMetrics } from "./useCameraMetrics";
+import { usePostureMetrics } from "./usePostureMetrics";
 import { prefetchQuestionAudio, useInterviewerVoice } from "./useInterviewerVoice";
 import { CameraCalibration } from "./CameraCalibration";
+import { MicCheck, micAlreadyChecked } from "./MicCheck";
 import { Interviewer } from "./Interviewer";
 import { SelfView, CameraToggle } from "./SelfView";
 
@@ -37,8 +57,6 @@ type Phase = "answering" | "sending" | "finishing";
 
 const SPEAK_DELAY_MS = 500;
 
-const LEAVE_CANCEL_WAIT_MS = 2_500;
-
 const STALE_CODES = new Set(["turn_already_answered", "unknown_turn", "session_not_active"]);
 
 function isStale(err: unknown): boolean {
@@ -51,8 +69,6 @@ const TYPE_LABEL: Record<QuestionType, string> = {
   followup: "Follow-up",
   behavioral: "Cultural",
 };
-
-const MAX_SEGMENTS = 24;
 
 const SEAT_BANNER = "flex-none border-b border-line bg-paper-raised/60";
 const SEAT_BANNER_IN =
@@ -77,6 +93,8 @@ function seatLine(s: {
   mode: "voice" | "text";
   rec: ReturnType<typeof useRecorder>;
   speaking: boolean;
+  handsFree: boolean;
+  vad: VoiceActivity;
 }): SeatLine {
   if (s.busy) {
     return { text: "Got it — scoring that answer", sub: "writing the next question", tone: "calm" };
@@ -109,11 +127,17 @@ function seatLine(s: {
         tone: "calm",
       };
     case "recording":
-      return {
-        text: "Listening — speak whenever you're ready",
-        sub: "tap the stop button when you've finished the answer",
-        tone: "live",
-      };
+      return s.handsFree && s.vad.state === "listening"
+        ? {
+            text: "Listening — I'll stop when you go quiet",
+            sub: "or tap the stop button",
+            tone: "live",
+          }
+        : {
+            text: "Listening — speak whenever you're ready",
+            sub: "tap the stop button when you've finished the answer",
+            tone: "live",
+          };
     case "stopped":
       return s.rec.capped
         ? { text: "That's the time limit", sub: "sending what you recorded", tone: "calm" }
@@ -150,8 +174,11 @@ export function HotSeat(props: Props) {
   const router = useRouter();
   const rec = useRecorder(props.maxSeconds);
   const speech = useSpeech();
+  const localTts = useKokoro(process.env.NEXT_PUBLIC_LOCAL_TTS !== "0" && readLocalVoicePref());
+  const kokoroVoice = PERSONA_KOKORO_VOICE[props.persona ?? "neutral"];
   const video = useSessionVideo(props.sessionId, props.videoBitrate);
   const camera = useCameraMetrics(video.stream);
+  const posture = usePostureMetrics(video.stream);
   const live = useLiveTranscript(rec.state === "recording");
 
   const [turnIndex, setTurnIndex] = useState(props.turnIndex);
@@ -164,8 +191,29 @@ export function HotSeat(props: Props) {
   const [phase, setPhase] = useState<Phase>("answering");
   const [error, setError] = useState("");
   const [pipOpen, setPipOpen] = useState(true);
+  const [handsFree, setHandsFree] = useState(true);
+  useEffect(() => setHandsFree(readHandsFreePref()), []);
+  const vad = useVoiceActivity(rec.stream, handsFree && rec.state === "recording");
+  const autoStopFired = useRef(false);
+  const interruptedAtRef = useRef<number | null>(null);
+  const interruptLineRef = useRef<string | null>(null);
+  const micGranted = useRef(false);
+  useEffect(() => {
+    if (rec.state === "recording") micGranted.current = true;
+  }, [rec.state]);
   const [calibrationDone, setCalibrationDone] = useState(false);
   const onCalibrated = useCallback(() => setCalibrationDone(true), []);
+  const [micChecked, setMicChecked] = useState(true);
+  useEffect(() => setMicChecked(micAlreadyChecked(props.sessionId)), [props.sessionId]);
+  const onMicChecked = useCallback(() => setMicChecked(true), []);
+
+  const calibrateFace = camera.calibrate;
+  const calibratePosture = posture.calibrate;
+  const calibrateBoth = useCallback(
+    (ms?: number, signal?: AbortSignal) =>
+      Promise.all([calibrateFace(ms, signal), calibratePosture(ms, signal)]).then(([face]) => face),
+    [calibrateFace, calibratePosture],
+  );
 
   const busy = phase !== "answering";
 
@@ -189,6 +237,8 @@ export function HotSeat(props: Props) {
     question,
     speech,
     delayMs: SPEAK_DELAY_MS,
+    local: localTts,
+    localVoice: kokoroVoice,
   });
   const stopSpeaking = voice.stop;
 
@@ -196,17 +246,31 @@ export function HotSeat(props: Props) {
     if (speech.muted) stopSpeaking();
   }, [speech.muted, stopSpeaking]);
 
+  function beginTakes() {
+    camera.beginTake();
+    posture.beginTake();
+  }
+
+  function endTakes(): CameraTurnMetrics | null {
+    const cam = camera.endTake();
+    const post = posture.endTake();
+    return cam ? { ...cam, posture: post } : null;
+  }
+
   function startRecording() {
     stopSpeaking();
+    autoStopFired.current = false;
+    interruptedAtRef.current = null;
+    interruptLineRef.current = null;
     rec.start();
-    camera.beginTake();
+    beginTakes();
   }
 
   const textTakeTurn = useRef<number | null>(null);
   const beginTextTake = () => {
     if (textTakeTurn.current === turnIndex) return;
     textTakeTurn.current = turnIndex;
-    camera.beginTake();
+    beginTakes();
   };
 
   async function afterAnswer(res: AnswerResponse) {
@@ -215,7 +279,7 @@ export function HotSeat(props: Props) {
       setTurnIndex(res.turn_index + 1);
       setQuestion(res.next_question);
       setQuestionType(res.next_question_type ?? "technical");
-      prefetchQuestionAudio(props.sessionId, res.turn_index + 1);
+      if (!localTts.ready) prefetchQuestionAudio(props.sessionId, res.turn_index + 1);
       setText("");
       rec.reset();
       setPhase("answering");
@@ -254,7 +318,7 @@ export function HotSeat(props: Props) {
 
   async function submitText() {
     if (!text.trim() || busy) return;
-    const cam = camera.endTake();
+    const cam = endTakes();
     stopSpeaking();
     setPhase("sending");
     setError("");
@@ -272,7 +336,7 @@ export function HotSeat(props: Props) {
       await track(send(), "Couldn't send that answer.");
     } catch (err) {
       if (isStale(err)) return resync();
-      camera.beginTake();
+      beginTakes();
       setError(err instanceof ApiClientError ? err.message : "Couldn't send that answer.");
       setPhase("answering");
     }
@@ -284,9 +348,57 @@ export function HotSeat(props: Props) {
     if (rec.capped && phase === "answering") void capSubmit.current();
   }, [rec.capped, phase]);
 
+  const interruptTake = useRef(interruptNow);
+  interruptTake.current = interruptNow;
+
+  useEffect(() => {
+    if (phase !== "answering" || rec.state !== "recording" || autoStopFired.current) return;
+    const stopNow = shouldAutoStop({
+      spoke: vad.spoke,
+      speaking: vad.speaking,
+      silenceMs: vad.silenceMs,
+      seconds: rec.seconds,
+      spokenMs: vad.spokenMs,
+    });
+    if (!stopNow) return;
+    autoStopFired.current = true;
+    void capSubmit.current();
+  }, [phase, rec.state, rec.seconds, vad.spoke, vad.speaking, vad.silenceMs, vad.spokenMs]);
+
+  useEffect(() => {
+    if (phase !== "answering" || rec.state !== "recording" || interruptedAtRef.current !== null) {
+      return;
+    }
+    if (!shouldInterrupt(props.persona, rec.seconds, handsFree)) return;
+    interruptedAtRef.current = rec.seconds;
+    void interruptTake.current();
+  }, [phase, rec.state, rec.seconds, handsFree, props.persona]);
+
+  useEffect(() => {
+    if (!handsFree || !micGranted.current || turnIndex === 0) return;
+    if (phase !== "answering" || mode !== "voice" || rec.state !== "idle") return;
+    if (voice.endedAt === null) return;
+    const t = setTimeout(() => startRecording(), HANDS_FREE.graceAfterQuestionMs);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handsFree, turnIndex, phase, mode, rec.state, voice.endedAt]);
+
+  async function interruptNow() {
+    interruptLineRef.current = INTERRUPT_LINES[props.persona ?? "neutral"];
+    await finishRecording();
+  }
+
+  function speakInterruptLine() {
+    const line = interruptLineRef.current;
+    interruptLineRef.current = null;
+    if (!line) return;
+    if (speech.muted || !localTts.speak(line, kokoroVoice)) voice.interject(line);
+  }
+
   async function finishRecording() {
     const blob = await rec.stop();
-    const cam = camera.endTake();
+    const cam = endTakes();
+    speakInterruptLine();
     if (!blob) {
       setError("Nothing was recorded. Try again, or type your answer.");
       rec.reset();
@@ -297,6 +409,11 @@ export function HotSeat(props: Props) {
       rec.reset();
       return;
     }
+    const started = rec.startedAt.current;
+    const ended = voice.endedAt ?? turnShownAt.current;
+    const offsetMs = started !== null ? Math.max(0, Math.round(started - ended)) : 0;
+    const interruptedAtS = interruptedAtRef.current;
+
     setPhase("sending");
     setError("");
     const send = async () => {
@@ -304,6 +421,8 @@ export function HotSeat(props: Props) {
       form.append("session_id", props.sessionId);
       form.append("turn_index", String(turnIndex));
       form.append("audio", blob, `turn_${turnIndex}.webm`);
+      if (offsetMs <= MAX_ANSWER_OFFSET_MS) form.append("answer_offset_ms", String(offsetMs));
+      if (interruptedAtS !== null) form.append("interrupted_at_s", String(interruptedAtS));
       if (cam) form.append("camera_metrics", JSON.stringify(cam));
       for (const [k, v] of Object.entries(videoFields())) form.append(k, String(v));
       const res = await apiPostForm<AnswerResponse>("/api/interview/answer", form);
@@ -319,17 +438,11 @@ export function HotSeat(props: Props) {
     }
   }
 
-  async function quit() {
-    if (!confirm("Leave this interview? It won't be scored.")) return;
+  const quit = useQuit(props.sessionId, () => {
     stopSpeaking();
     rec.reset();
     video.stream?.getTracks().forEach((t) => t.stop());
-    await Promise.race([
-      apiPost("/api/interview/cancel", { session_id: props.sessionId }).catch(() => {}),
-      new Promise((resolve) => setTimeout(resolve, LEAVE_CANCEL_WAIT_MS)),
-    ]);
-    router.push("/dashboard");
-  }
+  });
 
   if (phase === "finishing") {
     return <ThankYou sessionId={props.sessionId} saving={finishVideo.current} />;
@@ -359,6 +472,7 @@ export function HotSeat(props: Props) {
               {personaLabel(props.persona)}
             </span>
             <RecDot state={video.state} />
+            <LocalVoiceChip local={localTts} />
             {video.stream && <CameraToggle on={pipOpen} onClick={() => setPipOpen((c) => !c)} />}
             <button onClick={quit} disabled={busy} className="underlink">
               Leave
@@ -367,7 +481,7 @@ export function HotSeat(props: Props) {
         </div>
       </header>
 
-      <SeatState line={seatLine({ busy, mode, rec, speaking: voice.speaking })} />
+      <SeatState line={seatLine({ busy, mode, rec, speaking: voice.speaking, handsFree, vad })} />
 
       <main className="room-main">
         <div className="room-in">
@@ -408,6 +522,7 @@ export function HotSeat(props: Props) {
               {mode === "voice" ? (
                 <VoicePanel
                   rec={rec}
+                  activity={vad}
                   busy={busy}
                   onStart={startRecording}
                   onStop={finishRecording}
@@ -446,6 +561,17 @@ export function HotSeat(props: Props) {
                 >
                   {mode === "voice" ? "Type this one instead" : "Go back to speaking"}
                 </button>
+                <button
+                  onClick={() => {
+                    const next = !handsFree;
+                    setHandsFree(next);
+                    writeHandsFreePref(next);
+                  }}
+                  disabled={rec.state === "recording"}
+                  className="underlink"
+                >
+                  {handsFree ? "Hands-free: on" : "Hands-free: off"}
+                </button>
               </div>
             </div>
 
@@ -481,6 +607,12 @@ export function HotSeat(props: Props) {
         {camera.state === "ready" ? (
           <p>On-camera analysis runs on this device. Nothing is uploaded but the numbers.</p>
         ) : null}
+        {posture.state === "ready" ? (
+          <p>
+            Posture is measured on this device from body landmarks — nothing but the numbers leaves
+            your browser.
+          </p>
+        ) : null}
       </footer>
 
       {pipOpen && video.stream && (
@@ -493,22 +625,25 @@ export function HotSeat(props: Props) {
         />
       )}
 
-      {video.state === "recording" && camera.state === "ready" && !calibrationDone ? (
+      {video.state === "recording" &&
+      camera.state === "ready" &&
+      posture.state !== "loading" &&
+      !calibrationDone ? (
         <CameraCalibration
           sessionId={props.sessionId}
-          calibrate={camera.calibrate}
+          calibrate={calibrateBoth}
           onDone={onCalibrated}
         />
       ) : null}
-    </div>
-  );
-}
 
-function Key({ children }: { children: React.ReactNode }) {
-  return (
-    <kbd className="mx-0.5 border border-line px-1 py-px font-mono text-[9.5px] text-ink-soft">
-      {children}
-    </kbd>
+      {mode === "voice" &&
+      turnIndex === 0 &&
+      rec.state === "idle" &&
+      !micChecked &&
+      voice.endedAt !== null ? (
+        <MicCheck sessionId={props.sessionId} onDone={onMicChecked} />
+      ) : null}
+    </div>
   );
 }
 
@@ -587,50 +722,18 @@ function Metric({ k, v, unit }: { k: string; v: string; unit?: string }) {
   );
 }
 
-function Progress({ answered, total }: { answered: number; total: number }) {
-  if (total > MAX_SEGMENTS) {
+function LocalVoiceChip({ local }: { local: LocalVoice }) {
+  if (local.state === "loading") {
     return (
-      <div className="rprog" aria-hidden="true">
-        <div className="bar-track">
-          <div className="bar-fill" style={{ width: `${(answered / total) * 100}%` }} />
-        </div>
-      </div>
-    );
-  }
-  return (
-    <div className="rprog" aria-hidden="true">
-      <div className="segs">
-        {Array.from({ length: total }).map((_, i) => (
-          <span key={i} className="seg-i" data-done={i < answered} data-live={i === answered} />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function RecDot({ state }: { state: ReturnType<typeof useSessionVideo>["state"] }) {
-  if (state === "starting") {
-    return <span className="rec-chip">CAM…</span>;
-  }
-  if (state === "denied" || state === "failed") {
-    return (
-      <span
-        className="rec-chip"
-        title={
-          state === "denied"
-            ? "Camera blocked — the interview still works, but the replay will have no video."
-            : "Camera unavailable — the interview still works, but the replay will have no video."
-        }
-      >
-        NO CAM
+      <span className="rec-chip" title="The interviewer's voice is downloading to this device once">
+        VOICE {Math.round((local.progress ?? 0) * 100)}%
       </span>
     );
   }
-  if (state !== "recording") return null;
+  if (local.state !== "ready") return null;
   return (
-    <span className="rec-chip" title="This interview is being recorded">
-      <span aria-hidden="true" className="rec-dot animate-pulse-rec" />
-      REC
+    <span className="rec-chip" title="The interviewer is speaking from this device, not the server">
+      LOCAL VOICE
     </span>
   );
 }
@@ -662,6 +765,7 @@ function Question({ text }: { text: string }) {
 
 function VoicePanel({
   rec,
+  activity,
   busy,
   onStart,
   onStop,
@@ -669,6 +773,7 @@ function VoicePanel({
   runningLong,
 }: {
   rec: ReturnType<typeof useRecorder>;
+  activity: VoiceActivity;
   busy: boolean;
   onStart: () => void;
   onStop: () => void;
@@ -691,13 +796,14 @@ function VoicePanel({
       <div className="lvl" aria-hidden="true">
         {Array.from({ length: 28 }).map((_, i) => {
           const falloff = 1 - Math.abs(i - 13.5) / 15;
+          const hot = recording || activity.speaking;
           const h = recording ? Math.max(3, rec.level * 46 * falloff) : 3;
           return (
             <span
               key={i}
               className="lvl-bar"
-              data-hot={recording}
-              style={{ height: h, background: recording ? "var(--color-strong)" : undefined }}
+              data-hot={hot}
+              style={{ height: h, background: hot ? "var(--color-strong)" : undefined }}
             />
           );
         })}
@@ -719,7 +825,14 @@ function VoicePanel({
             {fmtTime(rec.seconds)}
             {remaining <= 30 && <span className="take-left">{remaining}s left</span>}
           </p>
-          <p className="mic-note">Tap to finish</p>
+          {activity.spoke && !activity.speaking ? (
+            <p className="mic-note">
+              Finishing in{" "}
+              {Math.max(0, Math.ceil((HANDS_FREE.silenceMs - activity.silenceMs) / 1000))}s…
+            </p>
+          ) : (
+            <p className="mic-note">Tap to finish</p>
+          )}
           {runningLong && (
             <p className="mt-2 font-mono text-[10px] tracking-[0.14em] text-mixed uppercase">
               Running long for a behavioral answer — land the result.
@@ -788,89 +901,6 @@ function TextPanel({
       </div>
     </div>
   );
-}
-
-const REDIRECT_MS = 5_000;
-
-const MARK_C = 2 * Math.PI * 30;
-
-function DoneMark() {
-  return (
-    <svg
-      className="done-mark"
-      viewBox="0 0 72 72"
-      xmlns="http://www.w3.org/2000/svg"
-      aria-hidden="true"
-    >
-      <circle cx="36" cy="36" r="30" className="dmark-disc" />
-      <circle
-        cx="36"
-        cy="36"
-        r="30"
-        className="dmark-arc"
-        style={{ "--c": MARK_C } as React.CSSProperties}
-        transform="rotate(-90 36 36)"
-      />
-      <path className="dmark-check" d="M24.5 37.5 L32.5 45 L48 28.5" pathLength={100} />
-    </svg>
-  );
-}
-
-function ThankYou({ sessionId, saving }: { sessionId: string; saving: Promise<void> | null }) {
-  const router = useRouter();
-  const [flushing, setFlushing] = useState(Boolean(saving));
-
-  useEffect(() => {
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout>;
-    const leave = () => {
-      if (!cancelled) timer = setTimeout(() => router.push("/dashboard"), REDIRECT_MS);
-    };
-    if (!saving) {
-      setFlushing(false);
-      leave();
-    } else {
-      void saving.then(() => {
-        if (cancelled) return;
-        setFlushing(false);
-        leave();
-      });
-    }
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [saving, router]);
-
-  return (
-    <div className="done">
-      <div className="grain" aria-hidden="true" />
-      <div className="done-glow" aria-hidden="true" />
-      <div className="done-in animate-rise">
-        <DoneMark />
-        <h1 className="done-h">That&apos;s the interview.</h1>
-        <p className="done-sub">
-          {flushing
-            ? "Saving the last of your recording — this only takes a moment."
-            : "You can close this — we're scoring every answer and measuring how you sounded. Your report will be waiting on the dashboard."}
-        </p>
-        <div className="done-btns">
-          <button onClick={() => router.push(`/report/${sessionId}`)} className="btn btn-primary">
-            Wait for the report
-          </button>
-          <button onClick={() => router.push("/dashboard")} className="underlink">
-            Go to the dashboard now
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function fmtTime(total: number): string {
-  const m = Math.floor(total / 60);
-  const s = total % 60;
-  return `${m}:${String(s).padStart(2, "0")}`;
 }
 
 function MicIcon() {

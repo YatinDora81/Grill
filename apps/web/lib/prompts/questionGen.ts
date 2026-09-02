@@ -30,9 +30,12 @@ export interface QuestionInputs {
   weakSpots?: WeakSpot[];
   fixedQuestions?: string[];
   companyBrief?: CompanyBriefContext;
+  lastAnswerInterruptedAtS?: number;
 }
 
-export function questionSystem(c: InterviewConfig): string {
+const JSON_ONLY = "Respond with JSON only — no prose, no code fences.";
+
+export function questionSystemProse(c: InterviewConfig): string {
   const voice = personaBrief(c.persona);
   const persona = voice ? `\n${voice}\n` : "";
   if (culturalOnly(c)) {
@@ -42,18 +45,20 @@ pressure, and decides what kind of workplace they thrive in.
 Pitch every question at the stated difficulty, and follow the interview brief.
 Do not ask about systems, code, architecture, or résumé projects. Do not answer for the candidate.
 ${persona}
-${CULTURAL_QUALITY_BAR}
-
-Respond with JSON only — no prose, no code fences.`;
+${CULTURAL_QUALITY_BAR}`;
   }
   return `You are a sharp, fair technical interviewer running a mock interview.
 Ask ONE question at a time. Questions must be specific and grounded in the provided context.
 Pitch every question at the stated difficulty, and follow the interview brief.
 Do not answer for the candidate.
 ${persona}
-${TECHNICAL_QUALITY_BAR}
+${TECHNICAL_QUALITY_BAR}`;
+}
 
-Respond with JSON only — no prose, no code fences.`;
+export function questionSystem(c: InterviewConfig): string {
+  return `${questionSystemProse(c)}
+
+${JSON_ONLY}`;
 }
 
 const TECHNICAL_QUALITY_BAR = `A question earns its place only if it clears all of this:
@@ -545,6 +550,15 @@ Never reword, soften or replace a fixed primary. Never re-ask anything else alre
 that digs into something the candidate actually said; otherwise move to a new area${areaHint}
 Never re-ask something already covered above, and don't rephrase a question they've answered.`;
 
+  const cutIn =
+    inputs.lastAnswerInterruptedAtS === undefined
+      ? ""
+      : `
+The interviewer cut the candidate off at ${inputs.lastAnswerInterruptedAtS}s because the answer ran
+long. Your next question must make them land the point in one or two sentences — the result, the
+number, or the decision — before any new ground.
+`;
+
   return `${contextBlock(s, inputs)}
 
 ${brief(s.config, !!inputs.weakSpots?.length)}
@@ -554,7 +568,7 @@ ${transcript}
 
 There are ${turnsRemaining} question(s) left after this one.
 ${ask}
-${culturalOnly(s.config) ? CULTURAL_THREAD : ""}${ONE_QUESTION}
+${cutIn}${culturalOnly(s.config) ? CULTURAL_THREAD : ""}${ONE_QUESTION}
 Return JSON: { "question": string, "question_type": ${typeUnionFor(s.config)} }`;
 }
 

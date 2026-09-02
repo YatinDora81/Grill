@@ -16,6 +16,7 @@ export function useRecorder(maxSeconds: number) {
   const [capped, setCapped] = useState(false);
   const [level, setLevel] = useState(0);
   const [error, setError] = useState("");
+  const [stream, setStream] = useState<MediaStream | null>(null);
 
   const [supported, setSupported] = useState(true);
   useEffect(() => {
@@ -30,6 +31,7 @@ export function useRecorder(maxSeconds: number) {
   const generationRef = useRef(0);
   const mountedRef = useRef(true);
   const takeRef = useRef<Promise<Blob | null> | null>(null);
+  const startedAtRef = useRef<number | null>(null);
 
   const teardown = useCallback(() => {
     generationRef.current += 1;
@@ -39,6 +41,7 @@ export function useRecorder(maxSeconds: number) {
     tickRef.current = null;
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
+    setStream(null);
     void audioCtxRef.current?.close().catch(() => {});
     audioCtxRef.current = null;
     setLevel(0);
@@ -76,6 +79,7 @@ export function useRecorder(maxSeconds: number) {
         return;
       }
       streamRef.current = stream;
+      setStream(stream);
 
       const ctx = new AudioContext();
       audioCtxRef.current = ctx;
@@ -120,6 +124,7 @@ export function useRecorder(maxSeconds: number) {
       takeRef.current = new Promise<Blob | null>((resolve) => {
         settle = resolve;
       });
+      startedAtRef.current = performance.now();
       rec.start();
       setSeconds(0);
       setState("recording");
@@ -159,11 +164,24 @@ export function useRecorder(maxSeconds: number) {
     teardown();
     dropRecorder();
     takeRef.current = null;
+    startedAtRef.current = null;
     setState("idle");
     setSeconds(0);
     setCapped(false);
     setError("");
   }, [teardown, dropRecorder]);
 
-  return { state, seconds, level, error, capped, start, stop, reset, supported };
+  return {
+    state,
+    seconds,
+    level,
+    error,
+    capped,
+    start,
+    stop,
+    reset,
+    supported,
+    stream,
+    startedAt: startedAtRef,
+  };
 }

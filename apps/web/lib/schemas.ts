@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { Difficulty, InterviewSource } from "@repo/types";
 import { QUESTION_BOUNDS, QUESTION_SET_BOUNDS } from "./interviewMeta";
+import { MAX_ANSWER_OFFSET_MS } from "./live/turnTaking";
 import { config } from "./env";
 
 export const signupSchema = z.object({
@@ -416,11 +417,23 @@ export const answerTextSchema = z.object({
 export const turnRefSchema = z.object({
   session_id: z.string().uuid(),
   turn_index: z.coerce.number().int().min(0),
-  video_id: z
-    .preprocess((v) => (v === null || v === "" ? undefined : v), z.string().uuid().optional()),
-  video_offset_ms: z
-    .preprocess((v) => (v === null || v === "" ? undefined : v), z.coerce.number().int().min(0).optional()),
+  video_id: z.preprocess(
+    (v) => (v === null || v === "" ? undefined : v),
+    z.string().uuid().optional(),
+  ),
+  video_offset_ms: z.preprocess(
+    (v) => (v === null || v === "" ? undefined : v),
+    z.coerce.number().int().min(0).optional(),
+  ),
   camera_metrics: jsonField(cameraMetricsSchema),
+  answer_offset_ms: z.preprocess(
+    (v) => (v === null || v === "" ? undefined : v),
+    z.coerce.number().int().min(0).max(MAX_ANSWER_OFFSET_MS).optional(),
+  ),
+  interrupted_at_s: z.preprocess(
+    (v) => (v === null || v === "" ? undefined : v),
+    z.coerce.number().int().min(0).max(3_600).optional(),
+  ),
 });
 
 export const sessionIdSchema = z.object({ session_id: z.string().uuid() });
