@@ -159,6 +159,9 @@ export const config = {
     geminiDailyBudget: num("GEMINI_TTS_DAILY_BUDGET", 12),
     geminiCachePrefix: process.env.GEMINI_TTS_CACHE_PREFIX || "tts/gemini/",
   },
+  code: {
+    runTimeoutMs: num("CODE_RUN_TIMEOUT_MS", 8_000),
+  },
   interview: {
     defaultNumQuestions: num("DEFAULT_NUM_QUESTIONS", 8),
   },

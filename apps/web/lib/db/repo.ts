@@ -5,6 +5,7 @@ import type { Session } from "@repo/db";
 import type {
   AnswerScores,
   CameraTurnMetrics,
+  CodeSubmission,
   InterviewConfig,
   QuestionSetSource,
   QuestionType,
@@ -87,7 +88,7 @@ export async function copyQuestionsInto(
   const source = await prisma.turn.findMany({
     where: { sessionId: sourceSessionId },
     orderBy: { turnIndex: "asc" },
-    select: { turnIndex: true, question: true, questionType: true },
+    select: { turnIndex: true, question: true, questionType: true, questionPayload: true },
   });
   if (!source.length) return 0;
   const { count } = await prisma.turn.createMany({
@@ -96,6 +97,7 @@ export async function copyQuestionsInto(
       turnIndex: t.turnIndex,
       question: t.question,
       questionType: t.questionType,
+      questionPayload: t.questionPayload ?? Prisma.JsonNull,
     })),
   });
   return count;
@@ -214,6 +216,10 @@ export async function softDeleteSession(id: string, userId: string): Promise<boo
 
 export function setStatus(id: string, status: SessionStatus, errorReason: string | null = null) {
   return prisma.session.update({ where: { id }, data: { status, errorReason } });
+}
+
+export function updateSessionConfig(id: string, config: InterviewConfig) {
+  return prisma.session.update({ where: { id }, data: { config: json(config) } });
 }
 
 export function questionHash(question: string): string {
@@ -542,6 +548,7 @@ export interface CreateTurnInput {
   turnIndex: number;
   question: string;
   questionType: QuestionType;
+  questionPayload?: unknown;
   audioKey?: string | null;
   transcript?: string | null;
   transcriptWords?: TranscriptWord[] | null;
@@ -555,6 +562,7 @@ export function createTurn(input: CreateTurnInput) {
       turnIndex: input.turnIndex,
       question: input.question,
       questionType: input.questionType,
+      questionPayload: input.questionPayload ? json(input.questionPayload) : Prisma.JsonNull,
       audioKey: input.audioKey ?? null,
       transcript: input.transcript ?? null,
       transcriptWords: input.transcriptWords ? json(input.transcriptWords) : Prisma.JsonNull,
@@ -570,13 +578,14 @@ export function recordAnswer(
     audioKey?: string | null;
     transcript: string;
     transcriptWords?: TranscriptWord[] | null;
-    answerScores: AnswerScores;
     transcriptConfidence?: number | null;
+    answerScores: AnswerScores | null;
     videoId?: string | null;
     videoOffsetMs?: number | null;
     cameraMetrics?: CameraTurnMetrics | null;
     responseLatencyMs?: number | null;
     interruptedAtS?: number | null;
+    codeSubmission?: CodeSubmission | null;
   },
 ) {
   return prisma.turn.update({
@@ -588,10 +597,11 @@ export function recordAnswer(
       cameraMetrics: data.cameraMetrics ? json(data.cameraMetrics) : undefined,
       transcript: data.transcript,
       transcriptWords: data.transcriptWords ? json(data.transcriptWords) : undefined,
-      answerScores: json(data.answerScores),
       transcriptConfidence: data.transcriptConfidence ?? undefined,
+      answerScores: data.answerScores ? json(data.answerScores) : undefined,
       responseLatencyMs: data.responseLatencyMs ?? undefined,
       interruptedAtS: data.interruptedAtS ?? undefined,
+      codeSubmission: data.codeSubmission ? json(data.codeSubmission) : undefined,
     },
   });
 }

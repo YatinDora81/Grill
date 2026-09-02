@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import type {
   Difficulty,
   ExclusiveMode,
+  InterviewRound,
   InterviewSource,
   JobImportResponse,
   Persona,
@@ -44,6 +45,38 @@ const MODE_NEEDS: Partial<Record<ExclusiveMode, string>> = {
   topic_only: "needs a topic",
   project: "needs a write-up",
 };
+
+const ROUNDS: InterviewRound[] = ["spoken", "coding", "design"];
+
+const ROUND_META: Record<
+  InterviewRound,
+  { label: string; blurb: string; capSeconds: number | null; minutesPer: number }
+> = {
+  spoken: {
+    label: "Spoken",
+    blurb: "Questions and follow-ups, out loud.",
+    capSeconds: null,
+    minutesPer: 0,
+  },
+  coding: {
+    label: "Coding",
+    blurb: "Problems in Python or JavaScript, run in your browser. Mic stays on.",
+    capSeconds: 1_200,
+    minutesPer: 22,
+  },
+  design: {
+    label: "System design",
+    blurb: "Draw it on a whiteboard, defend it out loud.",
+    capSeconds: 900,
+    minutesPer: 17,
+  },
+};
+
+const ROUND_LOCKED: ExclusiveMode[] = ["starred", "weak_spots", "real"];
+
+const ROUND_LOCKED_NOTE = "Not available for coding or design rounds";
+
+const PROBLEM_COUNTS = [1, 2, 3];
 
 type WizardStep = 1 | 2 | 3;
 
@@ -152,9 +185,11 @@ function article(n: number): "A" | "An" {
 export function NewInterviewForm({
   initialStarredHashes = [],
   initialMode = null,
+  initialRound = "spoken",
 }: {
   initialStarredHashes?: string[];
   initialMode?: ExclusiveMode | null;
+  initialRound?: InterviewRound;
 }) {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -191,6 +226,8 @@ export function NewInterviewForm({
   const [importing, setImporting] = useState(false);
   const [role, setRole] = useState("");
   const [numQuestions, setNumQuestions] = useState(8);
+  const [round, setRound] = useState<InterviewRound>(initialRound);
+  const [problems, setProblems] = useState(2);
   const [difficulty, setDifficulty] = useState<Difficulty>("medium");
   const [persona, setPersona] = useState<Persona>("neutral");
   const [allowRepeats, setAllowRepeats] = useState(false);
@@ -243,6 +280,15 @@ export function NewInterviewForm({
     setCarriedJd(true);
   }, [fromDrillLink, initialMode]);
 
+  const roundish = round !== "spoken";
+
+  useEffect(() => {
+    if (!roundish || !mode || !ROUND_LOCKED.includes(mode)) return;
+    setMode(null);
+    setSources(["resume"]);
+    setStarredHashes([]);
+  }, [roundish, mode]);
+
   const drilling = mode === "starred";
   const drillQuestions = starredRows
     ? starredHashes
@@ -252,8 +298,13 @@ export function NewInterviewForm({
   const drillLost = drillQuestions ? starredHashes.length - drillQuestions.length : 0;
   const liveHashes = drillQuestions ? drillQuestions.map((r) => r.question_hash) : starredHashes;
   const primaryCount = drilling ? liveHashes.length : numQuestions;
-  const questionCount = drilling ? drillTurnBudget(liveHashes.length) : numQuestions;
-  const answerCap = perAnswerCapSeconds(questionCount);
+  const questionCount = roundish
+    ? problems * 2
+    : drilling
+      ? drillTurnBudget(liveHashes.length)
+      : numQuestions;
+  const answerCap = roundish ? ROUND_META[round].capSeconds : perAnswerCapSeconds(questionCount);
+  const minutes = roundish ? problems * ROUND_META[round].minutesPer : estimateMinutes(questionCount);
 
   const hasResume = resumeText.trim().length > 0;
   const needsTopic = mode === "topic_only" || sources.includes("topic");
@@ -455,6 +506,8 @@ export function NewInterviewForm({
           sources,
           mode,
           allow_repeats: allowRepeats,
+          round,
+          ...(roundish ? { problems } : {}),
           ...(persona !== "neutral" ? { persona } : {}),
           ...(drilling ? { starred_hashes: liveHashes } : {}),
           ...(needsTopic ? { topic: topic.trim() } : {}),
@@ -867,6 +920,35 @@ export function NewInterviewForm({
               </p>
             </div>
 
+            <div className="mt-9">
+              <div className="field-row">
+                <span id="wiz-round" className="label">
+                  Round
+                </span>
+                <span className="hint">what kind of interview this is</span>
+              </div>
+              <div className={PICKS} role="radiogroup" aria-labelledby="wiz-round">
+                {ROUNDS.map((r) => (
+                  <Pick
+                    key={r}
+                    selected={round === r}
+                    onClick={() => setRound(r)}
+                    label={ROUND_META[r].label}
+                    blurb={ROUND_META[r].blurb}
+                    kind="radio"
+                  />
+                ))}
+              </div>
+              {roundish && (
+                <Explain>
+                  A {ROUND_META[round].label.toLowerCase()} round is{" "}
+                  <b>{problems} problems, each followed by one spoken follow-up</b> about what you
+                  actually built. Saved questions, weak spots and the real-interview arc are spoken
+                  formats, so they are off here.
+                </Explain>
+              )}
+            </div>
+
             <PersonaPicker value={persona} onPick={setPersona} />
 
             {drilling && (
@@ -979,17 +1061,22 @@ export function NewInterviewForm({
                 above, and clicking it again gives the mix back.
               </p>
               <div className={PICKS} role="radiogroup" aria-label="Interview mode">
-                {MODES.map((m) => (
-                  <Pick
-                    key={m}
-                    selected={mode === m}
-                    onClick={() => pickMode(m)}
-                    label={MODE_META[m].label}
-                    blurb={MODE_META[m].blurb}
-                    meta={MODE_NEEDS[m]}
-                    kind="radio"
-                  />
-                ))}
+                {MODES.map((m) => {
+                  const locked = roundish && ROUND_LOCKED.includes(m);
+                  return (
+                    <Pick
+                      key={m}
+                      selected={mode === m}
+                      onClick={() => pickMode(m)}
+                      label={MODE_META[m].label}
+                      blurb={MODE_META[m].blurb}
+                      meta={locked ? "spoken rounds only" : MODE_NEEDS[m]}
+                      kind="radio"
+                      disabled={locked}
+                      title={locked ? ROUND_LOCKED_NOTE : undefined}
+                    />
+                  );
+                })}
               </div>
               <Explain>
                 An interview is <b>either</b> a blend of sources <b>or</b> one of these modes —
@@ -1000,19 +1087,41 @@ export function NewInterviewForm({
 
             <div className="mt-9">
               <div className="field-row">
-                {drilling ? (
-                  <span className="label">Questions</span>
+                {drilling || roundish ? (
+                  <span className="label">{roundish ? "Problems" : "Questions"}</span>
                 ) : (
                   <label className="label" htmlFor="num">
                     Questions
                   </label>
                 )}
                 <span className="hint tabular">
-                  {questionCount} · ≈ {estimateMinutes(questionCount)} min
+                  {roundish ? `${problems} · ${questionCount} turns` : questionCount} · ≈ {minutes}{" "}
+                  min
                 </span>
               </div>
 
-              {drilling ? (
+              {roundish ? (
+                <>
+                  <div className={DIAL} role="radiogroup" aria-label="Problems">
+                    {PROBLEM_COUNTS.map((n) => (
+                      <button
+                        key={n}
+                        type="button"
+                        role="radio"
+                        aria-checked={problems === n}
+                        onClick={() => setProblems(n)}
+                        className={cx(DIALB, problems === n ? DIALB_ON : DIALB_OFF)}
+                      >
+                        {n} · ≈{n * ROUND_META[round].minutesPer}m
+                      </button>
+                    ))}
+                  </div>
+                  <p className="mt-3 text-[13px] leading-relaxed text-ink-soft">
+                    Each problem is followed by one spoken follow-up about what you actually built —{" "}
+                    <b className="font-semibold text-ember">{questionCount} turns</b> in all.
+                  </p>
+                </>
+              ) : drilling ? (
                 <p className="border border-line bg-paper-sunken px-5 py-4 text-[13px] leading-relaxed text-ink-soft">
                   Fixed at <b className="font-semibold text-ember">{primaryCount}</b> — one primary
                   per starred question, plus room for a follow-up after each. Drop the drill above
@@ -1057,18 +1166,18 @@ export function NewInterviewForm({
 
               <div className="tally">
                 <div>
-                  <p className="dk">Questions</p>
+                  <p className="dk">{roundish ? "Turns" : "Questions"}</p>
                   <p className="dv tabular">{questionCount}</p>
                 </div>
                 <div>
                   <p className="dk">Runtime</p>
                   <p className="dv tabular">
-                    ≈{estimateMinutes(questionCount)}
+                    ≈{minutes}
                     <small>min</small>
                   </p>
                 </div>
                 <div>
-                  <p className="dk">Per answer</p>
+                  <p className="dk">{roundish ? "Per problem" : "Per answer"}</p>
                   <p className="dv tabular">
                     {answerCap !== null ? (
                       <>
@@ -1081,7 +1190,7 @@ export function NewInterviewForm({
                   </p>
                 </div>
               </div>
-              {answerCap === null && (
+              {!roundish && answerCap === null && (
                 <p className="mt-4 text-[12px] leading-relaxed text-weak">
                   At {questionCount} questions there&rsquo;s no per-answer cap that lets the report
                   build in time — the server will refuse this count. Bring it down.
@@ -1143,10 +1252,12 @@ export function NewInterviewForm({
               </p>
               <p className="px-5 py-5 text-[15px] leading-relaxed text-ink">
                 {summarySentence({
+                  round,
+                  problems,
                   numQuestions: questionCount,
                   difficultyLabel: heat.label,
                   shapeLabel,
-                  minutes: estimateMinutes(questionCount),
+                  minutes,
                   answerCap,
                   role: role.trim(),
                 })}
@@ -1237,10 +1348,12 @@ export function NewInterviewForm({
           </p>
           <p className="border-b border-line px-5 py-5 text-[15px] leading-relaxed text-ink">
             {summarySentence({
+              round,
+              problems,
               numQuestions: questionCount,
               difficultyLabel: heat.label,
               shapeLabel,
-              minutes: estimateMinutes(questionCount),
+              minutes,
               answerCap,
               role: role.trim(),
             })}
@@ -1248,9 +1361,20 @@ export function NewInterviewForm({
           <dl className="py-1.5">
             <Fact k="Draws on" v={shapeLabel || "—"} wrap />
             <Fact k="Difficulty" v={heat.label} />
-            <Fact k="Questions" v={String(questionCount)} />
+            <Fact
+              k="Round"
+              v={
+                roundish
+                  ? `${ROUND_META[round].label} · ${problems} ${problems === 1 ? "problem" : "problems"}`
+                  : ROUND_META.spoken.label
+              }
+            />
+            <Fact k={roundish ? "Turns" : "Questions"} v={String(questionCount)} />
             <Fact k="Interviewer" v={PERSONA_META[persona].label} />
-            <Fact k="Per answer" v={answerCap !== null ? `${clock(answerCap)} max` : "—"} />
+            <Fact
+              k={roundish ? "Per problem" : "Per answer"}
+              v={answerCap !== null ? `${clock(answerCap)} max` : "—"}
+            />
             <Fact k="Repeats" v={allowRepeats ? "Allowed" : "Off"} />
             <Fact k="Résumé" v={hasResume ? "Loaded" : needsProject ? "Optional" : "Not yet"} />
             {role.trim() ? <Fact k="Role" v={role.trim()} wrap /> : null}
@@ -1277,6 +1401,8 @@ function Fact({ k, v, wrap }: { k: string; v: string; wrap?: boolean }) {
 }
 
 function summarySentence({
+  round,
+  problems,
   numQuestions,
   difficultyLabel,
   shapeLabel,
@@ -1284,6 +1410,8 @@ function summarySentence({
   answerCap,
   role,
 }: {
+  round: InterviewRound;
+  problems: number;
   numQuestions: number;
   difficultyLabel: string;
   shapeLabel: string;
@@ -1291,10 +1419,16 @@ function summarySentence({
   answerCap: number | null;
   role: string;
 }) {
+  const roundish = round !== "spoken";
+  const headline = roundish
+    ? `${problems}-problem ${round === "coding" ? "coding" : "system-design"}`
+    : `${numQuestions}-question`;
   return (
     <>
-      {article(numQuestions)} <b className="font-semibold text-ember">{numQuestions}-question</b>{" "}
-      interview at <b className="font-semibold text-ember">{difficultyLabel}</b> difficulty
+      {article(roundish ? problems : numQuestions)}{" "}
+      <b className="font-semibold text-ember">{headline}</b>{" "}
+      {roundish ? "round" : "interview"} at{" "}
+      <b className="font-semibold text-ember">{difficultyLabel}</b> difficulty
       {shapeLabel ? (
         <>
           , drawing on <b className="font-semibold text-ember">{shapeLabel}</b>
@@ -1304,7 +1438,12 @@ function summarySentence({
       )}
       {role ? <> for a {role} role</> : null}. Roughly{" "}
       <b className="font-semibold text-ember">{minutes} min</b>
-      {answerCap !== null ? <>, up to {clock(answerCap)} per answer</> : null}.
+      {answerCap !== null ? (
+        <>
+          , up to {clock(answerCap)} per {roundish ? "problem" : "answer"}
+        </>
+      ) : null}
+      .
     </>
   );
 }
@@ -1374,6 +1513,8 @@ function Pick({
   blurb,
   meta,
   kind,
+  disabled,
+  title,
 }: {
   selected: boolean;
   onClick: () => void;
@@ -1381,6 +1522,8 @@ function Pick({
   blurb: string;
   meta?: string;
   kind: "checkbox" | "radio";
+  disabled?: boolean;
+  title?: string;
 }) {
   return (
     <button
@@ -1388,7 +1531,13 @@ function Pick({
       role={kind}
       aria-checked={selected}
       onClick={onClick}
-      className={cx(PICK, selected && PICK_ON)}
+      disabled={disabled}
+      title={title}
+      className={cx(
+        PICK,
+        selected && PICK_ON,
+        disabled && "cursor-not-allowed opacity-45 hover:bg-transparent",
+      )}
     >
       <span className={cx(PICK_BOX, selected ? PICK_BOX_ON : PICK_BOX_OFF)} aria-hidden="true">
         {selected ? "✓" : null}

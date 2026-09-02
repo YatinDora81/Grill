@@ -275,6 +275,12 @@ export function HotSeat(props: Props) {
 
   async function afterAnswer(res: AnswerResponse) {
     setAnswered((n) => n + 1);
+    if (!res.done && res.next_payload) {
+      stopSpeaking();
+      rec.reset();
+      router.refresh();
+      return;
+    }
     if (!res.done && res.next_question) {
       setTurnIndex(res.turn_index + 1);
       setQuestion(res.next_question);

@@ -19,7 +19,21 @@ good.
 Articulation rate, phonation ratio, trailing off, transcriber confidence and posture are measured;
 describe them as "spoke at N syllables a second", "faded on N statements", "was harder for the
 transcriber to follow", "sat lower than the calibrated pose" — never as mood, nerves or confidence.
+Coding turns carry measured test results and editor timings; grade the code on what the tests
+measured and quote lines of it. Think-aloud percentage is measured talking time, not a judgement.
 Respond with JSON only — no prose, no code fences.`;
+
+export interface ReportTurnCode {
+  language: string;
+  passed: number;
+  total: number;
+  source: string;
+  think_aloud_pct: number | null;
+  longest_silence_s: number | null;
+  first_edit_ms: number | null;
+  runs: number;
+}
+
 
 export interface ReportTurn {
   turn_index: number;
@@ -27,6 +41,7 @@ export interface ReportTurn {
   question_type: string;
   transcript: string;
   answer_scores: AnswerScores | null;
+  code?: ReportTurnCode | null;
 }
 
 function deliveryBlock(d: DeliveryMetrics): string {
@@ -136,6 +151,19 @@ function deliveryBlock(d: DeliveryMetrics): string {
   return `${head}\n\nNOT MEASURED — ${absent.join(", ")}. ${causes.join(" ")}`;
 }
 
+function codeBlock(code: ReportTurnCode | null | undefined): string {
+  if (!code) return "";
+  const talk = code.think_aloud_pct === null ? "not measured" : `${code.think_aloud_pct}%`;
+  const silence = code.longest_silence_s === null ? "not measured" : `${code.longest_silence_s}s`;
+  const firstEdit = code.first_edit_ms === null ? "never edited" : `${code.first_edit_ms}ms`;
+  return (
+    `\n[coding turn] language=${code.language} passed=${code.passed}/${code.total} ` +
+    `think_aloud=${talk} longest_silence=${silence} first_edit=${firstEdit} runs=${code.runs}\n` +
+    `\`\`\`${code.language}\n${code.source}\n\`\`\``
+  );
+}
+
+
 export function reportPrompt(
   s: SessionContext,
   turns: ReportTurn[],
@@ -147,7 +175,8 @@ export function reportPrompt(
       (t) =>
         `[Turn ${t.turn_index}] (${t.question_type}) Q: ${t.question}\n` +
         `A: ${t.transcript || "(no clear answer)"}\n` +
-        `Scores: ${t.answer_scores ? JSON.stringify(t.answer_scores) : "n/a"}`,
+        `Scores: ${t.answer_scores ? JSON.stringify(t.answer_scores) : "n/a"}` +
+        codeBlock(t.code),
     )
     .join("\n\n");
 

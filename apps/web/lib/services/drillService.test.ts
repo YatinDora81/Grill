@@ -153,6 +153,17 @@ test("only badly answered turns become cards", async () => {
   expect(seeded).toEqual(["Question 0?"]);
 });
 
+test("a board or an editor never becomes a flashcard — the deck is spoken answers only", async () => {
+  const design = turn(0, 2);
+  design.designReview = { summary: "one primary, no replica" } as unknown as Turn["designReview"];
+  const code = turn(1, 2);
+  code.codeSubmission = { language: "python" } as unknown as Turn["codeSubmission"];
+
+  await seedDrillCards(USER, [design, code, turn(2, 3)]);
+
+  expect(repo.upsertDrillCard.mock.calls.map((c) => c[0].question)).toEqual(["Question 2?"]);
+});
+
 test("the seeding threshold is the line between a partial answer and a solid one", async () => {
   await seedDrillCards(USER, [turn(0, 5.9), turn(1, 6)]);
   expect(repo.upsertDrillCard.mock.calls.map((c) => c[0].question)).toEqual(["Question 0?"]);

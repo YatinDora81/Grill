@@ -19,6 +19,8 @@ const {
   JOB_PAGE_TEXT_MAX_CHARS,
   answerTextSchema,
   cameraMetricsSchema,
+  codeAnswerPayloadSchema,
+  codingQuestionSchema,
   companyBriefRequestSchema,
   companyBriefSchema,
   deliveryMetricsSchema,
@@ -28,11 +30,13 @@ const {
   jdExtractRequestSchema,
   jobExtractSchema,
   questionResponseSchema,
+  readTurnPayload,
   resumeGapRequestSchema,
   resumeGapResponseSchema,
   starBreakdownSchema,
   starResponseSchema,
   startRequestSchema,
+  storedCodeSubmissionSchema,
   storedConfigSchema,
   turnRefSchema,
   updateProfileSchema,
@@ -1279,5 +1283,174 @@ describe("a STAR breakdown read back off a report row", () => {
 
   test("refuses a breakdown with no basis, which is what the bar's units depend on", () => {
     expect(starBreakdownSchema.safeParse({ ...STORED, basis: "vibes" }).success).toBe(false);
+  });
+});
+
+describe("the round a session is run as", () => {
+  test("defaults to the spoken interview that existed before rounds", () => {
+    const r = interviewConfigSchema.safeParse(cfg());
+    expect(r.success).toBe(true);
+    expect(r.data!.round).toBe("spoken");
+    expect(r.data!.problems).toBe(2);
+  });
+
+  test("refuses a coding round drilling saved questions, which have no problems in them", () => {
+    const r = interviewConfigSchema.safeParse(
+      cfg({
+        round: "coding",
+        mode: "starred",
+        sources: [],
+        starred_hashes: ["a".repeat(64)],
+      }),
+    );
+    expect(r.success).toBe(false);
+    expect(issuePaths(r)).toContain("round");
+  });
+
+  test("refuses a design round rerunning weak spots for the same reason", () => {
+    const r = interviewConfigSchema.safeParse(
+      cfg({ round: "design", mode: "weak_spots", sources: [] }),
+    );
+    expect(r.success).toBe(false);
+    expect(issuePaths(r)).toContain("round");
+  });
+
+  test("refuses live mode on anything but a spoken round", () => {
+    const r = interviewConfigSchema.safeParse(cfg({ round: "coding", live: true }));
+    expect(r.success).toBe(false);
+    expect(issuePaths(r)).toContain("live");
+  });
+
+  test("caps the problem count at three, which is the longest round that fits the budget", () => {
+    expect(interviewConfigSchema.safeParse(cfg({ round: "coding", problems: 4 })).success).toBe(
+      false,
+    );
+    expect(interviewConfigSchema.safeParse(cfg({ round: "coding", problems: 3 })).success).toBe(
+      true,
+    );
+  });
+
+  test("starts a one-problem coding round, a length the spoken floor has no say over", () => {
+    const r = startRequestSchema.safeParse(
+      start({ config: cfg({ round: "coding", problems: 1, num_questions: 2 }) }),
+    );
+    expect(r.success).toBe(true);
+    expect(r.data!.config.problems).toBe(1);
+  });
+
+  test("a config stored before rounds existed still reads back", () => {
+    const r = storedConfigSchema.safeParse({
+      num_questions: 6,
+      difficulty: "hard",
+      sources: ["resume"],
+      mode: null,
+      allow_repeats: false,
+    });
+    expect(r.success).toBe(true);
+    expect(r.data!.round).toBe("spoken");
+  });
+});
+
+describe("a coding problem the model wrote", () => {
+  const PROBLEM = {
+    title: "Merge the ledgers",
+    prompt_markdown:
+      "Read two sorted ledgers from stdin and print the merged ledger, one per line.",
+    examples: [{ input: "1\n2", output: "1\n2" }],
+    hidden_tests: [
+      { input: "", output: "" },
+      { input: "1", output: "1" },
+    ],
+    starter: { python: "import sys", javascript: "const line = readLine();" },
+    complexity_target: "O(n) time, O(1) extra space",
+  };
+
+  test("comes back tagged with its kind, so a turn payload can be told apart", () => {
+    const r = codingQuestionSchema.safeParse(PROBLEM);
+    expect(r.success).toBe(true);
+    expect(r.data!.kind).toBe("coding");
+    expect(r.data!.title).toBe("Merge the ledgers");
+  });
+
+  test("needs enough hidden tests to catch the edge cases the examples do not", () => {
+    expect(
+      codingQuestionSchema.safeParse({ ...PROBLEM, hidden_tests: [{ input: "", output: "" }] })
+        .success,
+    ).toBe(false);
+  });
+
+  test("a missing complexity target is an empty line, not a failed problem", () => {
+    const r = codingQuestionSchema.safeParse({ ...PROBLEM, complexity_target: undefined });
+    expect(r.success).toBe(true);
+    expect(r.data!.complexity_target).toBe("");
+  });
+
+  test("reads back off a turn row, and reads junk back as nothing", () => {
+    expect(readTurnPayload({ kind: "coding", ...PROBLEM })?.kind).toBe("coding");
+    expect(readTurnPayload({ kind: "coding" })).toBeNull();
+    expect(readTurnPayload({ kind: "interpretive_dance" })).toBeNull();
+    expect(readTurnPayload("a question")).toBeNull();
+    expect(readTurnPayload(null)).toBeNull();
+  });
+});
+
+describe("what the editor sends back", () => {
+  const SENT = {
+    language: "python",
+    source: "print(1)",
+    results: [
+      {
+        index: 0,
+        kind: "example",
+        passed: true,
+        stdout: "1",
+        stderr: "",
+        expected: "1",
+        time_ms: 12,
+        timed_out: false,
+      },
+    ],
+    keystrokes: {
+      first_edit_ms: 4200,
+      edits: 90,
+      chars_added: 640,
+      chars_deleted: 80,
+      longest_idle_ms: 31000,
+      runs: 3,
+      run_timeline: [{ t_ms: 60000, passed: 1, total: 1 }],
+      submitted_at_ms: 900000,
+    },
+  };
+
+  test("accepts a run in a language the runner has", () => {
+    const r = codeAnswerPayloadSchema.safeParse(SENT);
+    expect(r.success).toBe(true);
+    expect(r.data!.results[0]!.kind).toBe("example");
+  });
+
+  test("refuses a language nothing in this browser can execute", () => {
+    expect(codeAnswerPayloadSchema.safeParse({ ...SENT, language: "ruby" }).success).toBe(false);
+  });
+
+  test("an editor that was never touched reports no first edit rather than zero", () => {
+    const r = codeAnswerPayloadSchema.safeParse({
+      ...SENT,
+      keystrokes: { ...SENT.keystrokes, first_edit_ms: null },
+    });
+    expect(r.success).toBe(true);
+    expect(r.data!.keystrokes.first_edit_ms).toBeNull();
+  });
+
+  test("a stored submission reads back off the turn row for the report", () => {
+    const r = storedCodeSubmissionSchema.safeParse({
+      ...SENT,
+      passed: 1,
+      total: 1,
+      think_aloud_pct: 41.5,
+      longest_silence_s: 62.4,
+    });
+    expect(r.success).toBe(true);
+    expect(r.data!.passed).toBe(1);
+    expect(r.data!.think_aloud_pct).toBe(41.5);
   });
 });

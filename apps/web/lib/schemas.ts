@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { Difficulty, InterviewSource } from "@repo/types";
+import type { Difficulty, InterviewSource, TurnPayload } from "@repo/types";
 import { QUESTION_BOUNDS, QUESTION_SET_BOUNDS } from "./interviewMeta";
 import { MAX_ANSWER_OFFSET_MS } from "./live/turnTaking";
 import { config } from "./env";
@@ -74,6 +74,8 @@ export const personaSchema = z.enum([
   "bar_raiser",
   "skeptic",
 ]);
+
+export const roundSchema = z.enum(["spoken", "coding", "design"]);
 
 export const interviewModeSchema = z.enum([
   "resume",
@@ -195,6 +197,8 @@ const interviewConfigShape = z.object({
     .optional(),
   allow_repeats: z.coerce.boolean().default(false),
   max_answer_seconds: z.coerce.number().int().positive().optional(),
+  round: roundSchema.default("spoken"),
+  problems: z.coerce.number().int().min(1).max(3).default(2),
 });
 
 export const interviewConfigSchema = interviewConfigShape.superRefine((v, ctx) => {
@@ -248,6 +252,14 @@ export const interviewConfigSchema = interviewConfigShape.superRefine((v, ctx) =
       message: "Saved questions are only asked back by a starred drill.",
     });
   }
+  if (v.round !== "spoken" && (v.mode === "starred" || v.mode === "weak_spots")) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["round"],
+      message:
+        "Coding and design rounds draw on your résumé, a topic or a job description — not saved questions.",
+    });
+  }
 });
 
 export const storedConfigSchema = z.preprocess(migrateConfig, interviewConfigSchema);
@@ -261,7 +273,11 @@ export const startRequestSchema = z
     config: interviewConfigSchema,
   })
   .superRefine((v, ctx) => {
-    if (v.config.mode !== "starred" && v.config.num_questions < QUESTION_BOUNDS.min) {
+    if (
+      v.config.round === "spoken" &&
+      v.config.mode !== "starred" &&
+      v.config.num_questions < QUESTION_BOUNDS.min
+    ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["config", "num_questions"],
@@ -491,6 +507,113 @@ function keepingOnlyWellFormed<T>(item: z.ZodType<T>, cap: number) {
         .slice(0, cap),
     );
 }
+
+const codingExampleSchema = z.object({
+  input: z.string().max(4_000),
+  output: z.string().max(4_000),
+  explanation: z.string().max(600).optional(),
+});
+
+export const codingQuestionSchema = z
+  .object({
+    title: cappedLine(120),
+    prompt_markdown: z.string().trim().min(40).max(6_000),
+    examples: z.array(codingExampleSchema).min(1).max(3),
+    hidden_tests: z.array(codingExampleSchema).min(2).max(6),
+    starter: z.object({
+      python: z.string().max(4_000).catch(""),
+      javascript: z.string().max(4_000).catch(""),
+    }),
+    complexity_target: cappedLine(120).catch(""),
+  })
+  .transform((v) => ({ kind: "coding" as const, ...v }));
+
+export const designQuestionSchema = z
+  .object({
+    title: cappedLine(120),
+    prompt_markdown: z.string().trim().min(40).max(6_000),
+    requirements: keepingOnlyWellFormed(cappedLine(240), 8),
+    scale: cappedLine(240).catch(""),
+    focus: keepingOnlyWellFormed(cappedLine(120), 5),
+  })
+  .transform((v) => ({ kind: "design" as const, ...v }));
+
+export const turnPayloadSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("coding") }).passthrough(),
+  z.object({ kind: z.literal("design") }).passthrough(),
+]);
+
+export function readTurnPayload(raw: unknown): TurnPayload | null {
+  if (!raw || typeof raw !== "object") return null;
+  const kind = (raw as { kind?: unknown }).kind;
+  if (kind === "coding") {
+    const r = codingQuestionSchema.safeParse(raw);
+    return r.success ? r.data : null;
+  }
+  if (kind === "design") {
+    const r = designQuestionSchema.safeParse(raw);
+    return r.success ? r.data : null;
+  }
+  return null;
+}
+
+export const codeLanguageSchema = z.enum(["python", "javascript"]);
+
+const runResultSchema = z.object({
+  index: z.coerce.number().int().min(0),
+  kind: z.enum(["example", "hidden"]),
+  passed: z.boolean(),
+  stdout: z.string().max(20_000),
+  stderr: z.string().max(20_000),
+  expected: z.string().max(20_000),
+  time_ms: z.coerce.number().min(0),
+  timed_out: z.boolean(),
+});
+
+const keystrokeStatsSchema = z.object({
+  first_edit_ms: z.coerce.number().min(0).nullable(),
+  edits: z.coerce.number().int().min(0),
+  chars_added: z.coerce.number().int().min(0),
+  chars_deleted: z.coerce.number().int().min(0),
+  longest_idle_ms: z.coerce.number().min(0),
+  runs: z.coerce.number().int().min(0),
+  run_timeline: z
+    .array(
+      z.object({
+        t_ms: z.coerce.number().min(0),
+        passed: z.coerce.number().int().min(0),
+        total: z.coerce.number().int().min(0),
+      }),
+    )
+    .max(200),
+  submitted_at_ms: z.coerce.number().min(0),
+});
+
+export const codeAnswerPayloadSchema = z.object({
+  language: codeLanguageSchema,
+  source: z.string().max(60_000),
+  results: z.array(runResultSchema).max(12),
+  keystrokes: keystrokeStatsSchema,
+});
+
+export const storedCodeSubmissionSchema = z.object({
+  language: codeLanguageSchema,
+  source: z.string().catch(""),
+  results: keepingOnlyWellFormed(runResultSchema, 12),
+  passed: z.coerce.number().int().min(0).catch(0),
+  total: z.coerce.number().int().min(0).catch(0),
+  keystrokes: keystrokeStatsSchema,
+  think_aloud_pct: z.number().nullable().catch(null),
+  longest_silence_s: z.number().nullable().catch(null),
+});
+
+export const codingTestsQuerySchema = z.object({
+  session_id: z.string().uuid(),
+  turn_index: z.coerce.number().int().min(0),
+});
+
+export type CodeAnswerPayload = z.infer<typeof codeAnswerPayloadSchema>;
+
 
 export const questionResponseSchema = z.object({
   question: z.string().min(1),

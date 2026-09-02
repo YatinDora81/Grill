@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Reveal } from "@/components/Reveal";
 import { ExplainBanner } from "@/components/Explain";
-import { exclusiveModeSchema } from "@/lib/schemas";
+import { exclusiveModeSchema, roundSchema } from "@/lib/schemas";
 import { NewInterviewForm } from "./NewInterviewForm";
 
 export const metadata: Metadata = {
@@ -30,6 +30,11 @@ export default async function NewInterviewPage({
   const starredHashes = mode === "starred" ? drillHashes(params.h) : [];
   const initialMode = mode === "starred" ? null : mode;
 
+  const askedRound = roundSchema.safeParse(
+    Array.isArray(params.round) ? params.round[0] : params.round,
+  );
+  const initialRound = askedRound.success ? askedRound.data : "spoken";
+
   return (
     <>
       <Reveal threshold={0.1} />
@@ -55,7 +60,11 @@ export default async function NewInterviewPage({
           <ExplainBanner />
         </div>
 
-        <NewInterviewForm initialStarredHashes={starredHashes} initialMode={initialMode} />
+        <NewInterviewForm
+          initialStarredHashes={starredHashes}
+          initialMode={initialMode}
+          initialRound={initialRound}
+        />
       </main>
     </>
   );

@@ -1,10 +1,21 @@
 import "server-only";
 import { after } from "next/server";
 import type { Session, Turn } from "@repo/db";
-import type { AcousticMetrics, AnswerScores, DeliveryMetrics, TranscriptWord } from "@repo/types";
+import type {
+  AcousticMetrics,
+  AnswerScores,
+  CodeSubmission,
+  DeliveryMetrics,
+  TranscriptWord,
+} from "@repo/types";
 import { generateJson } from "@/lib/clients/llmJson";
 import { ANSWER_CAP_MODEL } from "@/lib/interviewMeta";
-import { REPORT_SYSTEM, reportPrompt, type ReportTurn } from "@/lib/prompts/report";
+import {
+  REPORT_SYSTEM,
+  reportPrompt,
+  type ReportTurn,
+  type ReportTurnCode,
+} from "@/lib/prompts/report";
 import { reportResponseSchema, type ReportResponse } from "@/lib/schemas";
 import * as repo from "@/lib/db/repo";
 import { getAudio } from "@/lib/storage/objectStore";
@@ -26,6 +37,7 @@ import {
 } from "./deliveryService";
 import { computeStarBreakdown } from "./starService";
 import { seedDrillCards } from "./drillService";
+import { spokenPart as codeSpokenPart } from "./codingService";
 import { toSessionContext } from "./sessionContext";
 
 function words(t: Turn): TranscriptWord[] | null {
@@ -33,6 +45,29 @@ function words(t: Turn): TranscriptWord[] | null {
 }
 function scores(t: Turn): AnswerScores | null {
   return (t.answerScores as AnswerScores | null) ?? null;
+}
+
+const CODE_SOURCE_MAX_CHARS = 3_000;
+
+function codeFacts(t: Turn): ReportTurnCode | null {
+  const sub = (t.codeSubmission as CodeSubmission | null) ?? null;
+  if (!sub) return null;
+  return {
+    language: sub.language,
+    passed: sub.passed,
+    total: sub.total,
+    source: sub.source.slice(0, CODE_SOURCE_MAX_CHARS),
+    think_aloud_pct: sub.think_aloud_pct,
+    longest_silence_s: sub.longest_silence_s,
+    first_edit_ms: sub.keystrokes.first_edit_ms,
+    runs: sub.keystrokes.runs,
+  };
+}
+
+function spokenTranscript(t: Turn): string | null {
+  if (t.designReview) return designSpokenPart(t.transcript ?? "");
+  if (t.codeSubmission) return codeSpokenPart(t.transcript ?? "");
+  return t.transcript;
 }
 
 async function turnAcoustics(t: Turn): Promise<AcousticMetrics | null> {
@@ -55,7 +90,7 @@ async function turnAcoustics(t: Turn): Promise<AcousticMetrics | null> {
 
 export async function computeDelivery(turns: Turn[]): Promise<DeliveryMetrics> {
   const text = textDeliveryMetrics(
-    turns.map((t) => ({ transcript: t.transcript, transcriptWords: words(t) })),
+    turns.map((t) => ({ transcript: spokenTranscript(t), transcriptWords: words(t) })),
   );
 
   const acoustics: (AcousticMetrics | null)[] = new Array(turns.length).fill(null);
@@ -64,6 +99,10 @@ export async function computeDelivery(turns: Turn[]): Promise<DeliveryMetrics> {
     const worker = async () => {
       while (next < turns.length) {
         const i = next++;
+        if (turns[i]!.codeSubmission || turns[i]!.designReview) {
+          acoustics[i] = null;
+          continue;
+        }
         acoustics[i] = await turnAcoustics(turns[i]!);
       }
     };
@@ -137,13 +176,17 @@ export async function buildAndSaveReport(session: Session) {
     computeStarBreakdown(turns),
   ]);
 
-  const reportTurns: ReportTurn[] = turns.map((t) => ({
-    turn_index: t.turnIndex,
-    question: t.question,
-    question_type: t.questionType,
-    transcript: t.transcript ?? "",
-    answer_scores: scores(t),
-  }));
+  const reportTurns: ReportTurn[] = await Promise.all(
+    turns.map(async (t) => ({
+      turn_index: t.turnIndex,
+      question: t.question,
+      question_type: t.questionType,
+      transcript: t.transcript ?? "",
+      answer_scores: scores(t),
+      code: codeFacts(t),
+      design: await designFacts(t),
+    })),
+  );
 
   const ctx = toSessionContext(session);
   const { value, raw } = await generateJson(reportResponseSchema, {

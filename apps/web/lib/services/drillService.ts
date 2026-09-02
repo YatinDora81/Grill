@@ -34,7 +34,7 @@ const FALLBACK_ZONE = "UTC";
 export async function seedDrillCards(userId: string, turns: Turn[]): Promise<number> {
   const weak = turns
     .flatMap((t) => {
-      if (!t.transcript) return [];
+      if (!t.transcript || t.designReview || t.codeSubmission) return [];
       const mean = repo.rubricMean(t.answerScores);
       if (mean === null || mean >= SEED_MEAN_MAX) return [];
       return [{ turn: t, mean }];

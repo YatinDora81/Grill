@@ -15,6 +15,7 @@ import {
   cameraMetricsSchema,
   deliveryMetricsSchema,
   starBreakdownsSchema,
+  storedCodeSubmissionSchema,
 } from "@/lib/schemas";
 import * as repo from "@/lib/db/repo";
 import { takeMs } from "@/lib/camera/summarize";
@@ -26,6 +27,7 @@ import { Explain, ExplainBanner } from "@/components/Explain";
 import { Reveal } from "@/components/Reveal";
 import { ScoreBand } from "@/components/ScoreBand";
 import { PrepBrief } from "../../new/PrepBrief";
+import { CodeReplay, type CodeReplayTurn } from "./CodeReplay";
 import { DeleteInterviewButton } from "./DeleteInterviewButton";
 import { Delivery } from "./Delivery";
 import { FinishReport } from "./FinishReport";
@@ -126,6 +128,19 @@ export default async function ReportPage({
   const retries = await repo.getRetriesOf(sessionId, userId);
 
   const shareIsLive = await repo.hasLiveReportShare(sessionId, userId);
+
+  const codeTurns: CodeReplayTurn[] = turns.flatMap((t) => {
+    const parsed = storedCodeSubmissionSchema.safeParse(t.codeSubmission);
+    if (!parsed.success) return [];
+    return [
+      {
+        turn_index: t.turnIndex,
+        title: t.question.split("\n")[0]?.trim() || `Problem ${t.turnIndex + 1}`,
+        submission: parsed.data,
+      },
+    ];
+  });
+
 
   const cats = report.category_scores;
   const fixes = report.next_steps.slice(0, FIX_LIMIT);
@@ -493,6 +508,7 @@ export default async function ReportPage({
             moments you were looking away from the camera, on the same clock — <b>click one</b> to
             hear what you were saying then.
           </Explain>
+          <CodeReplay turns={codeTurns} />
         </div>
 
         {company ? (

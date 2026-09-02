@@ -3102,6 +3102,19 @@ a.vs-label:hover {
   font-size: 13.5px;
   color: var(--color-ink-soft);
 }
+.code-src {
+  overflow-x: auto;
+  max-height: 460px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-line);
+  background: var(--color-paper-sunken);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  tab-size: 2;
+  white-space: pre;
+  color: var(--color-ink-soft);
+}
 .rubric {
   display: grid;
   grid-template-columns: repeat(5, 1fr);

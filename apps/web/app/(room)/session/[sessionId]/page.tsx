@@ -1,12 +1,19 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
-import type { QuestionType, TurnState } from "@repo/types";
+import type { QuestionType, TurnPayload, TurnState } from "@repo/types";
 import { getUserId } from "@/lib/auth";
 import { config } from "@/lib/env";
 import * as repo from "@/lib/db/repo";
 import { toSessionContext } from "@/lib/services/sessionContext";
 import { followUp, questionInputs } from "@/lib/services/questionService";
+import {
+  CODING_ANSWER_CAP_S,
+  DESIGN_ANSWER_CAP_S,
+  payloadOf,
+  planNextCodingTurn,
+} from "@/lib/services/codingService";
 import { HotSeat } from "./HotSeat";
+import { CodeSeat } from "./CodeSeat";
 
 export const metadata: Metadata = {
   title: "Interview",
@@ -40,6 +47,7 @@ export default async function SessionPage({
     question_type: t.questionType,
     transcript: t.transcript,
     has_audio: Boolean(t.audioKey),
+    payload: payloadOf(t),
   }));
 
   const numQuestions = ctx.config.num_questions;
@@ -51,10 +59,33 @@ export default async function SessionPage({
 
     if (session.retryOfId) redirect(`/report/${sessionId}?finish=1`);
 
+    const nextIndex = state.length;
+
+    if (ctx.config.round === "coding" || ctx.config.round === "design") {
+      const planned =
+        ctx.config.round === "coding"
+          ? await planNextCodingTurn(ctx, turns, userId)
+          : await planNextDesignTurn(ctx, turns, userId);
+      if (!planned) redirect(`/report/${sessionId}?finish=1`);
+      try {
+        await repo.createTurn({
+          sessionId,
+          turnIndex: nextIndex,
+          question: planned.question,
+          questionType: planned.questionType,
+          questionPayload: planned.payload,
+        });
+      } catch {
+        const raced = await repo.getTurn(sessionId, nextIndex);
+        if (!raced) throw new Error("could not recover the next question");
+        return renderSeat(raced.question, raced.questionType, nextIndex, payloadOf(raced));
+      }
+      return renderSeat(planned.question, planned.questionType, nextIndex, planned.payload);
+    }
+
     const history = turns
       .filter((t) => t.transcript !== null)
       .map((t) => ({ question: t.question, answer: t.transcript ?? "" }));
-    const nextIndex = state.length;
     const next = await followUp(
       ctx,
       history,
@@ -71,14 +102,46 @@ export default async function SessionPage({
     } catch {
       const raced = await repo.getTurn(sessionId, nextIndex);
       if (!raced) throw new Error("could not recover the next question");
-      return renderSeat(raced.question, raced.questionType, nextIndex);
+      return renderSeat(raced.question, raced.questionType, nextIndex, payloadOf(raced));
     }
-    return renderSeat(next.question, next.question_type, nextIndex);
+    return renderSeat(next.question, next.question_type, nextIndex, null);
   }
 
-  return renderSeat(current.question, current.question_type, current.turn_index);
+  return renderSeat(
+    current.question,
+    current.question_type,
+    current.turn_index,
+    current.payload ?? null,
+  );
 
-  function renderSeat(question: string, questionType: QuestionType, turnIndex: number) {
+  function renderSeat(
+    question: string,
+    questionType: QuestionType,
+    turnIndex: number,
+    payload: TurnPayload | null,
+  ) {
+    const answered = state.filter((t) => t.transcript !== null).length;
+
+    if (payload?.kind === "coding") {
+      return (
+        <CodeSeat
+          key={turnIndex}
+          sessionId={sessionId}
+          name={name}
+          role={role}
+          numQuestions={numQuestions}
+          answered={answered}
+          turnIndex={turnIndex}
+          payload={{ ...payload, hidden_tests: [] }}
+          maxSeconds={CODING_ANSWER_CAP_S}
+          maxBytes={config.audio.maxBytes}
+          persona={ctx.config.persona ?? null}
+          videoBitrate={config.video.bitsPerSecond}
+        />
+      );
+    }
+
+
     return (
       <HotSeat
         key={turnIndex}
@@ -86,7 +149,7 @@ export default async function SessionPage({
         name={name}
         role={role}
         numQuestions={numQuestions}
-        answered={state.filter((t) => t.transcript !== null).length}
+        answered={answered}
         turnIndex={turnIndex}
         question={question}
         questionType={questionType}

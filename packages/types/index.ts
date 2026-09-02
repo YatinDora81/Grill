@@ -32,6 +32,8 @@ export type InterviewStage =
 
 export type Persona = "neutral" | "friendly_screen" | "terse_staff" | "bar_raiser" | "skeptic";
 
+export type InterviewRound = "spoken" | "coding" | "design";
+
 export type SessionStatus =
   | "in_progress"
   | "generating_report"
@@ -57,6 +59,8 @@ export interface InterviewConfig {
   starred_hashes?: string[];
   allow_repeats: boolean;
   max_answer_seconds?: number;
+  round?: InterviewRound;
+  problems?: number;
 }
 
 export interface AnswerScores {
@@ -89,6 +93,7 @@ export interface AnswerResponse {
   next_question: string | null;
   next_question_type: QuestionType | null;
   done: boolean;
+  next_payload?: TurnPayload | null;
 }
 
 export interface TurnState {
@@ -97,6 +102,7 @@ export interface TurnState {
   question_type: QuestionType;
   transcript: string | null;
   has_audio: boolean;
+  payload?: TurnPayload | null;
 }
 
 export interface SessionStateResponse {
@@ -518,3 +524,65 @@ export interface CompanyBriefResponse {
   cached: boolean;
   generated_at: string;
 }
+
+export type CodeLanguage = "python" | "javascript";
+
+export interface CodingExample {
+  input: string;
+  output: string;
+  explanation?: string;
+}
+
+export interface CodingQuestionPayload {
+  kind: "coding";
+  title: string;
+  prompt_markdown: string;
+  examples: CodingExample[];
+  hidden_tests: CodingExample[];
+  starter: Record<CodeLanguage, string>;
+  complexity_target: string;
+}
+
+export interface RunResult {
+  index: number;
+  kind: "example" | "hidden";
+  passed: boolean;
+  stdout: string;
+  stderr: string;
+  expected: string;
+  time_ms: number;
+  timed_out: boolean;
+}
+
+export interface KeystrokeStats {
+  first_edit_ms: number | null;
+  edits: number;
+  chars_added: number;
+  chars_deleted: number;
+  longest_idle_ms: number;
+  runs: number;
+  run_timeline: { t_ms: number; passed: number; total: number }[];
+  submitted_at_ms: number;
+}
+
+export interface CodeSubmission {
+  language: CodeLanguage;
+  source: string;
+  results: RunResult[];
+  passed: number;
+  total: number;
+  keystrokes: KeystrokeStats;
+  think_aloud_pct: number | null;
+  longest_silence_s: number | null;
+}
+
+export interface DesignQuestionPayload {
+  kind: "design";
+  title: string;
+  prompt_markdown: string;
+  requirements: string[];
+  scale: string;
+  focus: string[];
+}
+
+export type TurnPayload = CodingQuestionPayload | DesignQuestionPayload;
