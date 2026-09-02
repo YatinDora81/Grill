@@ -37,24 +37,42 @@ const ALL_LABELS = [
   "jitter",
   "shimmer",
   "voice clarity (HNR)",
+  "articulation rate",
+  "speech rate",
+  "phonation ratio",
+  "transcriber confidence",
   "uptalk",
+  "trailing off",
   "time looking at the camera",
   "time visibly smiling",
   "head movement",
+  "time to first word",
 ];
 
-function readDelivery(p: string): { measured: Record<string, string>; absent: string[] } {
+const POSTURE_LABELS = [
+  "time slouched below the calibrated pose",
+  "hands near the face",
+  "shoulder tilt",
+  "wrist motion",
+];
+
+function readDelivery(
+  p: string,
+  extra: readonly string[] = [],
+): { measured: Record<string, string>; absent: string[] } {
   const head = p.slice(p.indexOf("Measured delivery metrics (facts):"));
   const measured: Record<string, string> = {};
   for (const line of head.split("\n\n")[0]!.split("\n").slice(1)) {
     const [label, ...rest] = line.replace(/^- /, "").split(": ");
-    measured[label!] = rest.join(": ");
+    measured[label!.replace(" (median)", "")] = rest.join(": ");
   }
 
   const match = /NOT MEASURED — ([^.]+)\./.exec(p);
   const absent = match ? match[1]!.split(", ") : [];
 
-  expect([...Object.keys(measured), ...absent].sort()).toEqual([...ALL_LABELS].sort());
+  expect([...Object.keys(measured), ...absent].sort()).toEqual(
+    [...ALL_LABELS, ...extra].sort(),
+  );
   return { measured, absent };
 }
 
@@ -75,6 +93,20 @@ const FULL: DeliveryMetrics = {
   smile_pct: 18.5,
   head_motion_dps: 6.1,
   camera_turns: 5,
+  response_latency_ms: 900,
+  interruptions: 0,
+  articulation_rate_sps: 4.32,
+  speech_rate_sps: 3.11,
+  phonation_ratio: 0.72,
+  trailing_off_pct: 25,
+  trailing_off_statements: 8,
+  trailing_off_fading: 2,
+  transcriber_confidence: -0.28,
+  slouch_pct: 18.2,
+  hands_to_face_pct: 6.5,
+  shoulder_tilt_deg: 3.4,
+  wrist_motion: 0.12,
+  posture_turns: 5,
 };
 
 const TYPED: DeliveryMetrics = {
@@ -94,6 +126,20 @@ const TYPED: DeliveryMetrics = {
   smile_pct: null,
   head_motion_dps: null,
   camera_turns: 0,
+  response_latency_ms: null,
+  interruptions: 0,
+  articulation_rate_sps: null,
+  speech_rate_sps: null,
+  phonation_ratio: null,
+  trailing_off_pct: null,
+  trailing_off_statements: 0,
+  trailing_off_fading: 0,
+  transcriber_confidence: null,
+  slouch_pct: null,
+  hands_to_face_pct: null,
+  shoulder_tilt_deg: null,
+  wrist_motion: null,
+  posture_turns: 0,
 };
 
 const NO_ACOUSTICS: DeliveryMetrics = {
@@ -107,6 +153,12 @@ const NO_ACOUSTICS: DeliveryMetrics = {
   uptalk_pct: null,
   uptalk_statements: 0,
   uptalk_rising: 0,
+  articulation_rate_sps: null,
+  speech_rate_sps: null,
+  phonation_ratio: null,
+  trailing_off_pct: null,
+  trailing_off_statements: 0,
+  trailing_off_fading: 0,
 };
 
 const NO_CAMERA: DeliveryMetrics = {
@@ -115,6 +167,11 @@ const NO_CAMERA: DeliveryMetrics = {
   smile_pct: null,
   head_motion_dps: null,
   camera_turns: 0,
+  slouch_pct: null,
+  hands_to_face_pct: null,
+  shoulder_tilt_deg: null,
+  wrist_motion: null,
+  posture_turns: 0,
 };
 
 const build = (d: DeliveryMetrics) => reportPrompt(ctx, turns, d);
@@ -152,7 +209,7 @@ test("filler words survive typed answers, because they are counted from the text
 
 test("a failed acoustic service costs the acoustics and nothing else", () => {
   const p = build(NO_ACOUSTICS);
-  const { measured, absent } = readDelivery(p);
+  const { measured, absent } = readDelivery(p, POSTURE_LABELS);
 
   expect(measured["pace"]).toBe("132 wpm");
   expect(measured["average pause"]).toBe("410 ms");
@@ -165,7 +222,11 @@ test("a failed acoustic service costs the acoustics and nothing else", () => {
     "jitter",
     "shimmer",
     "voice clarity (HNR)",
+    "articulation rate",
+    "speech rate",
+    "phonation ratio",
     "uptalk",
+    "trailing off",
   ]);
   expect(measured["time looking at the camera"]).toBe("84.2%");
 
@@ -178,11 +239,7 @@ test("a camera that never opened is named absent, and blamed on the camera", () 
   const p = build(NO_CAMERA);
   const { measured, absent } = readDelivery(p);
 
-  expect(absent).toEqual([
-    "time looking at the camera",
-    "time visibly smiling",
-    "head movement",
-  ]);
+  expect(absent).toEqual(["time looking at the camera", "time visibly smiling", "head movement"]);
   expect(measured["uptalk"]).toBe("3 of 26 statements ended on a rising pitch");
   expect(p).toContain("The camera was off or blocked, so there is no on-camera measurement.");
   expect(p).not.toContain("audio analysis was unavailable");
@@ -196,7 +253,7 @@ test("a fully measured session is told about no absence at all", () => {
   expect(p).not.toContain("audio analysis was unavailable");
   expect(p).not.toContain("The camera was off or blocked");
 
-  const { measured, absent } = readDelivery(p);
+  const { measured, absent } = readDelivery(p, POSTURE_LABELS);
   expect(absent).toEqual([]);
   expect(measured).toEqual({
     pace: "132 wpm",
@@ -208,17 +265,64 @@ test("a fully measured session is told about no absence at all", () => {
     jitter: "0.014",
     shimmer: "0.062",
     "voice clarity (HNR)": "19.2 dB",
+    "articulation rate": "4.32 syllables/s of speaking time",
+    "speech rate": "3.11 syllables/s including pauses",
+    "phonation ratio": "0.72 (share of the time the candidate was actually voicing)",
+    "transcriber confidence":
+      "-0.28 (mean log-probability; closer to 0 is clearer to the transcriber)",
     uptalk: "3 of 26 statements ended on a rising pitch",
+    "trailing off": "2 of 8 statements ended at least 6 dB quieter than their body",
     "time looking at the camera": "84.2%",
     "time visibly smiling": "18.5%",
     "head movement": "6.1 deg/s",
+    "time slouched below the calibrated pose": "18.2%",
+    "hands near the face": "6.5%",
+    "shoulder tilt": "3.4°",
+    "wrist motion": "0.12 shoulder-widths/s",
+    "time to first word": "900 ms — from the end of the question to the first word spoken",
   });
   expect(p).not.toContain("11.54");
 });
 
+test("posture is handed over only when a calibrated pose actually measured it", () => {
+  const p = build({
+    ...FULL,
+    slouch_pct: null,
+    hands_to_face_pct: null,
+    shoulder_tilt_deg: null,
+    wrist_motion: null,
+    posture_turns: 0,
+  });
+
+  expect(p).not.toContain("slouched");
+  expect(p).not.toContain("shoulder tilt");
+  expect(readDelivery(p).absent).toEqual([]);
+});
+
+test("a mumbled take is a log-probability, never a mood", () => {
+  const p = build({ ...FULL, transcriber_confidence: -0.91 });
+
+  expect(p).toContain(
+    "- transcriber confidence: -0.91 (mean log-probability; closer to 0 is clearer to the transcriber)",
+  );
+  expect(REPORT_SYSTEM).toContain("never as mood, nerves or confidence.");
+});
+
+test("trailing off with nothing to judge is absent, not a measured zero", () => {
+  const p = build({
+    ...FULL,
+    trailing_off_pct: null,
+    trailing_off_statements: 0,
+    trailing_off_fading: 0,
+  });
+
+  expect(p).not.toContain("0 of 0 statements ended at least");
+  expect(readDelivery(p, POSTURE_LABELS).absent).toEqual(["trailing off"]);
+});
+
 test("uptalk with nothing judgeable is absent, not a measured zero", () => {
   const p = build({ ...FULL, uptalk_pct: null, uptalk_statements: 0, uptalk_rising: 0 });
-  const { measured, absent } = readDelivery(p);
+  const { measured, absent } = readDelivery(p, POSTURE_LABELS);
 
   expect(measured["uptalk"]).toBeUndefined();
   expect(absent).toEqual(["uptalk"]);
@@ -247,4 +351,32 @@ test("the report prompt asks for per-question possible answers and improvements"
   expect(p).toContain("question_feedback");
   expect(p).toContain("possible_answers");
   expect(p).toContain("improvements");
+});
+
+test("the measured gap to the first word is handed over as a fact, with its meaning", () => {
+  const p = build(FULL);
+
+  expect(p).toContain(
+    "- time to first word (median): 900 ms — from the end of the question to the first word spoken",
+  );
+  expect(REPORT_SYSTEM).toContain(
+    "Time to first word is a measured gap, not a judgement about preparation",
+  );
+});
+
+test("an interview with no word timings lists the gap as absent, not as an instant answer", () => {
+  const p = build({ ...FULL, response_latency_ms: null });
+  const { measured, absent } = readDelivery(p, POSTURE_LABELS);
+
+  expect(measured["time to first word"]).toBeUndefined();
+  expect(absent).toEqual(["time to first word"]);
+  expect(p).not.toContain("audio analysis was unavailable");
+  expect(p).not.toContain("The camera was off or blocked");
+});
+
+test("being cut off is reported as a count, and silence about it when it never happened", () => {
+  expect(build({ ...FULL, interruptions: 2 })).toContain(
+    "- the interviewer cut the candidate off 2 time(s) for running long",
+  );
+  expect(build(FULL)).not.toContain("cut the candidate off");
 });

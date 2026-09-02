@@ -571,9 +571,12 @@ export function recordAnswer(
     transcript: string;
     transcriptWords?: TranscriptWord[] | null;
     answerScores: AnswerScores;
+    transcriptConfidence?: number | null;
     videoId?: string | null;
     videoOffsetMs?: number | null;
     cameraMetrics?: CameraTurnMetrics | null;
+    responseLatencyMs?: number | null;
+    interruptedAtS?: number | null;
   },
 ) {
   return prisma.turn.update({
@@ -586,6 +589,9 @@ export function recordAnswer(
       transcript: data.transcript,
       transcriptWords: data.transcriptWords ? json(data.transcriptWords) : undefined,
       answerScores: json(data.answerScores),
+      transcriptConfidence: data.transcriptConfidence ?? undefined,
+      responseLatencyMs: data.responseLatencyMs ?? undefined,
+      interruptedAtS: data.interruptedAtS ?? undefined,
     },
   });
 }

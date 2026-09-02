@@ -716,6 +716,53 @@ describe("on-camera metrics coming off an answer", () => {
     expect(shared.pose_source).toBe("matrix");
     expect(shared.away_segments[0]!.end_ms).toBe(6_200);
   });
+
+  test("a room with no pose model sends no posture at all, and that still parses", () => {
+    const absent = cameraMetricsSchema.safeParse(cam());
+    expect(absent.success).toBe(true);
+    expect(absent.data!.posture).toBeUndefined();
+
+    const explicit = cameraMetricsSchema.safeParse(cam({ posture: null }));
+    expect(explicit.success).toBe(true);
+    expect(explicit.data!.posture).toBe(null);
+  });
+
+  test("a measured posture rides along inside the same payload", () => {
+    const post = {
+      frames: 42,
+      slouch_pct: 18.2,
+      hands_to_face_pct: 6.5,
+      shoulder_tilt_deg: 3.4,
+      wrist_motion: 0.14,
+      sample_hz: 3,
+    };
+    const r = cameraMetricsSchema.safeParse(cam({ posture: post }));
+
+    expect(r.success).toBe(true);
+    expect(r.data!.posture).toEqual(post);
+    const shared: CameraTurnMetrics = r.data!;
+    expect(shared.posture!.frames).toBe(42);
+  });
+
+  test.each([
+    ["slouch_pct", 100.1],
+    ["hands_to_face_pct", -1],
+    ["shoulder_tilt_deg", 90.1],
+    ["wrist_motion", -0.1],
+    ["frames", -1],
+    ["sample_hz", 0],
+  ])("refuses a posture whose %s is %p, and drops the whole payload with it", (key, value) => {
+    const post = {
+      frames: 42,
+      slouch_pct: 18.2,
+      hands_to_face_pct: 6.5,
+      shoulder_tilt_deg: 3.4,
+      wrist_motion: 0.14,
+      sample_hz: 3,
+      [key]: value,
+    };
+    expect(cameraMetricsSchema.safeParse(cam({ posture: post })).success).toBe(false);
+  });
 });
 
 describe("the JSON-in-a-form-field wrapper", () => {
@@ -1132,6 +1179,20 @@ describe("delivery metrics read back off a report row", () => {
     smile_pct: 8.3,
     head_motion_dps: 5.2,
     camera_turns: 4,
+    response_latency_ms: null,
+    interruptions: 0,
+    articulation_rate_sps: null,
+    speech_rate_sps: null,
+    phonation_ratio: null,
+    trailing_off_pct: null,
+    trailing_off_statements: 0,
+    trailing_off_fading: 0,
+    transcriber_confidence: null,
+    slouch_pct: null,
+    hands_to_face_pct: null,
+    shoulder_tilt_deg: null,
+    wrist_motion: null,
+    posture_turns: 0,
   };
 
   test("passes a fully measured report through untouched", () => {

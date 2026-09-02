@@ -18,8 +18,11 @@ import {
   analyzeAcoustics,
   aggregateAcoustics,
   aggregateCamera,
+  aggregateConfidence,
+  aggregateLatency,
   combineDelivery,
   statementEnds,
+  statementSpans,
 } from "./deliveryService";
 import { computeStarBreakdown } from "./starService";
 import { seedDrillCards } from "./drillService";
@@ -37,7 +40,13 @@ async function turnAcoustics(t: Turn): Promise<AcousticMetrics | null> {
   try {
     const audio = await getAudio(t.audioKey);
     const ext = t.audioKey.split(".").pop() || "webm";
-    return await analyzeAcoustics(audio, `turn.${ext}`, `audio/${ext}`, statementEnds(words(t)));
+    return await analyzeAcoustics(
+      audio,
+      `turn.${ext}`,
+      `audio/${ext}`,
+      statementEnds(words(t)),
+      statementSpans(words(t)),
+    );
   } catch (err) {
     console.warn(`[reportService] acoustics failed for ${t.audioKey}: ${(err as Error).message}`);
     return null;
@@ -63,7 +72,17 @@ export async function computeDelivery(turns: Turn[]): Promise<DeliveryMetrics> {
     );
   }
 
-  return combineDelivery(text, aggregateAcoustics(acoustics), aggregateCamera(turns));
+  const latency = aggregateLatency(
+    turns.map((t) => ({
+      responseLatencyMs: t.codeSubmission || t.designReview ? null : t.responseLatencyMs,
+      interruptedAtS: t.interruptedAtS,
+    })),
+  );
+
+  return combineDelivery(text, aggregateAcoustics(acoustics), aggregateCamera(turns), {
+    ...latency,
+    transcriber_confidence: aggregateConfidence(turns),
+  });
 }
 
 function honestLine(turns: Turn[], report: ReportResponse): string {

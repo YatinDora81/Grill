@@ -14,6 +14,17 @@ function jsxRegion(idAttr: string): string {
   return end === -1 ? rest : rest.slice(0, end);
 }
 
+describe("the delivery metrics handed to the tiles", () => {
+  it("is parsed, not cast, so a report written before a metric existed still renders", () => {
+    expect(SRC).toContain("delivery_metrics: readDeliveryMetrics(row.deliveryMetrics)");
+    expect(SRC).not.toMatch(/delivery_metrics: row\.deliveryMetrics as/);
+  });
+
+  it("fills the absent keys from the schema", () => {
+    expect(SRC).toContain("deliveryMetricsSchema.safeParse(value)");
+  });
+});
+
 describe("the every-question region", () => {
   const region = jsxRegion('id="questions"');
 

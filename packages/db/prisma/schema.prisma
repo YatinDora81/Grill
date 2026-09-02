@@ -257,6 +257,10 @@ model Turn {
 
   cameraMetrics Json?   @map("camera_metrics")
 
+  responseLatencyMs    Int?    @map("response_latency_ms")
+  interruptedAtS       Int?    @map("interrupted_at_s")
+  transcriptConfidence Float?  @map("transcript_confidence")
+
   session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   video   SessionVideo? @relation(fields: [videoId], references: [id], onDelete: SetNull)
   starred StarredQuestion[]

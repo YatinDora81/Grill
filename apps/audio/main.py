@@ -40,6 +40,8 @@ MAX_AUDIO_BYTES = _max_audio_bytes()
 
 MAX_SENTENCE_ENDS = 10_000
 
+MAX_SENTENCE_SPANS = 10_000
+
 MAX_UPLOAD_BYTES = MAX_AUDIO_BYTES + MULTIPART_OVERHEAD_BYTES
 
 
@@ -183,16 +185,78 @@ def _parse_sentence_ends(raw: str | None) -> list[float] | None:
     return ends
 
 
+def _span_edges(value: object) -> tuple[object, object]:
+    if isinstance(value, dict) and "start" in value and "end" in value:
+        return value["start"], value["end"]
+    if isinstance(value, list) and len(value) == 2:
+        return value[0], value[1]
+    raise HTTPException(
+        status_code=400,
+        detail="sentence_spans must contain only [start, end] pairs",
+    )
+
+
+def _parse_sentence_spans(raw: str | None) -> list[tuple[float, float]] | None:
+    if raw is None:
+        return None
+    raw = raw.strip()
+    if not raw:
+        return None
+
+    try:
+        parsed = json.loads(raw)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400, detail=f"sentence_spans is not valid JSON: {exc}"
+        ) from exc
+
+    if not isinstance(parsed, list):
+        raise HTTPException(
+            status_code=400,
+            detail="sentence_spans must be a JSON array of [start, end] pairs",
+        )
+    if len(parsed) > MAX_SENTENCE_SPANS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"sentence_spans holds more than {MAX_SENTENCE_SPANS} entries",
+        )
+
+    spans: list[tuple[float, float]] = []
+    for value in parsed:
+        edges: list[float] = []
+        for edge in _span_edges(value):
+            if isinstance(edge, bool) or not isinstance(edge, (int, float)):
+                raise HTTPException(
+                    status_code=400, detail="sentence_spans must contain only numbers"
+                )
+            seconds = float(edge)
+            if not math.isfinite(seconds) or seconds < 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail="sentence_spans must hold only finite, non-negative seconds",
+                )
+            edges.append(seconds)
+        start, end = edges
+        if end < start:
+            raise HTTPException(
+                status_code=400, detail="a sentence span may not end before it starts"
+            )
+        spans.append((start, end))
+    return spans
+
+
 @app.post("/analyze")
 async def analyze_endpoint(
     file: UploadFile = File(...),
     sentence_ends: str | None = Form(None),
+    sentence_spans: str | None = Form(None),
 ) -> dict[str, float | int | None]:
     data = await file.read()
     if not data:
         raise HTTPException(status_code=400, detail="empty audio")
     ends = _parse_sentence_ends(sentence_ends)
+    spans = _parse_sentence_spans(sentence_spans)
     try:
-        return await asyncio.to_thread(analyze, data, ends)
+        return await asyncio.to_thread(analyze, data, ends, spans)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"analysis failed: {exc}") from exc

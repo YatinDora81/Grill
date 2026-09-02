@@ -140,6 +140,20 @@ const reportDelivery: DeliveryMetrics = {
   smile_pct: 14.2,
   head_motion_dps: 5.3,
   camera_turns: 4,
+  response_latency_ms: null,
+  interruptions: 0,
+  articulation_rate_sps: null,
+  speech_rate_sps: null,
+  phonation_ratio: null,
+  trailing_off_pct: null,
+  trailing_off_statements: 0,
+  trailing_off_fading: 0,
+  transcriber_confidence: null,
+  slouch_pct: null,
+  hands_to_face_pct: null,
+  shoulder_tilt_deg: null,
+  wrist_motion: null,
+  posture_turns: 0,
 };
 
 const LOPSIDED = breakdown({

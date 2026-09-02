@@ -352,6 +352,15 @@ export const awaySegmentSchema = z
     }
   });
 
+export const postureMetricsSchema = z.object({
+  frames: z.coerce.number().int().min(0).max(100_000),
+  slouch_pct: z.coerce.number().min(0).max(100),
+  hands_to_face_pct: z.coerce.number().min(0).max(100),
+  shoulder_tilt_deg: z.coerce.number().min(0).max(90),
+  wrist_motion: z.coerce.number().min(0).max(1_000),
+  sample_hz: z.coerce.number().min(1).max(60),
+});
+
 export const cameraMetricsSchema = z.object({
   frames: z.coerce.number().int().min(0).max(100_000),
   no_face_frames: z.coerce.number().int().min(0).max(100_000),
@@ -362,6 +371,7 @@ export const cameraMetricsSchema = z.object({
   longest_away_ms: z.coerce.number().int().min(0).max(AWAY_MS_MAX),
   sample_hz: z.coerce.number().min(1).max(60),
   pose_source: z.enum(["matrix", "landmarks"]),
+  posture: postureMetricsSchema.nullish(),
 });
 
 const INVALID_JSON = "__invalid_json__";
@@ -680,6 +690,20 @@ export const deliveryMetricsSchema = z.object({
   uptalk_pct: storedMetric,
   uptalk_statements: storedCount,
   uptalk_rising: storedCount,
+  response_latency_ms: storedMetric,
+  interruptions: storedCount,
+  articulation_rate_sps: storedMetric,
+  speech_rate_sps: storedMetric,
+  phonation_ratio: storedMetric,
+  trailing_off_pct: storedMetric,
+  trailing_off_statements: storedCount,
+  trailing_off_fading: storedCount,
+  transcriber_confidence: storedMetric,
+  slouch_pct: storedMetric,
+  hands_to_face_pct: storedMetric,
+  shoulder_tilt_deg: storedMetric,
+  wrist_motion: storedMetric,
+  posture_turns: storedCount,
 });
 
 const starSegmentSchema = z.object({

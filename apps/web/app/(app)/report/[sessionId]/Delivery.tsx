@@ -131,6 +131,51 @@ export function Delivery({
         />
 
         <Metric
+          label="Articulation"
+          value={m.articulation_rate_sps !== null ? m.articulation_rate_sps.toFixed(2) : "—"}
+          unit="syll/s"
+          note={
+            m.articulation_rate_sps !== null
+              ? `Syllables a second across the time ${v.they} were actually voicing, counted off the intensity contour rather than the words. Pauses are excluded, so this is the speed of the speech itself${m.speech_rate_sps !== null ? `, against ${m.speech_rate_sps.toFixed(2)} once the pauses are counted back in` : ""}.`
+              : null
+          }
+        />
+        <Metric
+          label="Phonation"
+          value={m.phonation_ratio !== null ? String(Math.round(m.phonation_ratio * 100)) : "—"}
+          unit="%"
+          note={
+            m.phonation_ratio !== null
+              ? `The share of the recording ${v.they} were making sound in. The rest is breath and silence — some of it is thinking, some of it is the room.`
+              : null
+          }
+        />
+        <Metric
+          label="Trailing off"
+          value={
+            m.trailing_off_pct !== null
+              ? `${m.trailing_off_fading}/${m.trailing_off_statements}`
+              : "—"
+          }
+          unit="faded"
+          note={
+            m.trailing_off_pct !== null
+              ? `Statements whose last third of a second dropped at least 6 dB below the rest of the sentence. A few is ordinary; a lot means the end of ${v.their} point is the part the interviewer has to strain for.`
+              : null
+          }
+        />
+        <Metric
+          label="Transcriber confidence"
+          value={m.transcriber_confidence !== null ? m.transcriber_confidence.toFixed(2) : "—"}
+          unit="log prob"
+          note={
+            m.transcriber_confidence !== null
+              ? "How sure the transcriber was of the words it wrote down, averaged over the recording. It is always negative and closer to zero is clearer — a low number is usually a mumbled or distant mic, not a wrong answer."
+              : null
+          }
+        />
+
+        <Metric
           label="Looked at camera"
           value={m.on_camera_pct !== null ? String(Math.round(m.on_camera_pct)) : "—"}
           unit="%"
@@ -160,6 +205,62 @@ export function Delivery({
               : null
           }
         />
+
+        <Metric
+          label="Slouched"
+          value={m.slouch_pct !== null ? String(Math.round(m.slouch_pct)) : "—"}
+          unit="%"
+          note={
+            m.slouch_pct !== null
+              ? `How much of the time ${v.their} head sat lower over ${v.their} shoulders than it did in the calibration pose. It is measured against ${v.their} own neutral, so it says nothing about posture in general.`
+              : null
+          }
+        />
+        <Metric
+          label="Hands near face"
+          value={m.hands_to_face_pct !== null ? String(Math.round(m.hands_to_face_pct)) : "—"}
+          unit="%"
+          note={
+            m.hands_to_face_pct !== null
+              ? `Share of the frames a hand was within a shoulder-width of ${v.their} face. On a video call it covers the mouth and the audio with it; the number moves no score.`
+              : null
+          }
+        />
+        <Metric
+          label="Shoulder tilt"
+          value={m.shoulder_tilt_deg !== null ? m.shoulder_tilt_deg.toFixed(1) : "—"}
+          unit="°"
+          note={
+            m.shoulder_tilt_deg !== null
+              ? "Average angle of the shoulder line off horizontal. A steady few degrees is a chair or a camera on a slant, not a verdict."
+              : null
+          }
+        />
+        <Metric
+          label="Wrist motion"
+          value={m.wrist_motion !== null ? m.wrist_motion.toFixed(2) : "—"}
+          unit="sw/s"
+          note={
+            m.wrist_motion !== null
+              ? `How far ${v.their} wrists travelled a second, in shoulder-widths, so the number holds whether ${v.they} sat close to the lens or far from it. Compare it against ${v.their} own other runs.`
+              : null
+          }
+        />
+
+        <Metric
+          label="Time to first word"
+          value={
+            m.response_latency_ms !== null
+              ? String(Math.round(m.response_latency_ms / 100) / 10)
+              : "—"
+          }
+          unit="s"
+          note={
+            m.response_latency_ms !== null
+              ? `How long ${v.they} took to start talking after the question ended, median across answers. Under about a second reads as ready; several seconds is thinking time, which is fine if the answer is worth it.`
+              : null
+          }
+        />
       </div>
 
       <div className="border-r border-b border-line p-5 sm:p-6">
@@ -179,10 +280,18 @@ export function Delivery({
           </p>
         ) : null}
 
+        {m.interruptions > 0 ? (
+          <p className="mono-note" style={{ marginTop: 12 }}>
+            The interviewer cut in {m.interruptions} time(s) — answers were running long.
+          </p>
+        ) : null}
+
         <p className="dfoot">
           <b>pace &amp; pauses</b> ← word-level timings&ensp;·&ensp;<b>pitch, energy &amp; voice</b>{" "}
           ← raw audio&ensp;·&ensp;<b>on camera</b> ← the webcam, in {v.their} own
-          browser&ensp;·&ensp;never the transcript
+          browser&ensp;·&ensp;<b>syllables &amp; fading</b> ← intensity
+          contour&ensp;·&ensp;<b>posture</b> ← body landmarks, on device&ensp;·&ensp;never the
+          transcript
         </p>
       </div>
     </div>

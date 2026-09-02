@@ -81,6 +81,24 @@ def _tone(
     return 0.5 * np.sin(2 * np.pi * np.cumsum(instantaneous) / SR)
 
 
+def _bursts(count: int = 8, on: float = 0.15, off: float = 0.12) -> np.ndarray:
+    gap = np.zeros(int(off * SR))
+    parts: list[np.ndarray] = []
+    for index in range(count):
+        parts.append(_vowel(duration=on, seed=index + 1))
+        parts.append(gap)
+    return np.concatenate(parts)
+
+
+def _fading(
+    duration: float = 2.0, fade_s: float = 0.8, ends_at: float = 0.15
+) -> np.ndarray:
+    samples = _vowel(duration=duration)
+    tail = int(fade_s * SR)
+    samples[-tail:] *= np.linspace(1.0, ends_at, tail)
+    return samples
+
+
 def _sound(samples: np.ndarray) -> parselmouth.Sound:
     return parselmouth.Sound(samples, sampling_frequency=SR)
 
@@ -234,12 +252,22 @@ def test_a_caller_that_sends_no_sentence_ends_still_gets_every_other_metric():
         "hnr_db",
         "uptalk_statements",
         "uptalk_rising",
+        "syllables",
+        "speech_rate_sps",
+        "articulation_rate_sps",
+        "phonation_ratio",
+        "trailing_off_statements",
+        "trailing_off_fading",
+        "clipping_pct",
     }
     assert body["energy"] > 0
     assert body["mean_pitch_hz"] > 0
     assert body["hnr_db"] is not None
     assert body["uptalk_statements"] is None
     assert body["uptalk_rising"] is None
+    assert body["syllables"] is not None
+    assert body["trailing_off_statements"] is None
+    assert body["clipping_pct"] == 0
 
 
 def test_sentence_ends_travel_through_the_endpoint_as_whole_counts():
@@ -306,3 +334,105 @@ def test_an_empty_sentence_ends_field_is_read_as_absent():
     assert main._parse_sentence_ends(None) is None
     assert main._parse_sentence_ends("[]") == []
     assert main._parse_sentence_ends("[1, 2.5]") == [1.0, 2.5]
+
+
+def test_vowel_bursts_are_counted_as_syllable_nuclei():
+    sound = _sound(_bursts())
+    rates = analysis._syllable_nuclei(sound, sound.to_pitch(), analysis._intensity(sound))
+    assert 6 <= rates["syllables"] <= 10
+    assert rates["articulation_rate_sps"] > rates["speech_rate_sps"]
+    assert 0 < rates["phonation_ratio"] < 1
+
+
+def test_a_silent_clip_has_no_syllables_and_no_articulation_rate():
+    sound = _sound(np.zeros(int(1.5 * SR)))
+    rates = analysis._syllable_nuclei(sound, sound.to_pitch(), analysis._intensity(sound))
+    assert rates["syllables"] == 0
+    assert rates["articulation_rate_sps"] is None
+    assert rates["phonation_ratio"] == 0
+
+
+def test_a_statement_that_fades_at_the_end_is_counted_as_trailing_off():
+    intensity = analysis._intensity(_sound(_fading()))
+    assert analysis._trailing_off(intensity, [(0.0, 2.0)]) == {
+        "trailing_off_statements": 1,
+        "trailing_off_fading": 1,
+    }
+
+
+def test_a_statement_that_holds_its_level_is_judged_but_not_fading():
+    intensity = analysis._intensity(_sound(_vowel(duration=2.0)))
+    assert analysis._trailing_off(intensity, [(0.0, 2.0)]) == {
+        "trailing_off_statements": 1,
+        "trailing_off_fading": 0,
+    }
+
+
+def test_no_sentence_spans_at_all_means_not_measured_not_zero():
+    intensity = analysis._intensity(_sound(_fading()))
+    assert analysis._trailing_off(intensity, None) == {
+        "trailing_off_statements": None,
+        "trailing_off_fading": None,
+    }
+
+
+def test_a_clipped_waveform_is_measured_and_a_quiet_one_is_not():
+    square = np.sign(np.sin(2 * np.pi * 150.0 * np.arange(SR) / SR))
+    assert analysis._clipping_pct(_sound(square)) > 50
+    assert analysis._clipping_pct(_sound(_vowel() * 0.6)) == 0
+
+
+def test_sentence_spans_travel_through_the_endpoint_and_stand_in_for_ends():
+    res = client.post(
+        "/analyze",
+        files={"file": ("clip.wav", _wav_bytes(_fading()), "audio/wav")},
+        data={"sentence_spans": json.dumps([[0.0, 2.0]])},
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["trailing_off_statements"] == 1
+    assert body["trailing_off_fading"] == 1
+    assert body["uptalk_statements"] == 1
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "not json at all",
+        '{"spans": [[0, 1]]}',
+        "[[1, 0]]",
+        "[[0]]",
+        "[[0, 1, 2]]",
+        '[["0", "1"]]',
+        "[[true, 1]]",
+        "[[-1, 1]]",
+        "[[0, 1e400]]",
+        "[0, 1]",
+        "[null]",
+    ],
+)
+def test_a_malformed_sentence_spans_field_is_a_400(raw):
+    res = client.post(
+        "/analyze",
+        files={"file": ("clip.wav", _wav_bytes(_vowel()), "audio/wav")},
+        data={"sentence_spans": raw},
+    )
+    assert res.status_code == 400
+
+
+def test_too_many_sentence_spans_is_a_400():
+    res = client.post(
+        "/analyze",
+        files={"file": ("clip.wav", _wav_bytes(_vowel()), "audio/wav")},
+        data={"sentence_spans": json.dumps([[0.0, 1.0]] * (main.MAX_SENTENCE_SPANS + 1))},
+    )
+    assert res.status_code == 400
+
+
+def test_an_empty_sentence_spans_field_is_read_as_absent():
+    assert main._parse_sentence_spans("") is None
+    assert main._parse_sentence_spans("   ") is None
+    assert main._parse_sentence_spans(None) is None
+    assert main._parse_sentence_spans("[]") == []
+    assert main._parse_sentence_spans("[[0, 1.5], [2, 3]]") == [(0.0, 1.5), (2.0, 3.0)]
+    assert main._parse_sentence_spans('[{"start": 0, "end": 1.5}]') == [(0.0, 1.5)]

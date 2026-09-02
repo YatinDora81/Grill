@@ -350,6 +350,20 @@ function readDeliveryMetrics(value: unknown): DeliveryMetrics | null {
     smile_pct: optional(m.smile_pct),
     head_motion_dps: optional(m.head_motion_dps),
     camera_turns: count(m.camera_turns),
+    response_latency_ms: optional(m.response_latency_ms),
+    interruptions: count(m.interruptions),
+    articulation_rate_sps: optional(m.articulation_rate_sps),
+    speech_rate_sps: optional(m.speech_rate_sps),
+    phonation_ratio: optional(m.phonation_ratio),
+    trailing_off_pct: optional(m.trailing_off_pct),
+    trailing_off_statements: count(m.trailing_off_statements),
+    trailing_off_fading: count(m.trailing_off_fading),
+    transcriber_confidence: optional(m.transcriber_confidence),
+    slouch_pct: optional(m.slouch_pct),
+    hands_to_face_pct: optional(m.hands_to_face_pct),
+    shoulder_tilt_deg: optional(m.shoulder_tilt_deg),
+    wrist_motion: optional(m.wrist_motion),
+    posture_turns: count(m.posture_turns),
   };
 }
 

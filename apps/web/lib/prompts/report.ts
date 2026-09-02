@@ -14,6 +14,11 @@ Jitter, shimmer and HNR are acoustic voice-quality measures: describe high jitte
 a rising pitch, not a judgement about confidence.
 On-camera figures are measured from the candidate's webcam by software, not by a human. Describe
 them as "looked at the camera", never as "confidence" or "engagement".
+Time to first word is a measured gap, not a judgement about preparation; short is not automatically
+good.
+Articulation rate, phonation ratio, trailing off, transcriber confidence and posture are measured;
+describe them as "spoke at N syllables a second", "faded on N statements", "was harder for the
+transcriber to follow", "sat lower than the calibrated pose" — never as mood, nerves or confidence.
 Respond with JSON only — no prose, no code fences.`;
 
 export interface ReportTurn {
@@ -42,6 +47,18 @@ function deliveryBlock(d: DeliveryMetrics): string {
     ["jitter", d.jitter_local, ""],
     ["shimmer", d.shimmer_local, ""],
     ["voice clarity (HNR)", d.hnr_db, " dB"],
+    ["articulation rate", d.articulation_rate_sps, " syllables/s of speaking time"],
+    ["speech rate", d.speech_rate_sps, " syllables/s including pauses"],
+    [
+      "phonation ratio",
+      d.phonation_ratio,
+      " (share of the time the candidate was actually voicing)",
+    ],
+    [
+      "transcriber confidence",
+      d.transcriber_confidence,
+      " (mean log-probability; closer to 0 is clearer to the transcriber)",
+    ],
   ] as const) {
     if (v === null) absent.push(label);
     else measured.push(`- ${label}: ${v}${unit}`);
@@ -54,12 +71,39 @@ function deliveryBlock(d: DeliveryMetrics): string {
     );
   }
 
+  if (d.trailing_off_pct === null) absent.push("trailing off");
+  else {
+    measured.push(
+      `- trailing off: ${d.trailing_off_fading} of ${d.trailing_off_statements} statements ended at least 6 dB quieter than their body`,
+    );
+  }
+
   const audioAbsent = absent.length > 0;
+
+  if (d.response_latency_ms === null) absent.push("time to first word");
+  else {
+    measured.push(
+      `- time to first word (median): ${d.response_latency_ms} ms — from the end of the question to the first word spoken`,
+    );
+  }
+  if (d.interruptions > 0) {
+    measured.push(
+      `- the interviewer cut the candidate off ${d.interruptions} time(s) for running long`,
+    );
+  }
 
   for (const [label, v, unit] of [
     ["time looking at the camera", d.on_camera_pct, "%"],
     ["time visibly smiling", d.smile_pct, "%"],
     ["head movement", d.head_motion_dps, " deg/s"],
+    ...(d.posture_turns > 0
+      ? ([
+          ["time slouched below the calibrated pose", d.slouch_pct, "%"],
+          ["hands near the face", d.hands_to_face_pct, "%"],
+          ["shoulder tilt", d.shoulder_tilt_deg, "°"],
+          ["wrist motion", d.wrist_motion, " shoulder-widths/s"],
+        ] as const)
+      : []),
   ] as const) {
     if (v === null) absent.push(label);
     else measured.push(`- ${label}: ${v}${unit}`);
@@ -69,15 +113,21 @@ function deliveryBlock(d: DeliveryMetrics): string {
   if (!absent.length) return head;
 
   const causes: string[] = [];
-  if (audioAbsent) {
+  if (live) {
     causes.push(
-      spoke
-        ? "The audio analysis was unavailable for this session."
-        : "This candidate typed their answers rather than speaking, so there is no audio to measure.",
+      "This was a live spoken conversation: no audio was recorded, so pace, tone, latency and camera were not measured.",
     );
-  }
-  if (d.camera_turns === 0) {
-    causes.push("The camera was off or blocked, so there is no on-camera measurement.");
+  } else {
+    if (audioAbsent) {
+      causes.push(
+        spoke
+          ? "The audio analysis was unavailable for this session."
+          : "This candidate typed their answers rather than speaking, so there is no audio to measure.",
+      );
+    }
+    if (d.camera_turns === 0) {
+      causes.push("The camera was off or blocked, so there is no on-camera measurement.");
+    }
   }
   causes.push(
     "Treat these as absent, not as zero: do not describe them, do not hold them against the candidate, and do not let them move any score.",

@@ -11,7 +11,11 @@ import type {
   TranscriptWord,
 } from "@repo/types";
 import { getUserId } from "@/lib/auth";
-import { cameraMetricsSchema, starBreakdownsSchema } from "@/lib/schemas";
+import {
+  cameraMetricsSchema,
+  deliveryMetricsSchema,
+  starBreakdownsSchema,
+} from "@/lib/schemas";
 import * as repo from "@/lib/db/repo";
 import { takeMs } from "@/lib/camera/summarize";
 import { DIFFICULTY_META } from "@/lib/interviewMeta";
@@ -80,7 +84,7 @@ export default async function ReportPage({
     overall_score: row.overallScore,
     verdict: row.verdict,
     category_scores: row.categoryScores as unknown as ReportDTO["category_scores"],
-    delivery_metrics: row.deliveryMetrics as unknown as ReportDTO["delivery_metrics"],
+    delivery_metrics: readDeliveryMetrics(row.deliveryMetrics),
     strengths: row.strengths as unknown as ReportDTO["strengths"],
     weaknesses: row.weaknesses as unknown as ReportDTO["weaknesses"],
     best_answer: row.bestAnswer as unknown as ReportDTO["best_answer"],
@@ -521,6 +525,17 @@ function verdictTier(verdict: string): string {
   if (verdict.length >= VERDICT_LONG_FROM) return "verdict-long";
   if (verdict.length >= VERDICT_MID_FROM) return "verdict-mid";
   return "";
+}
+
+function readDeliveryMetrics(value: unknown): ReportDTO["delivery_metrics"] {
+  const parsed = deliveryMetricsSchema.safeParse(value);
+  const m = parsed.success ? parsed.data : deliveryMetricsSchema.parse({});
+  return {
+    ...m,
+    wpm: m.wpm ?? 0,
+    avg_pause_ms: m.avg_pause_ms ?? 0,
+    filler_count: m.filler_count ?? 0,
+  };
 }
 
 function parseTranscriptWords(value: unknown): TranscriptWord[] | null {

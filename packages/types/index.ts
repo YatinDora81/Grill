@@ -138,6 +138,15 @@ export interface AwaySegment {
   end_ms: number;
 }
 
+export interface PostureTurnMetrics {
+  frames: number;
+  slouch_pct: number;
+  hands_to_face_pct: number;
+  shoulder_tilt_deg: number;
+  wrist_motion: number;
+  sample_hz: number;
+}
+
 export interface CameraTurnMetrics {
   frames: number;
   no_face_frames: number;
@@ -148,6 +157,7 @@ export interface CameraTurnMetrics {
   longest_away_ms: number;
   sample_hz: number;
   pose_source: "matrix" | "landmarks";
+  posture?: PostureTurnMetrics | null;
 }
 
 export interface DeliveryMetrics {
@@ -167,6 +177,20 @@ export interface DeliveryMetrics {
   smile_pct: number | null;
   head_motion_dps: number | null;
   camera_turns: number;
+  response_latency_ms: number | null;
+  interruptions: number;
+  articulation_rate_sps: number | null;
+  speech_rate_sps: number | null;
+  phonation_ratio: number | null;
+  trailing_off_pct: number | null;
+  trailing_off_statements: number;
+  trailing_off_fading: number;
+  transcriber_confidence: number | null;
+  slouch_pct: number | null;
+  hands_to_face_pct: number | null;
+  shoulder_tilt_deg: number | null;
+  wrist_motion: number | null;
+  posture_turns: number;
 }
 
 export interface CategoryScores {
@@ -311,12 +335,27 @@ export interface AcousticMetrics {
   hnr_db: number | null;
   uptalk_statements: number | null;
   uptalk_rising: number | null;
+  syllables?: number | null;
+  speech_rate_sps?: number | null;
+  articulation_rate_sps?: number | null;
+  phonation_ratio?: number | null;
+  trailing_off_statements?: number | null;
+  trailing_off_fading?: number | null;
+  clipping_pct?: number | null;
 }
 
 export interface TranscriptWord {
   word: string;
   start: number;
   end: number;
+}
+
+export interface TranscriptSegment {
+  start: number;
+  end: number;
+  avg_logprob: number | null;
+  no_speech_prob: number | null;
+  compression_ratio: number | null;
 }
 
 export interface ResumeGapResponse {
