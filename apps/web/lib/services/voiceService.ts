@@ -3,9 +3,11 @@ import { createHash } from "node:crypto";
 import type { Session, Turn } from "@repo/db";
 import type { Persona } from "@repo/types";
 import { config } from "@/lib/env";
-import { PERSONA_VOICE } from "@/lib/interviewMeta";
+import { PERSONA_GEMINI_VOICE, PERSONA_VOICE } from "@/lib/interviewMeta";
 import { SPEECH_FORMAT, synthesize } from "@/lib/clients/ttsClient";
+import { synthesizeGemini } from "@/lib/clients/geminiTtsClient";
 import { headObject, presignGet, putObject } from "@/lib/storage/objectStore";
+import { isLatinScript } from "@/lib/text/script";
 import { toSessionContext } from "./sessionContext";
 import * as budget from "./ttsBudget";
 
@@ -15,6 +17,7 @@ export type VoiceFallbackReason = "disabled" | "budget" | "provider" | "storage"
 
 export type VoiceOutcome =
   | { url: string; provider: "orpheus"; cached: boolean }
+  | { url: string; provider: "gemini"; cached: boolean }
   | { url: null; provider: "browser"; reason: VoiceFallbackReason };
 
 export type VoicePayload = VoiceOutcome & { budget_remaining?: number };
@@ -28,18 +31,18 @@ export function spokenText(persona: Persona, question: string): string {
   return `${direction}${question.trim()}`.slice(0, config.tts.maxChars);
 }
 
-const NON_LATIN_TOLERANCE = 0.2;
-
-export function isLatinScript(text: string): boolean {
-  const letters = text.match(/\p{L}/gu);
-  if (!letters?.length) return true;
-  const nonLatin = letters.filter((ch) => !/\p{Script=Latin}/u.test(ch)).length;
-  return nonLatin / letters.length <= NON_LATIN_TOLERANCE;
-}
+export { isLatinScript };
 
 export function cacheKey(voice: string, text: string): string {
   const digest = createHash("sha256").update(`${config.tts.model}|${voice}|${text}`).digest("hex");
   return `${config.tts.cachePrefix}${digest}.${SPEECH_FORMAT}`;
+}
+
+export function geminiCacheKey(voice: string, text: string): string {
+  const digest = createHash("sha256")
+    .update(`${config.tts.geminiModel}|${voice}|${text}`)
+    .digest("hex");
+  return `${config.tts.geminiCachePrefix}${digest}.wav`;
 }
 
 function personaOf(session: Session): Persona {
@@ -54,13 +57,12 @@ function personaOf(session: Session): Persona {
   }
 }
 
-async function resolveAudio(session: Session, turn: Turn): Promise<VoiceOutcome> {
-  if (!config.ttsConfigured) return browser("disabled");
-
-  const persona = personaOf(session);
+async function resolveOrpheus(
+  turn: Turn,
+  persona: Persona,
+  text: string,
+): Promise<VoiceOutcome | null> {
   const { voice } = PERSONA_VOICE[persona];
-  const text = spokenText(persona, turn.question);
-  if (!text.trim()) return browser("provider");
 
   if (!isLatinScript(turn.question)) {
     console.warn(
@@ -83,7 +85,7 @@ async function resolveAudio(session: Session, turn: Turn): Promise<VoiceOutcome>
     return browser("storage");
   }
 
-  if (!(await budget.tryConsume())) return browser("budget");
+  if (!(await budget.tryConsume())) return null;
 
   try {
     const { bytes, mime } = await synthesize(text, voice);
@@ -96,6 +98,57 @@ async function resolveAudio(session: Session, turn: Turn): Promise<VoiceOutcome>
     );
     return browser("provider");
   }
+}
+
+async function resolveGemini(turn: Turn, persona: Persona, text: string): Promise<VoiceOutcome> {
+  const voice = PERSONA_GEMINI_VOICE[persona];
+  const key = geminiCacheKey(voice, text);
+
+  try {
+    if (await headObject(key)) {
+      return { url: await presignGet(key, URL_TTL_S), provider: "gemini", cached: true };
+    }
+  } catch (err) {
+    console.warn(
+      `[voice] gemini cache lookup failed for turn ${turn.turnIndex}; browser fallback:`,
+      err instanceof Error ? err.message : err,
+    );
+    return browser("storage");
+  }
+
+  if (!(await budget.tryConsume(new Date(), "gemini"))) return browser("budget");
+
+  try {
+    const { bytes, mime } = await synthesizeGemini(text, voice);
+    await putObject(key, bytes, mime);
+    return { url: await presignGet(key, URL_TTL_S), provider: "gemini", cached: false };
+  } catch (err) {
+    console.warn(
+      `[voice] gemini synthesis failed for turn ${turn.turnIndex}; browser fallback:`,
+      err instanceof Error ? err.message : err,
+    );
+    return browser("provider");
+  }
+}
+
+async function resolveAudio(session: Session, turn: Turn): Promise<VoiceOutcome> {
+  if (!config.ttsConfigured && !config.geminiTtsConfigured) return browser("disabled");
+
+  const persona = personaOf(session);
+  const text = spokenText(persona, turn.question);
+  if (!text.trim()) return browser("provider");
+
+  let exhausted = false;
+
+  if (config.ttsConfigured) {
+    const orpheus = await resolveOrpheus(turn, persona, text);
+    if (orpheus) return orpheus;
+    exhausted = true;
+  }
+
+  if (!config.geminiTtsConfigured) return browser(exhausted ? "budget" : "disabled");
+
+  return resolveGemini(turn, persona, text);
 }
 
 async function headroom(): Promise<number | undefined> {

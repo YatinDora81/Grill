@@ -129,6 +129,22 @@ export const PERSONA_VOICE: Record<Persona, { voice: string; direction: string }
   skeptic: { voice: "austin", direction: "" },
 };
 
+export const PERSONA_KOKORO_VOICE: Record<Persona, string> = {
+  neutral: "af_heart",
+  friendly_screen: "af_bella",
+  terse_staff: "am_michael",
+  bar_raiser: "bm_daniel",
+  skeptic: "am_fenrir",
+};
+
+export const PERSONA_GEMINI_VOICE: Record<Persona, string> = {
+  neutral: "Kore",
+  friendly_screen: "Aoede",
+  terse_staff: "Charon",
+  bar_raiser: "Orus",
+  skeptic: "Fenrir",
+};
+
 export const PERSONA_GUARDRAIL =
   "Persona changes tone and phrasing only — question difficulty, topic selection, and follow-up logic are unchanged; remain professional.";
 

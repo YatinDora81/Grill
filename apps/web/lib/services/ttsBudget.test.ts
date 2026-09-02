@@ -2,7 +2,7 @@ import { test, expect, mock, beforeEach } from "bun:test";
 
 mock.module("server-only", () => ({}));
 
-const envConfig = { tts: { dailyBudget: 3 } };
+const envConfig = { tts: { dailyBudget: 3, geminiDailyBudget: 2 } };
 mock.module("@/lib/env", () => ({ config: envConfig }));
 
 const counters = new Map<string, number>();
@@ -59,6 +59,7 @@ beforeEach(() => {
   redisDown = false;
   redisPresent = false;
   envConfig.tts.dailyBudget = 3;
+  envConfig.tts.geminiDailyBudget = 2;
   resetLocalBudget();
 });
 
@@ -129,4 +130,59 @@ test("remaining answers optimistically when the counter cannot be read", async (
   redisDown = true;
 
   expect(await remaining()).toBe(3);
+});
+
+test("in-memory: each lane spends its own budget, not the other's", async () => {
+  const day = new Date("2026-08-26T10:00:00.000Z");
+
+  for (let i = 0; i < 3; i++) expect(await tryConsume(day, "orpheus")).toBe(true);
+  expect(await tryConsume(day, "orpheus")).toBe(false);
+
+  expect(await tryConsume(day, "gemini")).toBe(true);
+  expect(await tryConsume(day, "gemini")).toBe(true);
+  expect(await tryConsume(day, "gemini")).toBe(false);
+
+  expect(await remaining(day, "orpheus")).toBe(0);
+  expect(await remaining(day, "gemini")).toBe(0);
+});
+
+test("in-memory: a lane's own budget is what limits it", async () => {
+  const day = new Date("2026-08-26T10:00:00.000Z");
+
+  expect(await tryConsume(day, "gemini")).toBe(true);
+
+  expect(await remaining(day, "gemini")).toBe(1);
+  expect(await remaining(day, "orpheus")).toBe(3);
+});
+
+test("redis: orpheus keeps the key it has always had, gemini gets its own", async () => {
+  redisPresent = true;
+  const day = new Date("2026-08-26T10:00:00.000Z");
+
+  await tryConsume(day, "orpheus");
+  await tryConsume(day, "gemini");
+
+  expect(counters.get("grill:tts:2026-08-26")).toBe(1);
+  expect(counters.get("grill:tts:gemini:2026-08-26")).toBe(1);
+  expect(expiries.get("grill:tts:gemini:2026-08-26")).toBe(172_800);
+});
+
+test("redis: a lane refuses past its own budget without touching the other", async () => {
+  redisPresent = true;
+  const day = new Date("2026-08-26T10:00:00.000Z");
+
+  expect(await tryConsume(day, "gemini")).toBe(true);
+  expect(await tryConsume(day, "gemini")).toBe(true);
+  expect(await tryConsume(day, "gemini")).toBe(false);
+
+  expect(await remaining(day, "gemini")).toBe(0);
+  expect(await remaining(day, "orpheus")).toBe(3);
+});
+
+test("a gemini budget of zero keeps the lane shut", async () => {
+  envConfig.tts.geminiDailyBudget = 0;
+
+  expect(await tryConsume(new Date(), "gemini")).toBe(false);
+  expect(await remaining(new Date(), "gemini")).toBe(0);
+  expect(await tryConsume()).toBe(true);
 });

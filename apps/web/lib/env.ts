@@ -154,6 +154,10 @@ export const config = {
     dailyBudget: num("TTS_DAILY_BUDGET", 90),
     cachePrefix: process.env.TTS_CACHE_PREFIX || "tts/orpheus/",
     maxChars: num("TTS_MAX_CHARS", 1_200),
+    geminiEnabled: process.env.GEMINI_TTS_ENABLED === "1",
+    geminiModel: process.env.GEMINI_TTS_MODEL || "gemini-2.5-flash-preview-tts",
+    geminiDailyBudget: num("GEMINI_TTS_DAILY_BUDGET", 12),
+    geminiCachePrefix: process.env.GEMINI_TTS_CACHE_PREFIX || "tts/gemini/",
   },
   interview: {
     defaultNumQuestions: num("DEFAULT_NUM_QUESTIONS", 8),
@@ -191,6 +195,9 @@ export const config = {
   },
   get ttsConfigured(): boolean {
     return Boolean(this.tts.enabled && this.groq.keys.length > 0 && storageReady);
+  },
+  get geminiTtsConfigured(): boolean {
+    return Boolean(this.tts.geminiEnabled && storageReady);
   },
   get redisConfigured(): boolean {
     return Boolean(this.upstash.redisUrl && this.upstash.redisToken);

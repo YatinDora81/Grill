@@ -11,11 +11,25 @@ const REDIS_TIMEOUT_MS = 1_500;
 const WARN_INTERVAL_MS = 60_000;
 let warnedAt = 0;
 
-let localDay = "";
-let localSpent = 0;
+export type TtsLane = "orpheus" | "gemini";
+
+interface LaneCount {
+  day: string;
+  spent: number;
+}
+
+const local = new Map<TtsLane, LaneCount>();
 
 export function dayKey(now: Date = new Date()): string {
   return now.toISOString().slice(0, 10);
+}
+
+function budgetFor(lane: TtsLane): number {
+  return lane === "gemini" ? config.tts.geminiDailyBudget : config.tts.dailyBudget;
+}
+
+function redisKey(lane: TtsLane, day: string): string {
+  return lane === "orpheus" ? `${REDIS_PREFIX}${day}` : `${REDIS_PREFIX}${lane}:${day}`;
 }
 
 function warnRedisDown(err: unknown): void {
@@ -39,25 +53,33 @@ function withTimeout<T>(work: Promise<T>, label: string): Promise<T> {
   return Promise.race([work, guard]).finally(() => clearTimeout(timer));
 }
 
-function localConsume(day: string, budget: number): boolean {
-  if (localDay !== day) {
-    localDay = day;
-    localSpent = 0;
-  }
-  if (localSpent >= budget) return false;
-  localSpent++;
+function laneCount(lane: TtsLane, day: string): LaneCount {
+  const existing = local.get(lane);
+  if (existing && existing.day === day) return existing;
+  const fresh = { day, spent: 0 };
+  local.set(lane, fresh);
+  return fresh;
+}
+
+function localConsume(lane: TtsLane, day: string, budget: number): boolean {
+  const count = laneCount(lane, day);
+  if (count.spent >= budget) return false;
+  count.spent++;
   return true;
 }
 
-export async function tryConsume(now: Date = new Date()): Promise<boolean> {
-  const budget = config.tts.dailyBudget;
+export async function tryConsume(
+  now: Date = new Date(),
+  lane: TtsLane = "orpheus",
+): Promise<boolean> {
+  const budget = budgetFor(lane);
   if (budget <= 0) return false;
 
   const day = dayKey(now);
   const redis = getRedis();
 
   if (redis) {
-    const key = `${REDIS_PREFIX}${day}`;
+    const key = redisKey(lane, day);
     try {
       const pipeline = redis.pipeline();
       pipeline.incr(key);
@@ -74,11 +96,14 @@ export async function tryConsume(now: Date = new Date()): Promise<boolean> {
     }
   }
 
-  return localConsume(day, budget);
+  return localConsume(lane, day, budget);
 }
 
-export async function remaining(now: Date = new Date()): Promise<number> {
-  const budget = config.tts.dailyBudget;
+export async function remaining(
+  now: Date = new Date(),
+  lane: TtsLane = "orpheus",
+): Promise<number> {
+  const budget = budgetFor(lane);
   if (budget <= 0) return 0;
 
   const day = dayKey(now);
@@ -86,17 +111,17 @@ export async function remaining(now: Date = new Date()): Promise<number> {
 
   if (redis) {
     try {
-      const used = await withTimeout(redis.get<number>(`${REDIS_PREFIX}${day}`), "tts budget read");
+      const used = await withTimeout(redis.get<number>(redisKey(lane, day)), "tts budget read");
       return Math.max(0, budget - (Number(used) || 0));
     } catch (err) {
       warnRedisDown(err);
     }
   }
 
-  return Math.max(0, budget - (localDay === day ? localSpent : 0));
+  const count = local.get(lane);
+  return Math.max(0, budget - (count?.day === day ? count.spent : 0));
 }
 
 export function resetLocalBudget(): void {
-  localDay = "";
-  localSpent = 0;
+  local.clear();
 }

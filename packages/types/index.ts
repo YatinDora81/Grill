@@ -127,7 +127,7 @@ export interface PresignResponse {
 
 export interface VoiceResponse {
   url: string | null;
-  provider: "orpheus" | "browser";
+  provider: "orpheus" | "gemini" | "browser";
   cached?: boolean;
   reason?: string;
   budget_remaining?: number;

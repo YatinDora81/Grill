@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 import type { User } from "@repo/types";
 import { apiPost, ApiClientError } from "@/lib/apiClient";
 import { GrillToaster } from "@/components/toast";
 import { Explain } from "@/components/Explain";
+import { readLocalVoicePref, writeLocalVoicePref } from "@/hooks/useKokoro";
 
 async function apiPatch<T>(path: string, payload: unknown): Promise<T> {
   const res = await fetch(path, {
@@ -45,6 +46,9 @@ export function ProfileForm({
 
   const [digestOn, setDigestOn] = useState(emailDigest);
   const [savingDigest, setSavingDigest] = useState(false);
+
+  const [localVoiceOn, setLocalVoiceOn] = useState(true);
+  useEffect(() => setLocalVoiceOn(readLocalVoicePref()), []);
 
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
@@ -109,6 +113,13 @@ export function ProfileForm({
     } finally {
       setSavingDigest(false);
     }
+  }
+
+  function toggleLocalVoice() {
+    const wanted = !localVoiceOn;
+    setLocalVoiceOn(wanted);
+    writeLocalVoicePref(wanted);
+    toast.success(wanted ? "This device will speak" : "On-device voice off");
   }
 
   async function savePassword(e: React.FormEvent) {
@@ -234,6 +245,31 @@ export function ProfileForm({
         <Explain>
           At most one every seven days, and never for an empty deck — <b>nothing due, no email</b>.
           Turning it off stops the nudge; it does not stop your cards from coming back.
+        </Explain>
+
+        <div className="switch-row">
+          <div>
+            <span className="switch-l">
+              Use the on-device interviewer voice (downloads ~90 MB once)
+            </span>
+            <p className="switch-d">
+              {localVoiceOn
+                ? "The model runs in this browser, so the room never waits on the voice server."
+                : "Questions are read by the server voice, and by your browser's own when that runs out."}
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={localVoiceOn}
+            aria-label="Use the on-device interviewer voice"
+            onClick={toggleLocalVoice}
+            className="switch"
+          />
+        </div>
+        <Explain>
+          English only, and kept in <b>this browser</b> rather than your account — the download is
+          cached after the first interview, and other scripts still go to the server voice.
         </Explain>
       </section>
 

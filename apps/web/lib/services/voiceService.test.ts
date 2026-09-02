@@ -6,10 +6,13 @@ mock.module("server-only", () => ({}));
 
 const envConfig = {
   ttsConfigured: true,
+  geminiTtsConfigured: false,
   tts: {
     model: "canopylabs/orpheus-v1-english",
     cachePrefix: "tts/orpheus/",
     maxChars: 40,
+    geminiModel: "gemini-2.5-flash-preview-tts",
+    geminiCachePrefix: "tts/gemini/",
   },
 };
 mock.module("@/lib/env", () => ({ config: envConfig }));
@@ -20,19 +23,29 @@ const synthesize = mock(async (_text: string, _voice: string) => ({
 }));
 mock.module("@/lib/clients/ttsClient", () => ({ synthesize, SPEECH_FORMAT: "wav" }));
 
+const synthesizeGemini = mock(async (_text: string, _voice: string) => ({
+  bytes: new Uint8Array([4, 5, 6]),
+  mime: "audio/wav",
+}));
+mock.module("@/lib/clients/geminiTtsClient", () => ({ synthesizeGemini }));
+
 let cached = false;
+let geminiCached = false;
 let headFails = false;
-const headObject = mock(async (_key: string) => {
+const headObject = mock(async (key: string) => {
   if (headFails) throw new Error("bucket on fire");
-  return cached;
+  return key.startsWith("tts/gemini/") ? geminiCached : cached;
 });
 const putObject = mock(async (_key: string, _bytes: Uint8Array, _mime: string) => {});
 const presignGet = mock(async (key: string, ttl?: number) => `https://r2.test/${key}?ttl=${ttl}`);
 mock.module("@/lib/storage/objectStore", () => ({ headObject, putObject, presignGet }));
 
 let budgetLeft = true;
+let geminiBudgetLeft = true;
 let budgetHeadroom = 17;
-const tryConsume = mock(async () => budgetLeft);
+const tryConsume = mock(async (_now?: Date, lane = "orpheus") =>
+  lane === "gemini" ? geminiBudgetLeft : budgetLeft,
+);
 const remaining = mock(async () => budgetHeadroom);
 mock.module("./ttsBudget", () => ({ tryConsume, remaining }));
 
@@ -45,19 +58,25 @@ mock.module("./sessionContext", () => ({
   },
 }));
 
-const { PERSONA_VOICE } = await import("@/lib/interviewMeta");
-const { cacheKey, isLatinScript, questionAudio, spokenText } = await import("./voiceService");
+const { PERSONA_GEMINI_VOICE, PERSONA_VOICE } = await import("@/lib/interviewMeta");
+const { cacheKey, geminiCacheKey, isLatinScript, questionAudio, spokenText } = await import(
+  "./voiceService"
+);
 
 const session = { id: "sess_1" } as Session;
 const turn = (question: string) => ({ turnIndex: 2, question }) as Turn;
 
 beforeEach(() => {
   cached = false;
+  geminiCached = false;
   headFails = false;
   budgetLeft = true;
+  geminiBudgetLeft = true;
   budgetHeadroom = 17;
   persona = "neutral";
   contextThrows = false;
+  envConfig.geminiTtsConfigured = false;
+  synthesizeGemini.mockClear();
   synthesize.mockClear();
   putObject.mockClear();
   headObject.mockClear();
@@ -251,4 +270,107 @@ test("still answers when the budget counter cannot be read", async () => {
 
   expect(outcome.provider).toBe("orpheus");
   expect(outcome.budget_remaining).toBeUndefined();
+});
+
+test("gives the gemini lane a key of its own, per model, voice and text", () => {
+  const base = geminiCacheKey("Kore", "Why did you leave?");
+
+  expect(base).toStartWith("tts/gemini/");
+  expect(base).toEndWith(".wav");
+  expect(base).not.toBe(cacheKey("Kore", "Why did you leave?"));
+  expect(geminiCacheKey("Charon", "Why did you leave?")).not.toBe(base);
+  expect(geminiCacheKey("Kore", "Why did you really leave?")).not.toBe(base);
+});
+
+test("hands the turn to gemini rather than the browser once orpheus has run dry", async () => {
+  budgetLeft = false;
+  budgetHeadroom = 0;
+  envConfig.geminiTtsConfigured = true;
+  const key = geminiCacheKey(PERSONA_GEMINI_VOICE.neutral, "Why did you leave?");
+
+  const outcome = await questionAudio(session, turn("Why did you leave?"));
+
+  expect(synthesize).not.toHaveBeenCalled();
+  expect(synthesizeGemini).toHaveBeenCalledWith("Why did you leave?", PERSONA_GEMINI_VOICE.neutral);
+  expect(putObject.mock.calls[0]?.[0]).toBe(key);
+  expect(outcome).toEqual({
+    url: `https://r2.test/${key}?ttl=3600`,
+    provider: "gemini",
+    cached: false,
+    budget_remaining: 0,
+  });
+});
+
+test("serves a cached gemini clip without spending either budget", async () => {
+  budgetLeft = false;
+  geminiCached = true;
+  envConfig.geminiTtsConfigured = true;
+  const key = geminiCacheKey(PERSONA_GEMINI_VOICE.neutral, "Why did you leave?");
+
+  const outcome = await questionAudio(session, turn("Why did you leave?"));
+
+  expect(outcome).toEqual({
+    url: `https://r2.test/${key}?ttl=3600`,
+    provider: "gemini",
+    cached: true,
+    budget_remaining: 17,
+  });
+  expect(synthesizeGemini).not.toHaveBeenCalled();
+});
+
+test("reads with the persona's own gemini voice", async () => {
+  budgetLeft = false;
+  persona = "skeptic";
+  envConfig.geminiTtsConfigured = true;
+
+  await questionAudio(session, turn("Are you sure that scaled?"));
+
+  expect(synthesizeGemini).toHaveBeenCalledWith(
+    "Are you sure that scaled?",
+    PERSONA_GEMINI_VOICE.skeptic,
+  );
+});
+
+test("goes to the browser voice when both budgets are gone", async () => {
+  budgetLeft = false;
+  geminiBudgetLeft = false;
+  budgetHeadroom = 0;
+  envConfig.geminiTtsConfigured = true;
+
+  const outcome = await questionAudio(session, turn("Why did you leave?"));
+
+  expect(outcome).toEqual({ url: null, provider: "browser", reason: "budget", budget_remaining: 0 });
+  expect(synthesizeGemini).not.toHaveBeenCalled();
+});
+
+test("falls back rather than throwing when the gemini preview model fails", async () => {
+  budgetLeft = false;
+  envConfig.geminiTtsConfigured = true;
+  synthesizeGemini.mockImplementationOnce(async () => {
+    throw new Error("gemini-tts 404");
+  });
+
+  const outcome = await questionAudio(session, turn("Why did you leave?"));
+
+  expect(outcome).toEqual({
+    url: null,
+    provider: "browser",
+    reason: "provider",
+    budget_remaining: 17,
+  });
+  expect(putObject).not.toHaveBeenCalled();
+});
+
+test("speaks through gemini alone when orpheus is not configured at all", async () => {
+  envConfig.ttsConfigured = false;
+  envConfig.geminiTtsConfigured = true;
+  try {
+    const outcome = await questionAudio(session, turn("Why did you leave?"));
+
+    expect(synthesize).not.toHaveBeenCalled();
+    expect(outcome.provider).toBe("gemini");
+    expect(outcome.budget_remaining).toBeUndefined();
+  } finally {
+    envConfig.ttsConfigured = true;
+  }
 });
